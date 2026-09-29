@@ -21,19 +21,16 @@ describeDb("migrations", () => {
     await testDb?.drop();
   });
 
-  async function appliedMigrationCount(): Promise<number> {
-    const result = await testDb.pool.query<{ count: string }>(
+  async function appliedMigrationCount(database: TestDatabase): Promise<number> {
+    const result = await database.pool.query<{ count: string }>(
       "select count(*) from drizzle.__drizzle_migrations",
     );
     return Number(result.rows[0]?.count);
   }
 
-  it("records every journal entry as applied", async () => {
-    expect(await appliedMigrationCount()).toBe(journal.entries.length);
-  });
-
-  it("creates every table and column declared in the schema", async () => {
-    const result = await testDb.pool.query<{ name: string }>(`
+  /** Schema columns (`schema.table.column`) that the database lacks. */
+  async function missingColumns(database: TestDatabase): Promise<string[]> {
+    const result = await database.pool.query<{ name: string }>(`
       select table_schema || '.' || table_name || '.' || column_name as name
       from information_schema.columns
     `);
@@ -42,15 +39,31 @@ describeDb("migrations", () => {
       const { name, columns } = describeTable(table);
       return columns.map((column) => `${name}.${column}`);
     });
-    expect(expected.filter((column) => !actual.has(column))).toEqual([]);
+    return expected.filter((column) => !actual.has(column));
+  }
+
+  it("records every journal entry as applied", async () => {
+    expect(await appliedMigrationCount(testDb)).toBe(journal.entries.length);
   });
 
-  it("applies nothing twice when runs overlap", async () => {
-    await Promise.all([
-      runMigrations(testDb.url),
-      runMigrations(testDb.url),
-      runMigrations(testDb.url),
-    ]);
-    expect(await appliedMigrationCount()).toBe(journal.entries.length);
+  it("creates every table and column declared in the schema", async () => {
+    expect(await missingColumns(testDb)).toEqual([]);
+  });
+
+  it("applies each migration once when runs race on an unmigrated database", async () => {
+    const unmigrated = await createTestDatabase({ migrate: false });
+    try {
+      // allSettled, so every run has ended before the database is dropped.
+      const runs = await Promise.allSettled([
+        runMigrations(unmigrated.url),
+        runMigrations(unmigrated.url),
+        runMigrations(unmigrated.url),
+      ]);
+      expect(runs.filter((run) => run.status === "rejected")).toEqual([]);
+      expect(await appliedMigrationCount(unmigrated)).toBe(journal.entries.length);
+      expect(await missingColumns(unmigrated)).toEqual([]);
+    } finally {
+      await unmigrated.drop();
+    }
   });
 });

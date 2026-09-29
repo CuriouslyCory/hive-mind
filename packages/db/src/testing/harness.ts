@@ -26,10 +26,10 @@ export interface TestDatabase {
 
 /**
  * Creates a database with a random name on the TEST_DATABASE_URL server and
- * applies every migration to it. Throws if TEST_DATABASE_URL is unset, so call
- * it only inside `describeDb`.
+ * applies every migration to it, unless `migrate` is false. Throws if
+ * TEST_DATABASE_URL is unset, so call it only inside `describeDb`.
  */
-export async function createTestDatabase(): Promise<TestDatabase> {
+export async function createTestDatabase({ migrate = true } = {}): Promise<TestDatabase> {
   if (!testDatabaseUrl) {
     throw new Error("TEST_DATABASE_URL is not set.");
   }
@@ -39,7 +39,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
 
   await withAdminClient((client) => client.query(`create database "${name}"`));
   try {
-    await runMigrations(url.toString());
+    if (migrate) await runMigrations(url.toString());
   } catch (error) {
     await dropDatabase(name);
     throw error;

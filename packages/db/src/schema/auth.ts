@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { boolean, index, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, timestamptz, updatedAt } from "../columns.ts";
 
 // Tables for better-auth and its organization plugin, as configured in
@@ -62,7 +62,12 @@ export const account = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (table) => [index("account_user_id_idx").on(table.userId)],
+  (table) => [
+    index("account_user_id_idx").on(table.userId),
+    // One row per linked provider account, so concurrent link callbacks cannot
+    // both insert one.
+    uniqueIndex("account_provider_id_account_id_idx").on(table.providerId, table.accountId),
+  ],
 );
 
 export const verification = pgTable(
