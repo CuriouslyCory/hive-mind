@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "hivemind Next.js app",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "lib": ["ES2025", "DOM"],
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "allowJs": false,
+    "plugins": [{ "name": "next" }]
+  }
+}

@@ -1,0 +1,21 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Shared version pins. Workspaces reference these with "catalog:".
+catalog:
+  "@types/node": ^24.19.0
+  "@types/pg": ^8.23.1
+  drizzle-orm: ~0.45.3
+  pg: ^8.23.0
+  typescript: ~6.0.3
+  vite: ^8.3.1
+  vitest: ^5.0.2
+
+# Every dependency with a build script must be reviewed here: true runs it,
+# false skips it. strictDepBuilds (default true) fails the install on any
+# package that is not listed. Never set dangerouslyAllowAllBuilds.
+allowBuilds:
+  # macOS-only optional dependency of vite. It ships a prebuilt fsevents.node
+  # and no binding.gyp, so its "node-gyp rebuild" install script cannot succeed.
+  fsevents: false
