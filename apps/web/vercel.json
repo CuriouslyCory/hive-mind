@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd ../.. && pnpm --filter @hivemind/db db:migrate && pnpm exec turbo run build --filter=@hivemind/web"
+}
