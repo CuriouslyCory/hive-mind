@@ -1,0 +1,19 @@
+# Dependencies
+node_modules
+
+# Build output and caches
+.next
+.turbo
+dist
+coverage
+*.tsbuildinfo
+
+# Environment files (.env.example is committed)
+.env*
+!.env.example
+
+# Vercel CLI
+.vercel
+
+# Vitest reports
+.vitest
