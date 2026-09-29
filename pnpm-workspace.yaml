@@ -19,3 +19,7 @@ allowBuilds:
   # macOS-only optional dependency of vite. It ships a prebuilt fsevents.node
   # and no binding.gyp, so its "node-gyp rebuild" install script cannot succeed.
   fsevents: false
+  # Pulled in by drizzle-kit (directly and via tsx and @esbuild-kit). The install
+  # script only verifies the platform binary, which pnpm already installs from
+  # the matching optional @esbuild/* package, so skipping it is safe.
+  esbuild: false
