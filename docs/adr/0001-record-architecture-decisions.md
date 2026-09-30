@@ -21,18 +21,17 @@ ADRs are markdown files in `docs/adr/`. The repo file is the source of truth, be
   - `status`: one of `proposed`, `accepted`, `superseded`, `deprecated`.
   - `date`: ISO 8601 (`YYYY-MM-DD`), the date the current status was set.
   - `supersedes`: only when non-empty. A YAML list of plain integers such as `[4]`, never zero-padded: YAML 1.1 reads `0008` as a malformed octal.
-- **Sections**, as H2s in this order: `Context`, `Decision`, `Consequences`, and `Alternatives considered` when a rejection wasn't obvious. Each section is about 15–40 lines. Every Context links to #1, and to the issue and PR that implemented the decision when there is one.
+- **Sections**, as H2s in this order: `Context`, `Decision`, `Consequences`, and `Alternatives considered` when a rejection wasn't obvious. Keep an ADR short; most are 30–50 lines. Every Context links to #1, and to the issue and PR that implemented the decision when there is one.
 - **Status rule:** `accepted` if the decision is exercised by merged code or is pure policy; `proposed` otherwise. A proposed ADR names the milestone that owns it, and that milestone's PR accepts it, edits it, or supersedes it.
 - **Changing a decision:** write a new ADR with `supersedes: [N]` and set ADR N's status to `superseded`. An accepted ADR's decision is not rewritten in place; correcting facts in its Consequences is allowed.
 - **No other files** in `docs/adr/`: no `template.md` (it would match M4's file glob) and no `README.md` index (it would conflict under parallel PRs).
 
-The template:
+The template follows. Replace `YYYY-MM-DD` with the date the status was set. An ADR that supersedes others also gets a `supersedes` line after `date`, such as `supersedes: [4]`.
 
 ```markdown
 ---
 status: proposed
-date: 2026-09-29
-supersedes: [4]
+date: YYYY-MM-DD
 ---
 
 # Title of the decision

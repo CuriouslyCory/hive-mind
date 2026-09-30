@@ -46,10 +46,12 @@ pnpm build
 
   Never hand-merge `meta/_journal.json`. Drizzle 0.x silently skips a migration older than the last one applied.
 
+- Once you push a migration, the preview build applies it to the `preview/<git-branch>` database branch, which persists across pushes. If you regenerate that migration afterwards (after a rebase or for review changes), the next preview migration fails with "already exists" or silently skips a migration from `main`. The fix is to delete that database branch in Neon; the next preview build recreates it. Only the repo owner can do this, so say in the PR that it is needed.
+
 ### Dependencies
 
 - Internal packages: `workspace:*`. Versions shared across workspaces go in `catalog` in `pnpm-workspace.yaml` and are referenced as `catalog:`.
-- `packages/db` depends only on `drizzle-orm` and `pg`. It never imports `next`, better-auth or anything in `apps/*`.
+- `packages/db` depends only on `drizzle-orm` and `pg`, plus an optional `vitest` peer that only its `./testing` export (the test harness) uses. It never imports `next`, better-auth or anything in `apps/*`.
 
 ### Naming
 

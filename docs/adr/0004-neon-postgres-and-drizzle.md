@@ -17,7 +17,7 @@ The M0 plan ([#2](https://github.com/CuriouslyCory/hive-mind/issues/2)) had to s
 - **Driver:** a `pg` Pool with `drizzle-orm/node-postgres`, wrapped by `createDb(pool)` in `@hivemind/db`. `apps/web/src/server/db.ts` creates the pool on first use and registers it with `attachDatabasePool` from `@vercel/functions`, which is Neon's documented setup for Vercel Fluid compute.
 - **URLs:** the runtime uses the pooled `DATABASE_URL`. Migrations use `DATABASE_URL_UNPOOLED`.
 - **Migrations:** `drizzle-kit generate` writes SQL that is committed. `drizzle-kit push` is never used against a shared database. `packages/db/src/migrate.ts` applies them under a session-level `pg_advisory_lock` (fixed key `7264193851066320745`) on one unpooled client. It runs under plain `node` using Node 24 type stripping.
-- **Where they run:** `apps/web/vercel.json`'s `buildCommand` runs `pnpm --filter @hivemind/db db:migrate` and then `turbo run build --filter=@hivemind/web`, for every Vercel environment. `pnpm build` has no side effects, so CI never migrates anything.
+- **Where they run:** `apps/web/vercel.json` sets `buildCommand` to `cd ../.. && pnpm --filter @hivemind/db db:migrate && pnpm exec turbo run build --filter=@hivemind/web`, which runs for every Vercel environment. `pnpm build` has no side effects, so CI never migrates anything.
 - **Expand/contract:** every schema change must be backward-compatible with the code currently deployed.
 - **Pins:** drizzle-orm 0.45 and drizzle-kit 0.31 until Drizzle 1.0 is stable.
 
@@ -31,7 +31,11 @@ The M0 plan ([#2](https://github.com/CuriouslyCory/hive-mind/issues/2)) had to s
 - **Out-of-order migrations are skipped silently.** Drizzle 0.x skips any migration older than the last one applied, so if PR B deploys before PR A, A's migration never runs. `packages/db/test/journal.test.ts` asserts that journal `idx` and `when` values strictly increase. The rule (AGENTS.md): after a rebase, regenerate migrations; never hand-merge the journal. The plan's longer-term mitigation is moving to Drizzle 1.0 once it is stable; whether 1.0 removes the hazard, and whether its migrator still needs the external lock, must be checked then.
 - **CI drift check:** after the other checks, CI runs `pnpm db:generate` and fails if `packages/db/migrations` changed or gained untracked files. The plan's `git diff --exit-code` alone would miss a new, untracked `.sql` file.
 - **Migrations are excluded from Biome** (`packages/db/biome.json`), because they are generated output.
-- **Preview data exposure:** preview database branches are created from production, so they copy production data, including login-session rows and encrypted OAuth tokens, into databases that PR code can read. #2's open question 4 tracks whether a scrubbed parent is possible; otherwise the exposure is accepted for M0 and handled in M7.
+- **Preview data exposure, accepted for M0.** A preview database branch is "a copy-on-write fork of your production data" ([Neon FAQ](https://neon.com/faqs/postgres-tools-preview-deployments)); Neon's Vercel integration guides document no setting to fork from a different parent. So every preview deployment, which runs unmerged PR code, can read a copy of production's users, login sessions and OAuth tokens.
+  - A copied login-session token that hasn't expired is still valid in production's `session` table. Production accepts it only in a cookie signed with production's `BETTER_AUTH_SECRET`, which previews don't have.
+  - OAuth tokens are encrypted with that same secret (`encryptOAuthTokens`).
+  - If production's `BETTER_AUTH_SECRET` leaks, or a plugin that accepts raw session tokens (such as `bearer`) is added, the copied tokens can be used against production.
+  - #2's open question 4 accepts this for M0, while the only data is the owner's. Follow-up for M7: see issue #TBD-preview-data.
 - **Neon branch limit:** each preview creates a database branch. Setting Vercel preview retention to about 30 days limits how many exist; cleanup automation is M7.
 
 ## Alternatives considered

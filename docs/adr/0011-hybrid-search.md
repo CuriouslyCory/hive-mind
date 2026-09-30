@@ -24,6 +24,7 @@ Proposed, owned by M5:
 - The CI Postgres image (`pgvector/pgvector:pg18`) already ships pgvector, not enabled. M5 adds the `CREATE EXTENSION vector` migration and doesn't change CI (ADR-0008).
 - That migration runs in the Vercel build against production like any other (ADR-0004), so it must be additive.
 - The embedding column's dimension depends on the model; #1's `vector(1536)` assumes `text-embedding-3-small`. Changing models later means re-embedding every chunk.
+- **Indexing can fail after the write succeeds.** `after()` runs once the response is sent. If the embedding call fails or times out, or the function stops first, the row is saved but missing from search, and nothing retries. M5 must define a durable path, for example an `indexed_at` or `index_version` column on each indexed row and a reconciliation job or queue that re-indexes rows where it is null or stale.
 - M5 must decide:
   - the embedding provider and model, which answers #1's open question 6;
   - the vector dimension;

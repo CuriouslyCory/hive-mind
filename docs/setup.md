@@ -32,18 +32,18 @@ How the database branches map to environments:
 
 | Environment | Database branch | How it is migrated |
 |---|---|---|
-| Production | the Neon project's production branch | the Vercel build, before `next build` |
+| Production | the production database branch | the Vercel build, before `next build` |
 | Preview | `preview/<git-branch>`, one per git branch | the Vercel build of that preview |
 | Development | its own database branch (a different Neon endpoint from Production) | by hand, see below |
 
 - **Preview variables.** For each git branch with a preview deployment, the integration creates `preview/<git-branch>` and adds `DATABASE_URL` and `DATABASE_URL_UNPOOLED` as Preview variables scoped to that git branch. `vercel env ls` shows them as `Preview (<git-branch>)`.
-- **Migrations run in every Vercel build.** The build command in `apps/web/vercel.json` is `pnpm --filter @hivemind/db db:migrate` followed by `turbo run build`, so a preview migrates its own database branch and a production deployment migrates production. The build log shows `migrations applied`.
+- **Migrations run in every Vercel build.** The build command in `apps/web/vercel.json` is `cd ../.. && pnpm --filter @hivemind/db db:migrate && pnpm exec turbo run build --filter=@hivemind/web`, so a preview migrates its own database branch and a production deployment migrates production. The build log shows `migrations applied`.
 - **The Development database branch is never built,** so migrate it yourself: `vercel env pull apps/web/.env.local`, then `node --env-file=apps/web/.env.local packages/db/src/migrate.ts`.
-- **Open question: preview data exposure** (open question 4 in #2). Check in the Neon console which branch the preview database branches are created from. If it is the production branch, every preview deployment, running unmerged PR code, gets a copy of production data, including login-session tokens (stored OAuth tokens are encrypted). If the integration can't branch previews from a schema-only or scrubbed parent, accept this for M0, while the only data is the owner's, and open an M7 issue.
+- **Preview data exposure, accepted for M0.** A preview database branch is "a copy-on-write fork of your production data" ([Neon FAQ](https://neon.com/faqs/postgres-tools-preview-deployments)); Neon's Vercel integration guides document no setting to fork from a different parent. So every preview deployment, which runs unmerged PR code, can read a copy of production's users, login sessions and OAuth tokens. A copied login-session token that hasn't expired is still valid in production; production accepts it only in a cookie signed with production's `BETTER_AUTH_SECRET`, which previews don't have, and the OAuth tokens are encrypted with that secret. If that secret leaks, the copied tokens can be used against production. #2's open question 4 accepts this for M0, while the only data is the owner's. Follow-up for M7: see issue #TBD-preview-data. Details: ADR-0004.
 
 ## H3. Production domain and GitHub OAuth apps
 
-**Production domain.** For now it is the Vercel alias `https://hive-mind-web-mu.vercel.app`. (`hive-mind-web.vercel.app` belongs to an unrelated project.) `BETTER_AUTH_URL` is unset, so the app takes the production host from Vercel's `VERCEL_PROJECT_PRODUCTION_URL`. Production trusts only that one host: sign-in doesn't work through the project's other aliases.
+**Production domain.** For now it is the Vercel alias `https://hive-mind-web-mu.vercel.app`. (`hive-mind-web.vercel.app` belongs to an unrelated Vercel project.) `BETTER_AUTH_URL` is unset, so the app takes the production host from Vercel's `VERCEL_PROJECT_PRODUCTION_URL`. Production trusts only that one host: sign-in doesn't work through the Vercel project's other aliases.
 
 - [ ] Create two GitHub OAuth apps (GitHub → Settings → Developer settings → OAuth Apps → New OAuth App):
 
@@ -126,5 +126,5 @@ vercel env add GITHUB_CLIENT_SECRET development
 
 - [ ] The preview build log shows `using pnpm v12.8.1` and `migrations applied`.
 - [ ] Open the preview while logged in to Vercel and sign in with GitHub. You pass through production and land back on the preview, signed in.
-- [ ] In the Neon console, the new row in the `user` table is on the `preview/<git-branch>` database branch, not on production.
+- [ ] In the Neon console, the new row in the `user` table is on the `preview/<git-branch>` database branch, not on the production database branch.
 - [ ] Users created on a preview have no GitHub login stored (oAuthProxy doesn't forward it), so their personal organization's slug comes from the display name. This is expected.
