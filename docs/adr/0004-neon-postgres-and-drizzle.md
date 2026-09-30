@@ -35,7 +35,7 @@ The M0 plan ([#2](https://github.com/CuriouslyCory/hive-mind/issues/2)) had to s
   - A copied login-session token that hasn't expired is still valid in production's `session` table. Production accepts it only in a cookie signed with production's `BETTER_AUTH_SECRET`, which previews don't have.
   - OAuth tokens are encrypted with that same secret (`encryptOAuthTokens`).
   - If production's `BETTER_AUTH_SECRET` leaks, or a plugin that accepts raw session tokens (such as `bearer`) is added, the copied tokens can be used against production.
-  - #2's open question 4 accepts this for M0, while the only data is the owner's. Follow-up for M7: see issue #TBD-preview-data.
+  - #2's open question 4 accepts this for M0, while the only data is the owner's. Follow-up for M7: see issue #8.
 - **Neon branch limit:** each preview creates a database branch. Setting Vercel preview retention to about 30 days limits how many exist; cleanup automation is M7.
 
 ## Alternatives considered
