@@ -14,8 +14,8 @@ Preview deployments complicate OAuth: a GitHub OAuth app allows one callback URL
 ## Decision
 
 - **better-auth 1.7.6, self-hosted in `apps/web`,** with GitHub as the only social provider. This answers #1's open question 3 with yes, as #1 recommends. Neon Auth stays off.
-- **Placement:** `src/server/auth.ts` exports a `createAuth(opts)` factory and a lazily created `auth` instance; there is no `packages/auth`. `src/server/session.ts` exports `getSession` and `requireSession`.
-- **Plugins:** `organization`, `oAuthProxy`, and `nextCookies` (last).
+- **Placement:** `src/server/auth.ts` exports a `createAuth(opts)` factory and a lazily created `auth` instance; there is no `packages/auth`. `src/server/login-session.ts` exports `getLoginSession` and `requireLoginSession` (the M0 plan's `requireSession()`, renamed per CONTEXT.md's naming rules).
+- **Plugins:** `organization` (restricted in M0; see ADR-0007), `oAuthProxy`, and `nextCookies` (last).
 - **Settings:** base path `/api/auth`; `advanced.cookiePrefix: "hivemind"`; `account.encryptOAuthTokens: true`; `advanced.database.generateId: "uuid"`; `advanced.disableOriginCheck: false`.
 - **Trusted hosts are exact.** `baseURL.allowedHosts` (which also defines the trusted origins) has no wildcards:
   - Production: its own host only (`BETTER_AUTH_URL`, else `VERCEL_PROJECT_PRODUCTION_URL`).

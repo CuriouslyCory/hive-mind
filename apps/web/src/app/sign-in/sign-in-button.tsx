@@ -10,9 +10,13 @@ export function SignInButton() {
   async function signIn() {
     setPending(true);
     setFailed(false);
-    // Redirects the browser to GitHub on success.
-    const { error } = await authClient.signIn.social({ provider: "github", callbackURL: "/" });
-    if (error) {
+    // Redirects the browser to GitHub on success. An error response resolves
+    // with `error`; a network failure rejects.
+    const started = await authClient.signIn.social({ provider: "github", callbackURL: "/" }).then(
+      ({ error }) => !error,
+      () => false,
+    );
+    if (!started) {
       setFailed(true);
       setPending(false);
     }

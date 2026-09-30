@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { Suspense } from "react";
-import { auth } from "../../server/auth";
-import { requireSession } from "../../server/session";
+import { auth, getActiveOrganization } from "../../server/auth";
+import { requireLoginSession } from "../../server/login-session";
 import { SignOutButton } from "./sign-out-button";
 
 // A placeholder until the dashboard (M3): who is signed in, and in which
@@ -18,12 +18,9 @@ export default function HomePage() {
 }
 
 async function SignedInAs() {
-  const { user } = await requireSession();
-  // Checks that the user is still a member of the active organization.
-  const activeOrganization = await auth.api.getFullOrganization({
-    headers: await headers(),
-    query: { membersLimit: 1 },
-  });
+  const { user } = await requireLoginSession();
+  // Null when the user is no longer a member of the active organization.
+  const activeOrganization = await getActiveOrganization(auth, await headers());
 
   return (
     <>
