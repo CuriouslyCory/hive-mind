@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { parseEnv } from "../src/env";
+import { envSchema, parseEnv } from "../src/env";
 
 const REQUIRED = {
   BETTER_AUTH_SECRET: "a".repeat(32),
@@ -83,5 +84,16 @@ describe("env", () => {
     vi.resetModules();
     const { env } = await import("../src/env");
     expect(() => env.BETTER_AUTH_SECRET).toThrow(/BETTER_AUTH_SECRET/);
+  });
+});
+
+describe(".env.example", () => {
+  it("lists every variable in envSchema", () => {
+    const example = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
+    // Commented-out lines count: optional and Vercel-set variables are listed that way.
+    const listed = new Set(
+      example.split("\n").flatMap((line) => line.match(/^#?\s*([A-Z][A-Z0-9_]*)=/)?.[1] ?? []),
+    );
+    expect(Object.keys(envSchema.shape).filter((name) => !listed.has(name))).toEqual([]);
   });
 });
