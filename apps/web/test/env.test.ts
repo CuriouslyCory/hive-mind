@@ -62,6 +62,16 @@ describe("parseEnv", () => {
     expect(parseEnv(source)).toEqual(source);
   });
 
+  it("treats empty Vercel host variables as unset", () => {
+    const source = {
+      ...REQUIRED,
+      VERCEL_PROJECT_PRODUCTION_URL: "",
+      VERCEL_URL: "",
+      VERCEL_BRANCH_URL: "",
+    };
+    expect(parseEnv(source)).toEqual(REQUIRED);
+  });
+
   it("rejects an unknown VERCEL_ENV", () => {
     expect(() => parseEnv({ ...REQUIRED, VERCEL_ENV: "staging" })).toThrow(/VERCEL_ENV/);
   });
