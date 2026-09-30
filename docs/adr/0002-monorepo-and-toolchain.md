@@ -20,7 +20,7 @@ date: 2026-09-29
 
 ## Consequences
 
-- **pnpm on Vercel works without a fallback.** pnpm 12.8.1 installed on Vercel's production build of `main` with no `installCommand` override and no downgrade. Vercel reads `devEngines.packageManager`, and the leading document that pnpm 12 writes at the top of `pnpm-lock.yaml` did not cause problems. The Vercel project also sets `ENABLE_EXPERIMENTAL_COREPACK=1` (setup step H1); whether that is still needed was not tested.
+- **pnpm on Vercel works without a fallback.** pnpm 12.8.1 installed on Vercel's production build of `main` with no `installCommand` override and no downgrade. Vercel reads `devEngines.packageManager`, and the leading document that pnpm 12 writes at the top of `pnpm-lock.yaml` did not cause problems. The plan's `ENABLE_EXPERIMENTAL_COREPACK=1` variable is not needed: it is not set on the Vercel project, and the build log shows pnpm taken from `devEngines.packageManager`.
 - **TypeScript is pinned to `~6.0.3`** because npm `latest` is now 7, and with TypeScript 7 `next build` needs an experimental flag. Upgrade when `next build` supports TypeScript 7 without flags.
 - **Vitest 5 needs `vite` as a peer**, so `vite` is in the catalog and declared next to `vitest` in every workspace that runs tests.
 - **Next is pinned to `~16.3.6`, not 16.3.7.** pnpm 12's minimum-release-age check blocked 16.3.7, which was less than a day old. The check was not weakened; later patch releases arrive once they are old enough.

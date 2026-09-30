@@ -25,7 +25,7 @@ date: 2026-09-29
 - **Vitest 5 needs `vite` as a peer** (ADR-0002) and defaults `clearMocks` to `true`, so the base config doesn't set it.
 - **Database tests need Docker locally** (`docker compose up -d`). Without `TEST_DATABASE_URL` they are skipped with a message, not silently. In CI (`CI=true`) a missing URL fails the run, so a misconfigured job cannot pass by skipping every database test.
 - The CI image already contains pgvector, so M5 only adds a `CREATE EXTENSION` migration and doesn't change CI.
-- **Break-it evidence from M0:** replacing a migration's SQL, making a journal `when` older, changing a column to plain `timestamp`, removing `oAuthProxy`, removing the organization plugin or either auth hook, dropping `session.ipAddress` from the schema, removing the migration lock, and making `BETTER_AUTH_SECRET` optional each made the matching test fail. The CI drift-check case (a column added without a migration) needed a real CI run and was still open when PR #6 merged.
+- **Break-it evidence from M0:** replacing a migration's SQL, making a journal `when` older, changing a column to plain `timestamp`, removing `oAuthProxy`, removing the organization plugin or either auth hook, dropping `session.ipAddress` from the schema, removing the migration lock, and making `BETTER_AUTH_SECRET` optional each made the matching test fail. Adding a column without generating a migration made the CI drift-check step exit 1, reporting the new untracked SQL file and snapshot as well as the journal change; this was run locally with the same commands as the CI step.
 - Real Postgres makes the suite slower than an in-process database; the base config sets 30-second test and hook timeouts.
 - M3 adds Playwright and decides how it gets a signed-in User and a database.
 

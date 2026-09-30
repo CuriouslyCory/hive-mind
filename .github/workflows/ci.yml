@@ -67,9 +67,10 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
-      # Env validation is never skipped, so the build gets clearly fake values
-      # for every required variable. Nothing connects to DATABASE_URL during
-      # the build, and CI never runs migrations.
+      # The build reads no env today (auth and the database pool are created on
+      # the first request), but env validation is never skipped, so any future
+      # build-time read gets clearly fake values for every required variable.
+      # Nothing connects to DATABASE_URL during the build; CI never migrates.
       - name: Build
         run: pnpm build
         env:
