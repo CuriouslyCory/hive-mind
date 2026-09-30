@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One run per ref. New pushes to a PR cancel its older run; runs on main
+# always finish so every merged commit gets a result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Same image as the root compose.yaml. pgvector ships in it but is not
+    # enabled until M5 adds the CREATE EXTENSION migration.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Installs the pnpm version from package.json (packageManager /
+      # devEngines.packageManager) and Node from .nvmrc, then runs
+      # `pnpm install --frozen-lockfile` (require-lockfile also fails the job
+      # if pnpm-lock.yaml is missing). No actions/setup-node needed.
+      - name: Set up pnpm and Node, install dependencies
+        id: setup
+        uses: pnpm/setup@v3
+        with:
+          node-version-file: .nvmrc
+          cache: true
+          require-lockfile: true
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # GitHub Actions sets CI=true, so the db test harness fails (rather than
+      # skips) database tests if TEST_DATABASE_URL is ever missing here.
+      - name: Test
+        run: pnpm test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      # Env validation is never skipped, so the build gets clearly fake values
+      # for every required variable. Nothing connects to DATABASE_URL during
+      # the build, and CI never runs migrations.
+      - name: Build
+        run: pnpm build
+        env:
+          BETTER_AUTH_SECRET: ci-placeholder-better-auth-secret-not-a-real-secret
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+          DATABASE_URL_UNPOOLED: postgres://ci:ci@localhost:5432/ci
+          GITHUB_CLIENT_ID: ci-placeholder-github-client-id
+          GITHUB_CLIENT_SECRET: ci-placeholder-github-client-secret
+          OAUTH_PROXY_SECRET: ci-placeholder-oauth-proxy-secret
+
+      # Runs even if an earlier check failed (as long as dependencies were
+      # installed), so one CI run reports both test failures and drift.
+      # `git diff` misses a newly generated .sql file because it is untracked,
+      # so `git status --porcelain` is checked as well.
+      - name: Check for schema changes without a migration
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          pnpm db:generate
+          drift=0
+          git --no-pager diff --exit-code -- packages/db/migrations || drift=1
+          changes="$(git status --porcelain --untracked-files=all -- packages/db/migrations)"
+          if [ -n "$changes" ]; then
+            printf 'Changed or new files in packages/db/migrations:\n%s\n' "$changes"
+            drift=1
+          fi
+          if [ "$drift" -ne 0 ]; then
+            echo "::error title=Migration drift::Schema changed without a committed migration: run pnpm db:generate and commit the result."
+            exit 1
+          fi

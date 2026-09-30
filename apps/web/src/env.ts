@@ -6,19 +6,39 @@ import { z } from "zod";
  *
  * There is deliberately no way to skip validation.
  */
+// Vercel system variables can be present but empty (for example
+// VERCEL_BRANCH_URL on a deployment made without git); treat that as unset.
+const vercelHost = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 export const envSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
+  // The production origin, for example https://hive-mind.example. Set only in
+  // Production; elsewhere src/server/auth.ts falls back to
+  // VERCEL_PROJECT_PRODUCTION_URL.
   BETTER_AUTH_URL: z.url().optional(),
 
-  // Optional only until packages/db (M0 step 5) and auth (M0 step 6) land,
-  // so the skeleton builds without them. Those steps make them required.
-  DATABASE_URL: z.url().optional(),
+  // The pooled connection used at runtime. The unpooled URL is read only by the
+  // migrator (packages/db), so it stays optional here.
+  DATABASE_URL: z.url(),
   DATABASE_URL_UNPOOLED: z.url().optional(),
-  GITHUB_CLIENT_ID: z.string().min(1).optional(),
-  GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
-  OAUTH_PROXY_SECRET: z.string().min(1).optional(),
 
+  GITHUB_CLIENT_ID: z.string().min(1),
+  GITHUB_CLIENT_SECRET: z.string().min(1),
+  // Encrypts what oAuthProxy passes between production and preview
+  // deployments. Must be the same in Production and Preview.
+  OAUTH_PROXY_SECRET: z.string().min(32),
+
+  // Vercel system variables. VERCEL_PROJECT_PRODUCTION_URL is the production
+  // host name without a scheme, and is set in every Vercel environment.
   VERCEL_ENV: z.enum(["production", "preview", "development"]).optional(),
+  VERCEL_PROJECT_PRODUCTION_URL: vercelHost,
+  // This deployment's generated URL and its git branch alias, also host names
+  // without a scheme. A preview deployment trusts only these hosts.
+  VERCEL_URL: vercelHost,
+  VERCEL_BRANCH_URL: vercelHost,
 });
 
 export type Env = z.infer<typeof envSchema>;

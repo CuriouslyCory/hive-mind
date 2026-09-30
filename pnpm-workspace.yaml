@@ -19,3 +19,14 @@ allowBuilds:
   # macOS-only optional dependency of vite. It ships a prebuilt fsevents.node
   # and no binding.gyp, so its "node-gyp rebuild" install script cannot succeed.
   fsevents: false
+  # Pulled in by drizzle-kit (directly and via tsx and @esbuild-kit). The install
+  # script only verifies the platform binary, which pnpm already installs from
+  # the matching optional @esbuild/* package, so skipping it is safe.
+  esbuild: false
+
+overrides:
+  # drizzle-orm has an optional peer on kysely, which better-auth brings into
+  # apps/web. That gave apps/web a second copy of drizzle-orm, whose types
+  # don't match the tables from @hivemind/db. Nothing here uses
+  # drizzle-orm/kysely, so the peer is dropped to keep a single copy.
+  "drizzle-orm>kysely": "-"

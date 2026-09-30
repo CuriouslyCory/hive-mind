@@ -1,41 +1,79 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseEnv } from "../src/env";
 
-const SECRET = "a".repeat(32);
+const REQUIRED = {
+  BETTER_AUTH_SECRET: "a".repeat(32),
+  DATABASE_URL: "postgresql://user:pass@pooler.example.com/db?sslmode=require",
+  GITHUB_CLIENT_ID: "client-id",
+  GITHUB_CLIENT_SECRET: "client-secret",
+  OAUTH_PROXY_SECRET: "b".repeat(32),
+};
+
+function without(name: keyof typeof REQUIRED) {
+  const { [name]: _, ...rest } = REQUIRED;
+  return rest;
+}
 
 describe("parseEnv", () => {
-  it("fails without BETTER_AUTH_SECRET", () => {
-    expect(() => parseEnv({})).toThrow(/BETTER_AUTH_SECRET/);
+  it.each(Object.keys(REQUIRED) as (keyof typeof REQUIRED)[])("fails without %s", (name) => {
+    expect(() => parseEnv(without(name))).toThrow(name);
   });
 
-  it("fails when BETTER_AUTH_SECRET is shorter than 32 characters", () => {
-    expect(() => parseEnv({ BETTER_AUTH_SECRET: "too-short" })).toThrow(/BETTER_AUTH_SECRET/);
+  it("names every missing variable at once", () => {
+    const message = (() => {
+      try {
+        parseEnv({});
+      } catch (error) {
+        return (error as Error).message;
+      }
+    })();
+    for (const name of Object.keys(REQUIRED)) {
+      expect(message).toContain(name);
+    }
   });
+
+  it.each(["BETTER_AUTH_SECRET", "OAUTH_PROXY_SECRET"] as const)(
+    "fails when %s is shorter than 32 characters",
+    (name) => {
+      expect(() => parseEnv({ ...REQUIRED, [name]: "too-short" })).toThrow(name);
+    },
+  );
 
   it("does not echo variable values in the error", () => {
-    expect(() => parseEnv({ BETTER_AUTH_SECRET: "leaky-value" })).toThrow(
+    expect(() => parseEnv({ ...REQUIRED, BETTER_AUTH_SECRET: "leaky-value" })).toThrow(
       expect.objectContaining({ message: expect.not.stringContaining("leaky-value") }),
     );
   });
 
-  it("succeeds with a valid minimal set", () => {
-    expect(parseEnv({ BETTER_AUTH_SECRET: SECRET })).toEqual({ BETTER_AUTH_SECRET: SECRET });
+  it("succeeds with only the required variables", () => {
+    expect(parseEnv(REQUIRED)).toEqual(REQUIRED);
   });
 
-  it("accepts Postgres connection URLs and a known VERCEL_ENV", () => {
+  it("accepts the optional variables", () => {
     const source = {
-      BETTER_AUTH_SECRET: SECRET,
-      DATABASE_URL: "postgresql://user:pass@pooler.example.com/db?sslmode=require",
+      ...REQUIRED,
+      BETTER_AUTH_URL: "https://hive-mind.example",
       DATABASE_URL_UNPOOLED: "postgresql://user:pass@direct.example.com/db?sslmode=require",
       VERCEL_ENV: "preview",
+      VERCEL_PROJECT_PRODUCTION_URL: "hive-mind.example",
+      VERCEL_URL: "hive-mind-web-a1b2c3d4e-curiouslycorys-projects.vercel.app",
+      VERCEL_BRANCH_URL: "hive-mind-web-git-feat-login-curiouslycorys-projects.vercel.app",
     };
     expect(parseEnv(source)).toEqual(source);
   });
 
+  it("treats empty Vercel host variables as unset", () => {
+    const source = {
+      ...REQUIRED,
+      VERCEL_PROJECT_PRODUCTION_URL: "",
+      VERCEL_URL: "",
+      VERCEL_BRANCH_URL: "",
+    };
+    expect(parseEnv(source)).toEqual(REQUIRED);
+  });
+
   it("rejects an unknown VERCEL_ENV", () => {
-    expect(() => parseEnv({ BETTER_AUTH_SECRET: SECRET, VERCEL_ENV: "staging" })).toThrow(
-      /VERCEL_ENV/,
-    );
+    expect(() => parseEnv({ ...REQUIRED, VERCEL_ENV: "staging" })).toThrow(/VERCEL_ENV/);
   });
 });
 
