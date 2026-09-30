@@ -28,6 +28,10 @@ export const envSchema = z.object({
   // host name without a scheme, and is set in every Vercel environment.
   VERCEL_ENV: z.enum(["production", "preview", "development"]).optional(),
   VERCEL_PROJECT_PRODUCTION_URL: z.string().min(1).optional(),
+  // This deployment's generated URL and its git branch alias, also host names
+  // without a scheme. A preview deployment trusts only these hosts.
+  VERCEL_URL: z.string().min(1).optional(),
+  VERCEL_BRANCH_URL: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

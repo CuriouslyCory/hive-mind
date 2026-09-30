@@ -56,6 +56,8 @@ describe("parseEnv", () => {
       DATABASE_URL_UNPOOLED: "postgresql://user:pass@direct.example.com/db?sslmode=require",
       VERCEL_ENV: "preview",
       VERCEL_PROJECT_PRODUCTION_URL: "hive-mind.example",
+      VERCEL_URL: "hive-mind-web-a1b2c3d4e-curiouslycorys-projects.vercel.app",
+      VERCEL_BRANCH_URL: "hive-mind-web-git-feat-login-curiouslycorys-projects.vercel.app",
     };
     expect(parseEnv(source)).toEqual(source);
   });

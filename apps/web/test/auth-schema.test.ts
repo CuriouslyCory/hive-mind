@@ -17,7 +17,7 @@ const auth = createAuth({
   secret: "x".repeat(32),
   github: { clientId: "id", clientSecret: "secret" },
   oauthProxySecret: "y".repeat(32),
-  allowLocalDev: true,
+  allowedHosts: ["localhost:3000"],
 });
 
 // better-auth field types and the SQL types that can hold them. Strings are

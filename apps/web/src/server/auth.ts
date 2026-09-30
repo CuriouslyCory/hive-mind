@@ -15,22 +15,12 @@ import { getDb } from "./db";
 //   GitHub OAuth app allows one callback URL. The proxy payload is encrypted
 //   with OAUTH_PROXY_SECRET, which Production and Preview share.
 // - Only the hosts in `allowedHosts` can be a base URL or a trusted origin.
-//   Never widen the preview pattern to `*.vercel.app`: any Vercel user can
-//   deploy there.
+//   They are exact hosts, never patterns: a `*` in a vercel.app host can match
+//   deployments of other Vercel teams. Production does not trust preview
+//   hosts; it returns the OAuth result to the preview named in the encrypted
+//   state, not to a URL taken from the request.
 // - `activeOrganizationId` is a UI default, not an authorization decision.
 //   Authorize through project -> organization membership.
-
-/**
- * Preview deployments of the `hive-mind-web` Vercel project in the
- * `curiouslycorys-projects` team. Matches both deployment URLs
- * (`hive-mind-web-<hash>-curiouslycorys-projects.vercel.app`) and branch
- * aliases (`hive-mind-web-git-<branch>-curiouslycorys-projects.vercel.app`).
- *
- * `*` also matches hyphens, so another Vercel team whose slug ends in
- * `-curiouslycorys-projects` could deploy a matching host. A custom preview
- * domain would close that gap.
- */
-export const PREVIEW_HOST_PATTERN = "hive-mind-*-curiouslycorys-projects.vercel.app";
 
 /** `next dev`. Trusted only outside Vercel deployments. */
 export const LOCAL_DEV_HOST = "localhost:3000";
@@ -48,8 +38,8 @@ export interface CreateAuthOptions {
    * development, where the dev OAuth app calls back to localhost directly.
    */
   productionURL?: string | undefined;
-  /** Whether `http://localhost:3000` is an allowed host. */
-  allowLocalDev: boolean;
+  /** The hosts this deployment serves; see `allowedHosts`. */
+  allowedHosts: string[];
   /**
    * Extra plugins, inserted before `nextCookies` (which must stay last). For
    * tests, such as better-auth's `testUtils`.
@@ -57,18 +47,41 @@ export interface CreateAuthOptions {
   plugins?: BetterAuthPlugin[];
 }
 
+export interface HostPolicyInput {
+  /** VERCEL_ENV. Anything but `production` or `preview` is local development. */
+  vercelEnv: "production" | "preview" | "development" | undefined;
+  productionURL: string | undefined;
+  /** The deployment's own hosts, VERCEL_URL and VERCEL_BRANCH_URL. */
+  deploymentHosts: (string | undefined)[];
+}
+
 /**
  * Hosts that may serve the auth API. better-auth resolves the base URL of
  * each request from its `Host` header and rejects any host not listed here.
  * Each host is also a trusted origin (https, plus http for localhost), so
  * `trustedOrigins` needs no separate list.
+ *
+ * Production trusts only its own host, each preview only its deployment URL
+ * and branch alias, and local development only localhost.
  */
-export function allowedHosts(opts: Pick<CreateAuthOptions, "productionURL" | "allowLocalDev">) {
-  return [
-    ...(opts.productionURL ? [new URL(opts.productionURL).host] : []),
-    PREVIEW_HOST_PATTERN,
-    ...(opts.allowLocalDev ? [LOCAL_DEV_HOST] : []),
-  ];
+export function allowedHosts(input: HostPolicyInput): string[] {
+  switch (input.vercelEnv) {
+    case "production": {
+      if (!input.productionURL) {
+        throw new Error("Production needs BETTER_AUTH_URL or VERCEL_PROJECT_PRODUCTION_URL.");
+      }
+      return [new URL(input.productionURL).host];
+    }
+    case "preview": {
+      const hosts = input.deploymentHosts.filter((host): host is string => Boolean(host));
+      if (hosts.length === 0) {
+        throw new Error("A preview deployment needs VERCEL_URL or VERCEL_BRANCH_URL.");
+      }
+      return [...new Set(hosts)];
+    }
+    default:
+      return [LOCAL_DEV_HOST];
+  }
 }
 
 /**
@@ -80,7 +93,7 @@ export function createAuth(opts: CreateAuthOptions) {
   return betterAuth({
     basePath: AUTH_BASE_PATH,
     baseURL: {
-      allowedHosts: allowedHosts(opts),
+      allowedHosts: opts.allowedHosts,
       // No fallback: a request from any other host fails instead of being
       // treated as production.
     },
@@ -107,6 +120,9 @@ export function createAuth(opts: CreateAuthOptions) {
     },
     advanced: {
       cookiePrefix: AUTH_COOKIE_PREFIX,
+      // better-auth skips origin and callback URL checks when NODE_ENV is
+      // `test`. Keep them on everywhere, so tests exercise them too.
+      disableOriginCheck: false,
       database: { generateId: "uuid" },
     },
     databaseHooks: {
@@ -223,13 +239,19 @@ function productionURLFromEnv(): string | undefined {
 let instance: Auth | undefined;
 
 function load(): Auth {
-  instance ??= createAuth({
+  if (instance) return instance;
+  const productionURL = productionURLFromEnv();
+  instance = createAuth({
     db: getDb(),
     secret: env.BETTER_AUTH_SECRET,
     github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET },
     oauthProxySecret: env.OAUTH_PROXY_SECRET,
-    productionURL: productionURLFromEnv(),
-    allowLocalDev: env.VERCEL_ENV !== "production" && env.VERCEL_ENV !== "preview",
+    productionURL,
+    allowedHosts: allowedHosts({
+      vercelEnv: env.VERCEL_ENV,
+      productionURL,
+      deploymentHosts: [env.VERCEL_URL, env.VERCEL_BRANCH_URL],
+    }),
   });
   return instance;
 }
