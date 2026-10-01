@@ -102,7 +102,10 @@ export function overviewHelp(commands: readonly CommandDefinition[]): string {
     "Environment:",
     ...table([
       ["HIVEMIND_URL", "Backend origin when --server is not given"],
-      ["HIVEMIND_TOKEN", "Credential to use instead of the stored login (never falls back)"],
+      [
+        "HIVEMIND_TOKEN",
+        "Credential to use instead of the stored login (never falls back); empty counts as unset",
+      ],
     ]),
     "",
     "Exit codes:",

@@ -30,11 +30,23 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await api.close();
-  await manager().remove(api.origin);
+  harness.os.failWith = null;
+  // A terminal manager, so a login left in the OS store is cleaned up too.
+  await terminalManager().remove(api.origin);
 });
 
 function manager(env: Record<string, string> = {}) {
   return createCredentialManager({ env, interactive: false, file: harness.file });
+}
+
+function terminalManager() {
+  return createCredentialManager({
+    env: {},
+    interactive: true,
+    platform: "linux",
+    file: harness.file,
+    factories: { libsecret: () => harness.os },
+  });
 }
 
 async function loginAs(token = USER_TOKEN): Promise<void> {
@@ -187,6 +199,61 @@ describe("login over a stored login", () => {
     expect(result.code, result.stderr).toBe(0);
     expect(signOuts()).toEqual([]);
   });
+
+  it("without a terminal, refuses to replace an OS-store login before contacting the server", async () => {
+    await terminalManager().save(api.origin, USER_TOKEN);
+    const result = await run(["login", "--json"]);
+    expect(result.code).toBe(1);
+    expect(onlyJsonLine(result.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "TERMINAL_REQUIRED", message: expect.stringContaining("hivemind logout") },
+    });
+    expect(api.requests).toEqual([]);
+    expect(harness.os.items.get(api.origin)).toBe(USER_TOKEN);
+    expect((await terminalManager().readStored(api.origin))?.token).toBe(USER_TOKEN);
+  });
+
+  it("warns that a login it cannot read was replaced without being revoked", async () => {
+    // A pointer to a store this platform does not have (a config dir copied from a Mac).
+    mkdirSync(harness.configDir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(harness.configDir, "credentials.json"),
+      JSON.stringify({ version: 1, credentials: { [api.origin]: { store: "keychain" } } }),
+      { mode: 0o600 },
+    );
+    const result = await run(["login", "--json"], { interactive: true });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).toContain(
+      `warning: Could not read the login being replaced for ${api.origin}`,
+    );
+    expect(result.stderr).toContain("was not revoked on the server");
+    expect(signOuts()).toEqual([]);
+  });
+
+  it("revokes the new login on the server when it cannot be stored", async () => {
+    await loginAs();
+    const file = harness.file;
+    const result = await run(["login", "--json"], {
+      credentialOptions: {
+        file: {
+          ...file,
+          transact: (origin, fn) =>
+            file.transact(origin, (entry) =>
+              fn(entry, async () => ({ ok: false, reason: "error", message: "disk full" })),
+            ),
+        },
+      },
+    });
+    expect(result.code).toBe(1);
+    expect(onlyJsonLine(result.stdout)).toMatchObject({
+      error: { code: "CREDENTIAL_STORE_ERROR" },
+    });
+    const [issued] = api.issuedTokens;
+    expect(signOuts()).toEqual([expect.objectContaining({ authorization: `Bearer ${issued}` })]);
+    // The previous login is untouched and still valid.
+    expect((await manager().readStored(api.origin))?.token).toBe(USER_TOKEN);
+    expect(api.users.has(USER_TOKEN)).toBe(true);
+  });
 });
 
 describe("logout", () => {
@@ -229,14 +296,27 @@ describe("logout", () => {
     expect(await manager().readStored(api.origin)).toBeNull();
   });
 
+  it("without a terminal, leaves an OS-store login intact and asks for a terminal", async () => {
+    await terminalManager().save(api.origin, USER_TOKEN);
+    const result = await run(["logout", "--json"]);
+    expect(result.code).toBe(1);
+    expect(onlyJsonLine(result.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "TERMINAL_REQUIRED", message: expect.stringContaining("hivemind logout") },
+    });
+    expect(api.requests).toEqual([]);
+    expect(harness.os.items.get(api.origin)).toBe(USER_TOKEN);
+
+    // The pointer survived, so a terminal logout can still revoke the token.
+    const later = await run(["logout", "--json"], { interactive: true });
+    expect(later.code, later.stderr).toBe(0);
+    expect(data(later.stdout)).toMatchObject({ removed: true, revoked: true });
+    expect(api.users.has(USER_TOKEN)).toBe(false);
+    expect(harness.os.items.has(api.origin)).toBe(false);
+  });
+
   it("removes the OS-store copy too in a terminal", async () => {
-    await createCredentialManager({
-      env: {},
-      interactive: true,
-      platform: "linux",
-      file: harness.file,
-      factories: { libsecret: () => harness.os },
-    }).save(api.origin, USER_TOKEN);
+    await terminalManager().save(api.origin, USER_TOKEN);
     expect(harness.os.items.get(api.origin)).toBe(USER_TOKEN);
     const result = await run(["logout"], { interactive: true });
     expect(result.code, result.stderr).toBe(0);

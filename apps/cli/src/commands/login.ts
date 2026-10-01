@@ -1,4 +1,5 @@
 import type { CommandDefinition } from "../command.ts";
+import type { SaveResult } from "../credentials/manager.ts";
 import {
   createDeviceTransport,
   formatUserCode,
@@ -35,14 +36,25 @@ export const login: CommandDefinition = {
     "credentials.json file. The token is never printed.",
     "",
     "A login already stored for this server is replaced, and the server is asked",
-    "to revoke it; if that fails, a warning says so and the login still succeeds.",
+    "to revoke it; if it cannot be read or revoked, a warning says so and the",
+    "login still succeeds. If the new login cannot be stored, it is revoked and",
+    "the previous one is left in place.",
     "",
-    "If HIVEMIND_TOKEN is set, the login is still stored, but HIVEMIND_TOKEN keeps",
-    "taking precedence until you unset it.",
+    "Without a terminal, a login kept in the Keychain or Secret Service can be",
+    "neither revoked nor deleted, so login refuses to replace it: it fails with",
+    "TERMINAL_REQUIRED (exit 1) before contacting the server. Run 'hivemind",
+    "logout' in a terminal first.",
+    "",
+    "If HIVEMIND_TOKEN is set to a non-empty value, the login is still stored,",
+    "but HIVEMIND_TOKEN keeps taking precedence until you unset it. An empty",
+    "HIVEMIND_TOKEN counts as unset.",
   ].join("\n"),
   examples: ["hivemind login", "hivemind login --server http://localhost:3000"],
   async run(context) {
     const { origin } = context.origin();
+    // Before the device flow: refusing after the user approved in the browser
+    // would waste the approval and mint a token only to revoke it.
+    await context.credentials().checkReplaceable(origin);
     const tokenSet = hivemindTokenSet(context.env);
     if (tokenSet) {
       context.report.warn(
@@ -91,13 +103,35 @@ export const login: CommandDefinition = {
     });
 
     // Read the login being replaced before `save` overwrites it. Best effort:
-    // one this run cannot read (an OS store without a terminal, a broken
-    // entry) is replaced without being revoked.
+    // one this run cannot read (a broken entry, a failing keyring) is replaced
+    // without being revoked, and the warning says so.
     const previous = await context
       .credentials()
       .readStored(origin)
-      .catch(() => null);
-    const saved = await context.credentials().save(origin, accessToken);
+      .catch((error: unknown) => {
+        const detail = isCliError(error) ? error.message : String(error);
+        context.report.warn(
+          `Could not read the login being replaced for ${origin} (${detail}); it was not revoked on the server and stays valid until it expires.`,
+        );
+        return null;
+      });
+    let saved: SaveResult;
+    try {
+      saved = await context.credentials().save(origin, accessToken);
+    } catch (error) {
+      // Not stored anywhere, so nothing could ever use or revoke it later.
+      const failure = await revokeLoginToken(context, {
+        origin,
+        token: accessToken,
+        source: "file",
+      });
+      if (failure !== null) {
+        context.report.warn(
+          `The new login could not be stored and was not revoked on the server (${failure}); it stays valid until it expires.`,
+        );
+      }
+      throw error;
+    }
     for (const warning of saved.warnings) context.report.warn(warning);
     if (previous && previous.token !== accessToken) {
       // Only after the new login is stored, so a failure here never leaves the
