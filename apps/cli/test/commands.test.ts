@@ -123,6 +123,11 @@ describe("registry", () => {
       "key create",
       "key list",
       "key revoke",
+      "status",
+      "plan create",
+      "task claim",
+      "session heartbeat",
+      "scope check",
     ])
       expect(help.stdout).toContain(name);
   });
