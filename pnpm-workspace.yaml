@@ -23,6 +23,24 @@ allowBuilds:
   # script only verifies the platform binary, which pnpm already installs from
   # the matching optional @esbuild/* package, so skipping it is safe.
   esbuild: false
+  # Bun's npm package (apps/cli devDependency, pinned per ADR-0012). Its
+  # postinstall resolves the platform binary from the optional @oven/bun-*
+  # package, then moves it into bun/bin, mutating the store; if that package is
+  # missing it falls back to a nested `npm install` or a registry download with
+  # no integrity check. Skipped: apps/cli/scripts/build.ts resolves the
+  # lockfile-verified @oven/bun-* binary itself, so the bun/bin shim is unused.
+  bun: false
+
+# Install the darwin and linux x64/arm64 optional platform packages on every
+# host, not only the current one. apps/cli cross-compiles all four release
+# targets from one machine: each target embeds its own @napi-rs/keyring-* addon
+# and uses its own @oven/bun-* runtime as the executable base, both taken from
+# the lockfile rather than downloaded at build time. Cost: roughly 250 MB of Bun
+# runtimes in node_modules. libc stays "current" so no musl builds are fetched.
+supportedArchitectures:
+  os: [current, darwin, linux]
+  cpu: [current, x64, arm64]
+  libc: [current]
 
 overrides:
   # drizzle-orm has an optional peer on kysely, which better-auth brings into
