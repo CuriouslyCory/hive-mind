@@ -27,7 +27,7 @@ export const login: CommandDefinition = {
   summary: "Log in through the browser (device approval) and store the login",
   description: [
     "Starts a device login: prints a URL and a code on stderr, then waits while",
-    "you approve the request in a browser where you are signed in to Hive Mind.",
+    "you approve the request in a browser where you are signed in to hive-mind.",
     "In a terminal it also tries to open the browser; without one it only prints",
     "and waits, and never reads input. Ctrl+C cancels and stores nothing.",
     "",

@@ -99,7 +99,7 @@ function invalidResponse(origin: string, what: string): CliError {
   return new CliError(
     CLI_ERROR_CODES.invalidResponse,
     `${origin} sent an unexpected response ${what}.`,
-    { hint: "Check that --server or HIVEMIND_URL points at a Hive Mind backend." },
+    { hint: "Check that --server or HIVEMIND_URL points at a hive-mind backend." },
   );
 }
 

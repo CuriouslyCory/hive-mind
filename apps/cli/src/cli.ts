@@ -94,7 +94,7 @@ function globalHelp(): string[] {
 
 export function overviewHelp(commands: readonly CommandDefinition[]): string {
   const lines = [
-    "hivemind - command-line client for Hive Mind",
+    "hivemind - command-line client for hive-mind",
     "",
     "Usage:",
     "  hivemind <command> [options]",

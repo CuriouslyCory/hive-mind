@@ -1,10 +1,16 @@
 # hivemind
 
-Command-line client for Hive Mind.
+Command-line client for hive-mind.
 
 ```sh
 npm install -g {{name}}
 hivemind --help
+```
+
+Or run it without a global install:
+
+```sh
+npx {{name}} --help
 ```
 
 This package is a small launcher. npm installs the standalone `hivemind` binary for your platform
