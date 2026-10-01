@@ -250,7 +250,7 @@ describeDb("coordination schema: Event ordering columns", () => {
         const insert = () =>
           insertEvent(tx, {
             projectId: a.project.id,
-            type: "plan.logged",
+            type: "plan.log_appended",
             payload: { message: "hello" },
             actor: { ...a.principal, sessionId: a.session.id },
             planId: a.plan.id,
@@ -312,7 +312,7 @@ describeDb("coordination schema: Event ordering columns", () => {
     const stored = await withCoordinationLock(testDb.db, a.project.id, ({ tx, now }) =>
       insertEvent(tx, {
         projectId: a.project.id,
-        type: "plan.logged",
+        type: "plan.log_appended",
         payload: { message },
         actor: a.principal,
         planId: a.plan.id,
@@ -326,7 +326,7 @@ describeDb("coordination schema: Event ordering columns", () => {
       withCoordinationLock(testDb.db, a.project.id, ({ tx, now }) =>
         insertEvent(tx, {
           projectId: a.project.id,
-          type: "plan.logged",
+          type: "plan.log_appended",
           payload: { message: "x".repeat(MAX_EVENT_PAYLOAD_BYTES) },
           actor: a.principal,
           now,

@@ -15,21 +15,6 @@ function notImplemented(): never {
 }
 
 export const pendingCoordination = {
-  plans: {
-    list: api.projects.plans.list.handler(notImplemented),
-    create: api.projects.plans.create.handler(notImplemented),
-    get: api.projects.plans.get.handler(notImplemented),
-    update: api.projects.plans.update.handler(notImplemented),
-    setStatus: api.projects.plans.setStatus.handler(notImplemented),
-    log: {
-      list: api.projects.plans.log.list.handler(notImplemented),
-      append: api.projects.plans.log.append.handler(notImplemented),
-    },
-    tasks: {
-      list: api.projects.plans.tasks.list.handler(notImplemented),
-      add: api.projects.plans.tasks.add.handler(notImplemented),
-    },
-  },
   tasks: {
     claim: api.projects.tasks.claim.handler(notImplemented),
     release: api.projects.tasks.release.handler(notImplemented),
@@ -46,7 +31,6 @@ export const pendingCoordination = {
     attach: api.projects.sessions.attach.handler(notImplemented),
     end: api.projects.sessions.end.handler(notImplemented),
     claims: api.projects.sessions.claims.handler(notImplemented),
-    events: api.projects.sessions.events.handler(notImplemented),
     overlaps: api.projects.sessions.overlaps.handler(notImplemented),
     scopes: {
       list: api.projects.sessions.scopes.list.handler(notImplemented),
@@ -58,9 +42,6 @@ export const pendingCoordination = {
       batch: api.projects.sessions.collections.batch.handler(notImplemented),
       finalize: api.projects.sessions.collections.finalize.handler(notImplemented),
     },
-  },
-  events: {
-    list: api.projects.events.list.handler(notImplemented),
   },
   status: api.projects.status.handler(notImplemented),
 };

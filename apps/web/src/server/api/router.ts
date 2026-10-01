@@ -9,10 +9,22 @@ import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { ORPCError, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { apiError } from "./authorize";
+import { listProjectEvents, listSessionEvents } from "./events";
 import { listOrganizations, me } from "./identity";
 import { api } from "./implementer";
 import { createProjectKey, listProjectKeys, revokeProjectKey } from "./keys";
 import { pendingCoordination } from "./not-implemented";
+import {
+  addTask,
+  appendPlanLog,
+  createPlan,
+  getPlan,
+  listPlanLog,
+  listPlans,
+  listPlanTasks,
+  setPlanStatus,
+  updatePlan,
+} from "./plans";
 import { type ApiDeps, bearerToken, resolvePrincipal, withoutCredentials } from "./principal";
 import { createProject, getProject, listProjects } from "./projects";
 
@@ -25,7 +37,18 @@ export const router = api.router({
     create: createProject,
     get: getProject,
     keys: { list: listProjectKeys, create: createProjectKey, revoke: revokeProjectKey },
+    plans: {
+      list: listPlans,
+      create: createPlan,
+      get: getPlan,
+      update: updatePlan,
+      setStatus: setPlanStatus,
+      log: { list: listPlanLog, append: appendPlanLog },
+      tasks: { list: listPlanTasks, add: addTask },
+    },
+    events: { list: listProjectEvents },
     ...pendingCoordination,
+    sessions: { ...pendingCoordination.sessions, events: listSessionEvents },
   },
 });
 
