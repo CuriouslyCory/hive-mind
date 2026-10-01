@@ -9,9 +9,11 @@
 #                                        (SH is one command name or path)
 #
 # Covers: fresh, repeat and pinned installs into a path with spaces; latest
-# lookup; file:// mirror; unsupported OS and CPU; non-https mirror; missing
-# asset; bad checksum; truncated download; interrupted download; a binary that
-# reports the wrong version; an archive with extra entries. Every failure case
+# lookup; file:// mirror; TMPDIR mounted noexec; an install directory where
+# nothing can execute; unsupported OS and CPU; musl libc; an x64 CPU without
+# AVX2; non-https mirror; missing asset; bad checksum; truncated download;
+# interrupted download; a binary that reports the wrong version; an archive
+# with extra entries. Every failure case
 # checks that the existing installation is byte-for-byte unchanged and that no
 # temporary or staged files are left behind.
 
@@ -59,7 +61,13 @@ make_release() {
   dir="$releases/download/v$v"
   stage="$work/stage/$v"
   mkdir -p "$dir" "$stage"
-  printf '#!/bin/sh\necho "hivemind %s (test, fixture)"\n' "$reported" >"$stage/hivemind"
+  # NOEXEC_DIR stands in for a noexec mount: run from under it, the fixture
+  # fails the way the shell does when it cannot execute a file.
+  cat >"$stage/hivemind" <<EOF
+#!/bin/sh
+case "\$0" in "\${NOEXEC_DIR:-/nonexistent}"/*) echo "\$0: Permission denied" >&2; exit 126 ;; esac
+echo "hivemind $reported (test, fixture)"
+EOF
   chmod 0755 "$stage/hivemind"
   asset="hivemind-$v-$os-$arch.tar.gz"
   if [ -n "${4:-}" ]; then
@@ -209,7 +217,18 @@ expect_failure "truncated download" "download failed" "$http_url" HIVEMIND_VERSI
 expect_failure "binary reports the wrong version" "expected version 9.9.4" "$http_url" HIVEMIND_VERSION=9.9.4
 expect_failure "archive with extra entries" "unexpected contents" "$http_url" HIVEMIND_VERSION=9.9.3
 
-# Unsupported platforms: a fake uname first on PATH. Nothing may be downloaded.
+# A noexec TMPDIR (a CIS hardening item) must not matter: nothing runs from
+# there. Then back to 9.9.9 for the failure cases below.
+if run_installer "$http_url" HIVEMIND_VERSION=9.9.8 NOEXEC_DIR="$tmp_dir" && [ "$(installed_version)" = 9.9.8 ] &&
+  no_leftovers && run_installer "$http_url" HIVEMIND_VERSION=9.9.9 && [ "$(installed_version)" = 9.9.9 ]; then
+  pass "TMPDIR mounted noexec"
+else
+  fail "TMPDIR mounted noexec: $(cat "$out")"
+fi
+expect_failure "install directory mounted noexec" "cannot execute the downloaded binary in $bin_dir" \
+  "$http_url" HIVEMIND_VERSION=9.9.8 NOEXEC_DIR="$bin_dir"
+
+# Unsupported platforms: fake commands first on PATH. Nothing may be downloaded.
 fake_uname() {
   mkdir -p "$work/uname-$1-$2"
   cat >"$work/uname-$1-$2/uname" <<EOF
@@ -219,11 +238,40 @@ EOF
   chmod +x "$work/uname-$1-$2/uname"
   printf '%s' "$work/uname-$1-$2:$PATH"
 }
+# Alpine's ldd is musl's loader, which prints this to stderr and exits 1.
+mkdir -p "$work/musl"
+cat >"$work/musl/ldd" <<'EOF'
+#!/bin/sh
+printf 'musl libc (x86_64)\nVersion 1.2.5\nDynamic Program Loader\n' >&2
+exit 1
+EOF
+chmod +x "$work/musl/ldd"
+# A CPU without AVX2: this grep reads a fixture in place of /proc/cpuinfo. It
+# matches the installer's exact `grep -qw avx2 /proc/cpuinfo`; if that check
+# changes shape, the fake no longer applies and the case fails, not passes.
+real_grep="$(command -v grep)"
+mkdir -p "$work/no-avx2"
+printf 'processor\t: 0\nflags\t\t: fpu sse sse2 ssse3 sse4_1 sse4_2 avx popcnt\n' >"$work/no-avx2/cpuinfo"
+cat >"$work/no-avx2/grep" <<EOF
+#!/bin/sh
+if [ "\$#" -eq 3 ] && [ "\$3" = /proc/cpuinfo ]; then exec "$real_grep" "\$1" "\$2" "$work/no-avx2/cpuinfo"; fi
+exec "$real_grep" "\$@"
+EOF
+chmod +x "$work/no-avx2/grep"
+
 requests_before="$(wc -l <"$work/requests.log")"
 expect_failure "unsupported OS" "unsupported operating system: FreeBSD" "$http_url" PATH="$(fake_uname FreeBSD amd64)"
 expect_failure "unsupported OS (Windows shell)" "unsupported operating system: MINGW64_NT" "$http_url" PATH="$(fake_uname MINGW64_NT-10.0 x86_64)"
 expect_failure "unsupported CPU" "unsupported CPU architecture: i686" "$http_url" PATH="$(fake_uname Linux i686)"
 expect_failure "unsupported CPU (armv7)" "unsupported CPU architecture: armv7l" "$http_url" PATH="$(fake_uname Linux armv7l)"
+expect_failure "musl libc" "uses musl libc" "$http_url" PATH="$work/musl:$(fake_uname Linux x86_64)"
+expect_failure "musl libc (arm64)" "uses musl libc" "$http_url" PATH="$work/musl:$(fake_uname Linux aarch64)"
+# The installer reads /proc/cpuinfo only where it exists, that is on Linux.
+if [ -r /proc/cpuinfo ]; then
+  expect_failure "x64 CPU without AVX2" "lacks AVX2" "$http_url" PATH="$work/no-avx2:$(fake_uname Linux x86_64)"
+else
+  printf 'skip x64 CPU without AVX2 (this host has no /proc/cpuinfo)\n'
+fi
 if [ "$(wc -l <"$work/requests.log")" = "$requests_before" ]; then
   pass "unsupported platforms download nothing"
 else

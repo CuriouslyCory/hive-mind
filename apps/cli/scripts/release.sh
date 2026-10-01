@@ -28,11 +28,16 @@ die() {
   exit 1
 }
 
+# The fields of a release that these steps use.
+RELEASE_FIELDS='{id, draft, target_commitish, html_url, assets: [.assets[] | {id, name}]}'
+
 # The release with this tag, drafts included (the tags endpoint skips drafts).
+# The list can lag a just-created release by seconds, so callers that have
+# just created one use the creation response instead.
 release_json() {
   local tag="$1" found
   found="$(gh api --paginate "repos/$repo/releases?per_page=100" \
-    --jq ".[] | select(.tag_name == \"$tag\") | {id, draft, target_commitish, html_url, assets: [.assets[] | {id, name}]}" |
+    --jq ".[] | select(.tag_name == \"$tag\") | $RELEASE_FIELDS" |
     jq -s .)"
   case "$(jq length <<<"$found")" in
     0) ;;
@@ -53,14 +58,15 @@ cmd_draft() {
   local release
   release="$(release_json "$tag")"
   if [ -z "$release" ]; then
-    local flags=(--draft --target "$sha_target" --title "$title" --notes-file "$notes")
-    [ "$prerelease" = true ] && flags+=(--prerelease)
-    gh release create "$tag" "${flags[@]}"
-    release="$(release_json "$tag")"
-    [ -n "$release" ] || die "created release $tag but cannot find it"
+    # A draft gets no git tag until it is published.
+    release="$(gh api -X POST "repos/$repo/releases" -f tag_name="$tag" -f target_commitish="$sha_target" \
+      -f name="$title" -F body=@"$notes" -F draft=true -F prerelease="$prerelease" --jq "$RELEASE_FIELDS")"
+    [ -n "$release" ] || die "could not create the draft release $tag"
+    echo "created draft $tag (release $(jq -r .id <<<"$release"))"
   fi
 
-  local target draft
+  local target draft release_id
+  release_id="$(jq -r .id <<<"$release")"
   target="$(jq -r .target_commitish <<<"$release")"
   draft="$(jq -r .draft <<<"$release")"
   [ "$target" = "$sha_target" ] ||
@@ -80,7 +86,11 @@ cmd_draft() {
         die "$name on $tag differs from this build; it is never overwritten. Delete the draft (or bump the version) to rebuild."
       echo "$name: already attached, identical"
     elif [ "$draft" = true ]; then
-      gh release upload "$tag" "$file"
+      # By release id: `gh release upload <tag>` finds a draft through the
+      # same lagging list.
+      gh api -X POST -H "Content-Type: application/octet-stream" \
+        "https://uploads.github.com/repos/$repo/releases/$release_id/assets?name=$name" \
+        --input "$file" --jq .name >/dev/null
       echo "$name: uploaded"
     else
       die "release $tag is published but lacks $name"

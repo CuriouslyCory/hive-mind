@@ -13,9 +13,10 @@
 #                          file:// (a local mirror, which needs a pinned version).
 #
 # Supports Linux (glibc) and macOS on x64 and arm64. Downloads the archive and
-# SHA256SUMS, verifies the checksum, checks that the new binary runs and
-# reports the expected version, and only then replaces the installed binary
-# with an atomic rename in the install directory. On any failure or
+# SHA256SUMS, verifies the checksum, stages the new binary in the install
+# directory, checks that it runs there and reports the expected version, and
+# only then replaces the installed binary with an atomic rename. Nothing is
+# executed from $TMPDIR, so a noexec /tmp is fine. On any failure or
 # interruption the existing installation is left untouched and temporary files
 # are removed. Never uses sudo and never edits shell startup files.
 
@@ -194,21 +195,30 @@ entries="$(tar -tzf "$tmp/$asset")" || die "$asset is not a valid archive"
 mkdir "$tmp/extract"
 tar -xzf "$tmp/$asset" -C "$tmp/extract" || die "could not extract $asset"
 [ -f "$tmp/extract/$BINARY" ] && [ ! -L "$tmp/extract/$BINARY" ] || die "$asset does not contain a regular file named $BINARY"
-chmod 0755 "$tmp/extract/$BINARY"
+
+# Stage next to the target so the final rename stays on one filesystem and is
+# atomic: the old binary is replaced whole or not at all. The version check
+# runs on the staged copy, not in $TMPDIR: hardened hosts often mount /tmp
+# noexec, and the install directory is where the binary has to run anyway.
+staged="$install_dir/.$BINARY.install.$$"
+cp "$tmp/extract/$BINARY" "$staged" || die "could not write to $install_dir"
+chmod 0755 "$staged"
 
 # The new binary must run here and be the requested version before it
-# replaces anything.
-reported="$("$tmp/extract/$BINARY" --version 2>&1)" || die "the downloaded binary does not run on this system: $reported"
+# replaces anything. The shell exits 126 when it cannot execute the file at
+# all (permission denied, which includes a noexec mount, or a wrong format).
+status=0
+reported="$("$staged" --version 2>&1)" || status=$?
+if [ "$status" -eq 126 ]; then
+  die "cannot execute the downloaded binary in $install_dir: $reported. If that directory is on a filesystem mounted noexec, choose another with --install-dir."
+elif [ "$status" -ne 0 ]; then
+  die "the downloaded binary does not run on this system (exit $status): $reported"
+fi
 case "$reported" in
   "$BINARY $version "*) ;;
   *) die "the downloaded binary reports '$reported', expected version $version" ;;
 esac
 
-# Stage next to the target so the final rename stays on one filesystem and is
-# atomic: the old binary is replaced whole or not at all.
-staged="$install_dir/.$BINARY.install.$$"
-cp "$tmp/extract/$BINARY" "$staged" || die "could not write to $install_dir"
-chmod 0755 "$staged"
 mv -f "$staged" "$target" || die "could not replace $target"
 staged=""
 

@@ -6,8 +6,9 @@ name: CLI native
 # ci.yml compiles only the host target.
 #
 # Runs on pull requests and pushes to main that touch the CLI, the contract it
-# speaks, the installer or the release workflows; release.yml calls it to build
-# the release assets, which it uploads as hivemind-<target> artifacts.
+# speaks, the installer, the release workflows or the toolchain that runs them
+# (root package.json pins pnpm, .nvmrc pins Node); release.yml calls it to
+# build the release assets, which it uploads as hivemind-<target> artifacts.
 
 on:
   pull_request:
@@ -15,6 +16,8 @@ on:
       - apps/cli/**
       - packages/contract/**
       - scripts/install.sh
+      - package.json
+      - .nvmrc
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - .github/workflows/cli-native.yml
@@ -25,6 +28,8 @@ on:
       - apps/cli/**
       - packages/contract/**
       - scripts/install.sh
+      - package.json
+      - .nvmrc
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - .github/workflows/cli-native.yml
@@ -61,14 +66,14 @@ jobs:
             runner: macos-15
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       # Installs only this runner's platform packages: the Bun runtime that
       # becomes the binary and, on macOS, its Keychain addon.
       - name: Set up pnpm and Node, install dependencies
-        uses: pnpm/setup@v3
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           node-version-file: .nvmrc
           cache: true
@@ -124,7 +129,7 @@ jobs:
             --commit "$COMMIT"
 
       - name: Upload the archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hivemind-${{ matrix.target }}
           path: apps/cli/dist/release/hivemind-*.tar.gz

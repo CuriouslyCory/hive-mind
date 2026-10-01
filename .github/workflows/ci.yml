@@ -38,7 +38,7 @@ jobs:
           --health-retries 15
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -48,7 +48,7 @@ jobs:
       # if pnpm-lock.yaml is missing). No actions/setup-node needed.
       - name: Set up pnpm and Node, install dependencies
         id: setup
-        uses: pnpm/setup@v3
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           node-version-file: .nvmrc
           cache: true
@@ -130,12 +130,12 @@ jobs:
           --health-retries 15
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up pnpm and Node, install dependencies
-        uses: pnpm/setup@v3
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           node-version-file: .nvmrc
           cache: true
@@ -154,7 +154,7 @@ jobs:
 
       - name: Cache Playwright's Chromium
         id: playwright-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
@@ -197,7 +197,7 @@ jobs:
       # (trace: retain-on-failure); test-results has the raw files.
       - name: Upload the Playwright report
         if: ${{ failure() && steps.e2e.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
           path: |
