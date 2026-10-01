@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "command": "task claim",
+  "ok": false,
+  "error": {
+    "code": "CONFLICT",
+    "message": "The Task is claimed by Session 5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9 (intent: \"Run the coordination checks\")."
+  }
+}

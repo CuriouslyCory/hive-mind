@@ -12,6 +12,7 @@ import { apiError } from "./authorize";
 import { listOrganizations, me } from "./identity";
 import { api } from "./implementer";
 import { createProjectKey, listProjectKeys, revokeProjectKey } from "./keys";
+import { pendingCoordination } from "./not-implemented";
 import { type ApiDeps, bearerToken, resolvePrincipal, withoutCredentials } from "./principal";
 import { createProject, getProject, listProjects } from "./projects";
 
@@ -24,6 +25,7 @@ export const router = api.router({
     create: createProject,
     get: getProject,
     keys: { list: listProjectKeys, create: createProjectKey, revoke: revokeProjectKey },
+    ...pendingCoordination,
   },
 });
 

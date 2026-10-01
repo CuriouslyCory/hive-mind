@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "id": "7a2e3d4c-5b6a-4f90-8b1c-2d3e4f5a6b7c",
+      "projectId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "planId": "6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b",
+      "planKey": "PLAN-1",
+      "title": "Define the contract",
+      "status": "in_progress",
+      "position": 0,
+      "claim": {
+        "sessionId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+        "claimedAt": "2026-10-01T12:05:00.000Z",
+        "leaseExpiresAt": "2026-10-01T12:10:00.000Z"
+      },
+      "blockedReason": null,
+      "createdAt": "2026-10-01T12:00:00.000Z",
+      "updatedAt": "2026-10-01T12:05:00.000Z"
+    },
+    {
+      "id": "8b3f4e5d-6c7b-4a01-9c2d-3e4f5a6b7c8d",
+      "projectId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "planId": "6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b",
+      "planKey": "PLAN-1",
+      "title": "Write the handlers",
+      "status": "todo",
+      "position": 1,
+      "claim": null,
+      "blockedReason": null,
+      "createdAt": "2026-10-01T12:00:00.000Z",
+      "updatedAt": "2026-10-01T12:00:00.000Z"
+    }
+  ],
+  "nextCursor": null
+}

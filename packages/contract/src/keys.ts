@@ -47,7 +47,7 @@ export type ProjectKeyPage = z.infer<typeof projectKeyPageSchema>;
 /**
  * `POST /projects/{id}/keys`. Without `expiresInDays` the key never expires
  * (`expiresAt: null`); it lasts until it is revoked. The key's permissions are
- * not chosen by the caller: M1 keys get `PROJECT_KEY_PERMISSIONS`.
+ * not chosen by the caller: every key gets `PROJECT_KEY_PERMISSIONS`.
  */
 export const createProjectKeyInputSchema = z.strictObject({
   id: idSchema,
