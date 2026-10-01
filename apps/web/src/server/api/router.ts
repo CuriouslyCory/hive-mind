@@ -13,7 +13,6 @@ import { listProjectEvents, listSessionEvents } from "./events";
 import { listOrganizations, me } from "./identity";
 import { api } from "./implementer";
 import { createProjectKey, listProjectKeys, revokeProjectKey } from "./keys";
-import { pendingCoordination } from "./not-implemented";
 import {
   addTask,
   appendPlanLog,
@@ -26,7 +25,28 @@ import {
   updatePlan,
 } from "./plans";
 import { type ApiDeps, bearerToken, resolvePrincipal, withoutCredentials } from "./principal";
+import { getProjectStatus } from "./project-status";
 import { createProject, getProject, listProjects } from "./projects";
+import {
+  addSessionScope,
+  checkSessionOverlaps,
+  finalizeCollection,
+  listSessionScopes,
+  registerCollectionManifest,
+  removeSessionScope,
+  uploadCollectionBatch,
+} from "./scopes";
+import {
+  attachSession,
+  endSession,
+  getSession,
+  heartbeatSession,
+  listSessionClaims,
+  listSessions,
+  startSession,
+  updateSession,
+} from "./sessions";
+import { blockTask, claimTask, completeTask, releaseTask, startTask } from "./tasks";
 
 /** The `/api/v1` router: the contract, implemented. */
 export const router = api.router({
@@ -46,9 +66,33 @@ export const router = api.router({
       log: { list: listPlanLog, append: appendPlanLog },
       tasks: { list: listPlanTasks, add: addTask },
     },
+    tasks: {
+      claim: claimTask,
+      release: releaseTask,
+      start: startTask,
+      block: blockTask,
+      done: completeTask,
+    },
+    sessions: {
+      list: listSessions,
+      start: startSession,
+      get: getSession,
+      update: updateSession,
+      heartbeat: heartbeatSession,
+      attach: attachSession,
+      end: endSession,
+      claims: listSessionClaims,
+      events: listSessionEvents,
+      overlaps: checkSessionOverlaps,
+      scopes: { list: listSessionScopes, add: addSessionScope, remove: removeSessionScope },
+      collections: {
+        manifest: registerCollectionManifest,
+        batch: uploadCollectionBatch,
+        finalize: finalizeCollection,
+      },
+    },
     events: { list: listProjectEvents },
-    ...pendingCoordination,
-    sessions: { ...pendingCoordination.sessions, events: listSessionEvents },
+    status: getProjectStatus,
   },
 });
 

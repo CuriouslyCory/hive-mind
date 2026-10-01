@@ -374,12 +374,24 @@ describeDb("heartbeatSession", () => {
       collectionContentHash: null,
       scopeHistoryIncomplete: true,
     });
+    // The loss is recorded once, naming the superseded collection and its
+    // manifest's path count; a further replacement writes no second Event.
+    await heartbeatSession(testDb.db, { ...ref, collectionId: uuid() });
     const events = await eventsOf(testDb.db, project.id);
-    expect(events.map((e) => (e.payload as { collectionId?: string }).collectionId)).toEqual([
-      first,
-      first,
-      second,
+    expect(
+      events.map((e) => [e.type, (e.payload as { collectionId?: string }).collectionId]),
+    ).toEqual([
+      ["session.heartbeat", first],
+      ["session.heartbeat", first],
+      ["scope.coverage_lost", first],
+      ["session.heartbeat", second],
+      ["session.heartbeat", expect.any(String)],
     ]);
+    expect(events.find((e) => e.type === "scope.coverage_lost")).toMatchObject({
+      payload: { collectionId: first, reason: "collection_superseded", pathCount: 2 },
+      sessionId: session.id,
+      actorSessionId: session.id,
+    });
   });
 
   it("is owner-only", async () => {

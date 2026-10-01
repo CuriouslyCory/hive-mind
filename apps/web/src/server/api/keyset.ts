@@ -39,8 +39,13 @@ export function decodeKeysetCursor(
     hash === scopeHash(scope) &&
     position.length === pattern.length &&
     position.every((part, index) => pattern[index]?.test(part));
-  if (!valid) throw apiError("BAD_REQUEST", "The cursor is not one this list returned.");
+  if (!valid) throw invalidCursor();
   return position;
+}
+
+/** The 400 for a malformed cursor or one another list returned. */
+export function invalidCursor() {
+  return apiError("BAD_REQUEST", "The cursor is not one this list returned.");
 }
 
 export const DECIMAL_POSITION = /^(?:0|[1-9][0-9]{0,19})$/;

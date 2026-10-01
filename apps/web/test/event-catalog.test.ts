@@ -1,32 +1,47 @@
 import { randomUUID } from "node:crypto";
+import { EVENT_TYPES } from "@hivemind/contract";
 import {
+  addDeclaredScope,
+  addTask,
+  appendPlanLog,
   attachSession,
   blockTask,
   claimTask,
+  createPlan,
   creatorColumns,
   doneTask,
+  EVENT_PAYLOAD_VERSIONS,
   endSession,
+  finalizeCollection,
   heartbeatSession,
   type Principal,
+  recordCollectionManifest,
   releaseTask,
+  removeScope,
   schema,
+  setPlanStatus,
   startSession,
   startTask,
   sweepCoordination,
+  touchedPathsContentHash,
+  updatePlan,
   updateSession,
+  uploadCollectionBatch,
 } from "@hivemind/db";
 import { createTestDatabase, describeDb, type TestDatabase } from "@hivemind/db/testing";
 import { asc, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { toEventDto } from "../src/server/api/coordination-dto";
 
-// Every Event the Session, Task-claim and sweep helpers of @hivemind/db write
-// must read back as a valid contract Event; a mismatch would make Event reads
-// fail with 500.
+// The Event catalog of @hivemind/db (src/event.ts) and the contract's
+// `eventSchema` must name the same types with the same payloads: Event reads
+// return stored rows as they are, so a mismatch would make them fail with
+// 500. This produces one Event of every type through the db helpers and reads
+// each back through the API's DTO, which validates it against the contract.
 
 let testDb: TestDatabase;
 
-describeDb("lifecycle Events", () => {
+describeDb("the Event catalog", () => {
   beforeAll(async () => {
     testDb = await createTestDatabase();
   });
@@ -35,7 +50,11 @@ describeDb("lifecycle Events", () => {
     await testDb?.drop();
   });
 
-  it("match the contract's eventSchema", async () => {
+  it("has the contract's types, and every written Event matches eventSchema", async () => {
+    expect(Object.keys(EVENT_PAYLOAD_VERSIONS).sort()).toEqual([...EVENT_TYPES].sort());
+  });
+
+  it("writes Events that match the contract's eventSchema, one of every type", async () => {
     const db = testDb.db;
     const slug = `org-${randomUUID().slice(0, 8)}`;
     const [org] = await db.insert(schema.organization).values({ name: slug, slug }).returning();
@@ -50,18 +69,15 @@ describeDb("lifecycle Events", () => {
       .returning();
     if (!project) throw new Error("setup");
     const principal: Principal = { kind: "user", userId: user.id };
-    const [plan] = await db
-      .insert(schema.plan)
-      .values({
-        projectId: project.id,
-        number: 1,
-        title: "Plan",
-        status: "active",
-        ...creatorColumns(principal),
-        creationFingerprint: "0".repeat(64),
-      })
-      .returning();
-    if (!plan) throw new Error("setup");
+    const created = await createPlan(db, {
+      projectId: project.id,
+      principal,
+      id: randomUUID(),
+      title: "Plan",
+      status: "active",
+    });
+    if (created.status !== "created") throw new Error("setup");
+    const { plan } = created.plan;
     const newTask = async () => {
       const [row] = await db
         .insert(schema.task)
@@ -137,26 +153,64 @@ describeDb("lifecycle Events", () => {
     ).toMatchObject({ sessionsAbandoned: 1, claimsReleased: 1 });
     expect(await endSession(db, { ...own(b), summary: "Late" })).toMatchObject(ok);
 
+    // Plans and Tasks.
+    const writer = { projectId: project.id, principal };
+    const planId = randomUUID();
+    expect(await createPlan(db, { ...writer, id: planId, title: "Second" })).toMatchObject({
+      status: "created",
+    });
+    expect(await updatePlan(db, { ...writer, ref: planId, title: "Renamed" })).toMatchObject({
+      status: "ok",
+      changed: true,
+    });
+    expect(
+      await appendPlanLog(db, { ...writer, ref: planId, eventId: randomUUID(), message: "Note" }),
+    ).toMatchObject({ status: "created" });
+    expect(
+      await addTask(db, { ...writer, ref: planId, taskId: randomUUID(), title: "More" }),
+    ).toMatchObject({ status: "created" });
+    expect(await setPlanStatus(db, { ...writer, ref: planId, status: "active" })).toMatchObject({
+      status: "ok",
+      changed: true,
+    });
+
+    // Scopes and a touched-path collection, then a collection superseded
+    // before it was finalized, which loses coverage for good.
+    const c = await start();
+    const added = await addDeclaredScope(db, { ...own(c), pattern: "apps/web/**" });
+    if (added.status !== "ok") throw new Error(`addDeclaredScope: ${added.status}`);
+    expect(await removeScope(db, { ...own(c), scopeId: added.scope.id })).toMatchObject({
+      status: "ok",
+      removed: true,
+    });
+    const collectionId = randomUUID();
+    expect(await heartbeatSession(db, { ...own(c), collectionId })).toMatchObject(ok);
+    const paths = ["README.md"];
+    const collection = { ...own(c), collectionId };
+    expect(
+      await recordCollectionManifest(db, {
+        ...collection,
+        expectedBatches: 1,
+        pathCount: 1,
+        contentHash: touchedPathsContentHash(paths),
+      }),
+    ).toMatchObject(ok);
+    expect(await uploadCollectionBatch(db, { ...collection, batchIndex: 0, paths })).toMatchObject(
+      ok,
+    );
+    expect(await finalizeCollection(db, collection)).toMatchObject(ok);
+    expect(await heartbeatSession(db, { ...own(c), collectionId: randomUUID() })).toMatchObject(ok);
+    expect(await heartbeatSession(db, { ...own(c), collectionId: randomUUID() })).toMatchObject(ok);
+
     const rows = await db
       .select()
       .from(schema.event)
       .where(eq(schema.event.projectId, project.id))
       .orderBy(asc(schema.event.seq));
     const types = rows.map((row) => toEventDto(row).type);
-    expect(new Set(types)).toEqual(
-      new Set([
-        "session.started",
-        "session.updated",
-        "session.attached",
-        "session.heartbeat",
-        "task.claimed",
-        "task.started",
-        "task.blocked",
-        "task.released",
-        "task.done",
-        "session.ended",
-        "session.status_changed",
-      ]),
-    );
+    expect([...new Set(types)].sort()).toEqual(Object.keys(EVENT_PAYLOAD_VERSIONS).sort());
+    expect(rows.find((row) => row.type === "scope.coverage_lost")?.payload).toMatchObject({
+      reason: "collection_superseded",
+    });
   });
 });

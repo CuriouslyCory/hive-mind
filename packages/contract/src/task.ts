@@ -99,7 +99,8 @@ export type ListPlanTasksInput = z.input<typeof listPlanTasksInputSchema>;
 /**
  * Task work actions, `POST /projects/{id}/tasks/{taskId}/<action>`. `sessionId`
  * is required: it must be the caller's own live Session in this Project
- * (another principal's is NOT_FOUND, a stale, ended or abandoned one CONFLICT).
+ * (another principal's is FORBIDDEN, another Project's or an absent one
+ * NOT_FOUND, a stale, ended or abandoned one CONFLICT).
  */
 const taskActionInputShape = {
   id: idSchema,

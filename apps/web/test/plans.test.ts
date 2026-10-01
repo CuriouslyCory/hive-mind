@@ -362,7 +362,7 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
       });
     });
 
-    it("answers 404 for another principal's Session and 409 for an ended one", async () => {
+    it("answers 403 for another principal's Session, 404 for none and 409 for an ended one", async () => {
       const others = await insertSession(projectA, { userId: owner.id });
       const keys = await insertSession(projectA, { keyId: keyA.id });
       const ended = await insertSession(
@@ -392,8 +392,12 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
         call(member.token, `/projects/${projectA}/plans/${plan.key}/log`, {
           body: { eventId: uuid(), message: "X", sessionId },
         });
-      expect((await append(others.id)).status).toBe(404);
-      expect((await append(keys.id)).status).toBe(404);
+      // Visible Sessions of the Project the caller does not own.
+      for (const foreign of [others.id, keys.id]) {
+        const response = await append(foreign);
+        expect(response.status).toBe(403);
+        expect(await errorCode(response)).toBe("FORBIDDEN");
+      }
       expect((await append(uuid())).status).toBe(404);
       expect((await append(ended.id)).status).toBe(409);
       expect((await append(lapsed.id)).status).toBe(409);

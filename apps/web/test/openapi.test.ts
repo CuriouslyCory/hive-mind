@@ -1,9 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { API_BASE_PATH, API_ERRORS } from "@hivemind/contract";
+import { API_BASE_PATH, API_ERRORS, touchedPathsContentHash } from "@hivemind/contract";
 import { agentSession } from "@hivemind/db/schema";
 import { describeDb } from "@hivemind/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NOT_IMPLEMENTED_MESSAGE } from "../src/server/api/not-implemented";
 import { generateOpenAPIDocument, OPENAPI_DOCUMENT_PATH } from "../src/server/api/router";
 import { type ApiHarness, createApiHarness, ORIGIN, type SignedInUser } from "./support/api";
 
@@ -13,36 +12,6 @@ import { type ApiHarness, createApiHarness, ORIGIN, type SignedInUser } from "./
 // each documented operation with its documented success status.
 
 const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json"];
-
-/**
- * TEMPORARY: coordination operations whose handler is still a stub in
- * `src/server/api/not-implemented.ts`. They are checked for their 401 and
- * for the stub's 500 until implemented; whoever implements one removes it
- * here and adds a valid request to `bodies` below. Empty before #12 merges.
- */
-const NOT_YET_SERVED = new Set([
-  "claimTask",
-  "releaseTask",
-  "startTask",
-  "blockTask",
-  "completeTask",
-  "listSessions",
-  "startSession",
-  "getSession",
-  "updateSession",
-  "heartbeatSession",
-  "attachSession",
-  "endSession",
-  "listSessionClaims",
-  "checkSessionOverlaps",
-  "listSessionScopes",
-  "addSessionScope",
-  "removeSessionScope",
-  "registerCollectionManifest",
-  "uploadCollectionBatch",
-  "finalizeCollection",
-  "getProjectStatus",
-]);
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -144,14 +113,17 @@ describeDb("the served API", () => {
 
   it("answers each documented operation with its documented statuses", async () => {
     const key = await api.createKey(owner, projectId);
-    // PLAN-1, which the Plan routes below address.
-    const plan = await api.request(`/projects/${projectId}/plans`, {
-      token: owner.token,
-      body: { planId: crypto.randomUUID(), title: "Addressed" },
-    });
-    expect(plan.status).toBe(200);
-    // A Session whose history the Session event route reads; the Session
-    // routes still stubbed use their own id below.
+    const call = async (path: string, body?: unknown) => {
+      const response = await api.request(`/projects/${projectId}${path}`, {
+        token: owner.token,
+        body,
+      });
+      expect([path, response.status]).toEqual([path, 200]);
+      return (await response.json()) as Record<string, unknown>;
+    };
+    // PLAN-1, which the Plan routes below address; active, so its Tasks can be claimed.
+    await call("/plans", { planId: crypto.randomUUID(), title: "Addressed", status: "active" });
+    // A Session whose history the Session event route reads.
     const [readSession] = await api.testDb.db
       .insert(agentSession)
       .values({
@@ -164,11 +136,46 @@ describeDb("the served API", () => {
       })
       .returning();
     if (!readSession) throw new Error("Session insert returned no row.");
-    const nestedIdOverrides: Record<string, Record<string, string>> = {
-      listSessionEvents: { "{sessionId}": readSession.id },
+
+    const startBody = { agent: "openapi", intent: "Check the OpenAPI document" };
+    const newSession = async () => {
+      const sessionId = crypto.randomUUID();
+      await call("/sessions", { sessionId, ...startBody });
+      return sessionId;
     };
-    // A valid request for each operation, as the owner.
+    const newTask = async () => {
+      const taskId = crypto.randomUUID();
+      await call("/plans/PLAN-1/tasks", { taskId, title: "OpenAPI" });
+      return taskId;
+    };
+    // A Task claimed by a new Session, for the actions that need a claim.
+    const claimed = async () => {
+      const sessionId = await newSession();
+      const taskId = await newTask();
+      await call(`/tasks/${taskId}/claim`, { sessionId });
+      return { ids: { "{taskId}": taskId }, body: { sessionId } };
+    };
+    // A new Session's current collection, optionally with a registered manifest.
+    const collection = async (paths?: string[]) => {
+      const sessionId = await newSession();
+      const { collectionId } = await call(`/sessions/${sessionId}/heartbeat`, {});
+      if (paths) {
+        await call(`/sessions/${sessionId}/collections/${collectionId}/manifest`, {
+          pathCount: paths.length,
+          batchCount: Math.ceil(paths.length / 16),
+          omittedPathCount: 0,
+          contentHash: await touchedPathsContentHash(paths),
+        });
+      }
+      return { "{sessionId}": sessionId, "{collectionId}": String(collectionId) };
+    };
+
+    // The shared Session most Session routes address; the startSession
+    // operation below replays its start (`created: false`).
     const sessionId = crypto.randomUUID();
+    await call("/sessions", { sessionId, ...startBody });
+
+    // A valid request for each operation, as the owner.
     const bodies: Record<string, unknown> = {
       createProject: { organizationId: owner.organizationId, slug: "openapi", name: "OpenAPI" },
       createProjectKey: { name: "openapi" },
@@ -177,58 +184,71 @@ describeDb("the served API", () => {
       setPlanStatus: { status: "active" },
       appendPlanLog: { eventId: crypto.randomUUID(), message: "Progress." },
       addTask: { taskId: crypto.randomUUID(), title: "OpenAPI" },
-      claimTask: { sessionId },
-      releaseTask: { sessionId },
-      startTask: { sessionId },
-      blockTask: { sessionId, reason: "Waiting for review." },
-      completeTask: { sessionId },
-      startSession: { sessionId, agent: "openapi", intent: "Check the OpenAPI document" },
+      startSession: { sessionId, ...startBody },
       updateSession: { status: "idle" },
       heartbeatSession: {},
-      attachSession: { planRef: null },
-      endSession: { summary: "Checked." },
+      attachSession: { planRef: "PLAN-1" },
       addSessionScope: { pattern: "apps/web/**" },
       registerCollectionManifest: {
         pathCount: 0,
         batchCount: 0,
         omittedPathCount: 0,
-        contentHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        contentHash: await touchedPathsContentHash([]),
       },
       uploadCollectionBatch: { batchIndex: 0, paths: ["README.md"] },
       finalizeCollection: {},
     };
+    // Operations that change what they address get records of their own, so
+    // the document's operation order does not matter.
+    const prepare: Record<string, () => Promise<{ ids?: Record<string, string>; body?: unknown }>> =
+      {
+        listSessionEvents: async () => ({ ids: { "{sessionId}": readSession.id } }),
+        claimTask: async () => ({
+          ids: { "{taskId}": await newTask() },
+          body: { sessionId: await newSession() },
+        }),
+        releaseTask: claimed,
+        startTask: claimed,
+        blockTask: async () => {
+          const prepared = await claimed();
+          return { ...prepared, body: { ...prepared.body, reason: "Waiting for review." } };
+        },
+        completeTask: claimed,
+        endSession: async () => ({
+          ids: { "{sessionId}": await newSession() },
+          body: { summary: "Checked." },
+        }),
+        registerCollectionManifest: async () => ({ ids: await collection() }),
+        uploadCollectionBatch: async () => ({ ids: await collection(["README.md"]) }),
+        finalizeCollection: async () => ({ ids: await collection([]) }),
+      };
     const nestedIds: Record<string, string> = {
       "{planRef}": "PLAN-1",
-      "{taskId}": crypto.randomUUID(),
       "{sessionId}": sessionId,
       "{scopeId}": crypto.randomUUID(),
-      "{collectionId}": crypto.randomUUID(),
     };
     for (const operation of await documentedOperations()) {
+      const prepared = await prepare[operation.operationId]?.();
+      const body = prepared?.body ?? bodies[operation.operationId];
       let path = operation.path.replace("{id}", projectId).replace("{keyId}", key.id);
-      const ids = { ...nestedIds, ...nestedIdOverrides[operation.operationId] };
+      const ids = { ...nestedIds, ...prepared?.ids };
       for (const [parameter, value] of Object.entries(ids)) {
         path = path.replace(parameter, value);
       }
+      expect(path).not.toContain("{");
       const response = await api.request(path, {
         method: operation.method as Method,
         token: owner.token,
-        body: bodies[operation.operationId],
+        body,
       });
-      if (NOT_YET_SERVED.has(operation.operationId)) {
-        // The request passed input validation and reached the stub.
-        expect([operation.operationId, response.status]).toEqual([operation.operationId, 500]);
-        expect(await response.json()).toMatchObject({ message: NOT_IMPLEMENTED_MESSAGE });
-      } else {
-        expect([operation.operationId, response.status]).toEqual([
-          operation.operationId,
-          operation.successStatus,
-        ]);
-      }
+      expect([operation.operationId, response.status]).toEqual([
+        operation.operationId,
+        operation.successStatus,
+      ]);
 
       const anonymous = await api.request(path, {
         method: operation.method as Method,
-        body: bodies[operation.operationId],
+        body,
       });
       expect(anonymous.status).toBe(401);
       expect(operation.errorStatuses).toContain(anonymous.status);

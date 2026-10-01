@@ -329,7 +329,7 @@ describeDb("Plan helpers", () => {
     const attempt = (sessionId: string) =>
       createPlan(testDb.db, { ...writer, sessionId, id: randomUUID(), title: "T" });
     expect(await attempt(foreign.id)).toEqual({ status: "session_not_found" });
-    expect(await attempt(someoneElses.id)).toEqual({ status: "session_not_found" });
+    expect(await attempt(someoneElses.id)).toEqual({ status: "session_forbidden" });
     expect(await attempt(ended.id)).toEqual({ status: "session_ended" });
     expect(await attempt(own.id)).toMatchObject({
       status: "created",
