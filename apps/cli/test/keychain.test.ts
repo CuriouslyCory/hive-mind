@@ -7,13 +7,16 @@ import {
   statSync,
   symlinkSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { build, CLI_ROOT, type Target } from "../scripts/build.ts";
+import { CLI_ROOT, hostTarget } from "../scripts/build.ts";
+import { inspectBinary, targetParts } from "../scripts/release-assets.ts";
 import { createKeychainStore } from "../src/credentials/keychain.ts";
 import type { KeyringBinding, KeyringEntry } from "../src/credentials/keychain-binding.ts";
 import { loadKeyringBinding, withPrivateTmpdir } from "../src/credentials/keychain-binding.ts";
+import { PROBE_BINARY } from "./helpers/binaries.ts";
 
 // Spike (b). macOS binaries cannot run on this Linux host, so this proves what
 // a cross-compile can: each Darwin binary embeds exactly its own Keychain addon
@@ -142,66 +145,25 @@ describe("withPrivateTmpdir", () => {
   });
 });
 
-const ADDONS = {
-  "bun-darwin-arm64": "keyring-darwin-arm64/keyring.darwin-arm64.node",
-  "bun-darwin-x64": "keyring-darwin-x64/keyring.darwin-x64.node",
-} as const;
-
-function addon(target: keyof typeof ADDONS): Buffer {
-  return readFileSync(join(CLI_ROOT, "node_modules", "@napi-rs", ADDONS[target]));
-}
-
-// Mach-O 64-bit header: magic 0xfeedfacf, then cputype (CPU_TYPE_ARM64 or _X86_64).
-const CPU_TYPES: Record<keyof typeof ADDONS, number> = {
-  "bun-darwin-arm64": 0x0100000c,
-  "bun-darwin-x64": 0x01000007,
-};
-
-function loadCommands(binary: Buffer): number[] {
-  const count = binary.readUInt32LE(16);
-  const commands: number[] = [];
-  let offset = 32;
-  for (let i = 0; i < count; i++) {
-    commands.push(binary.readUInt32LE(offset));
-    offset += binary.readUInt32LE(offset + 4);
-  }
-  return commands;
-}
-
-describe("Darwin cross-compilation embeds the Keychain addon", () => {
-  const dir = mkdtempSync(join(tmpdir(), "hivemind-darwin-"));
-  afterAll(() => rmSync(dir, { recursive: true, force: true }));
-
-  it.each(Object.keys(ADDONS) as (keyof typeof ADDONS)[])(
-    "%s",
-    (target: Target & keyof typeof ADDONS) => {
-      const other = target === "bun-darwin-arm64" ? "bun-darwin-x64" : "bun-darwin-arm64";
-      const binary = readFileSync(
-        build({ target, entry: "test/native/probe.ts", outfile: join(dir, target, "probe") }),
-      );
-
-      expect(binary.readUInt32LE(0)).toBe(0xfeedfacf);
-      expect(binary.readInt32LE(4)).toBe(CPU_TYPES[target]);
-      // LC_CODE_SIGNATURE: Bun signs the cross-compiled binary (ad hoc).
-      expect(loadCommands(binary)).toContain(0x1d);
-
-      expect(binary.includes(addon(target))).toBe(true);
-      expect(binary.includes(addon(other))).toBe(false);
-      // The generic napi-rs loader (with its env override) is not bundled.
-      expect(binary.includes("NAPI_RS_NATIVE_LIBRARY_PATH")).toBe(false);
-    },
-  );
-
-  it("embeds no Keychain addon in a Linux binary", () => {
-    const binary = readFileSync(
-      build({
-        target: "bun-linux-arm64",
-        entry: "test/native/probe.ts",
-        outfile: join(dir, "linux", "probe"),
-      }),
-    );
-    for (const target of Object.keys(ADDONS) as (keyof typeof ADDONS)[]) {
-      expect(binary.includes(addon(target))).toBe(false);
-    }
+// Each target embeds only what it needs, checked on the binary built for this
+// host. A host can build only its own target (STATE.md D11), so the Darwin
+// binaries are checked on macOS runners, where scripts/smoke.ts runs the same
+// inspection on the release archive and then a real Keychain roundtrip.
+describe("the compiled binary embeds its own Keychain addon", () => {
+  it("matches its target, with the addon on Darwin and none on Linux", () => {
+    const target = hostTarget();
+    const binary = readFileSync(PROBE_BINARY);
+    const { os, arch } = targetParts(target);
+    const addon =
+      os === "darwin"
+        ? readFileSync(
+            createRequire(join(CLI_ROOT, "package.json")).resolve(
+              `@napi-rs/keyring-darwin-${arch}/keyring.darwin-${arch}.node`,
+            ),
+          )
+        : undefined;
+    expect(inspectBinary(binary, target, addon)).toEqual([]);
+    // Linux binaries carry no Node-API addon at all (D9: libsecret via secret-tool).
+    if (os === "linux") expect(binary.includes("keyring.darwin")).toBe(false);
   });
 });

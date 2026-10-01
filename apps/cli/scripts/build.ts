@@ -17,8 +17,13 @@
 // Runs on Node (`pnpm build`), not Bun: Bun is a devDependency whose install
 // script is not run (pnpm-workspace.yaml), so this script resolves the
 // lockfile-pinned @oven/bun-* binary itself, both to run `bun build` and as the
-// cross-compilation base for the target, so no runtime is downloaded at build
-// time.
+// executable base for the target, so no runtime is downloaded at build time.
+//
+// pnpm installs only the host's optional platform packages (STATE.md D11), so
+// a host can build only its own target. Release binaries are built on each
+// target's native runner (.github/workflows/cli-native.yml and release.yml),
+// which also runs that binary's native smoke test. Building another target
+// here fails with a message naming the missing packages.
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -44,6 +49,13 @@ const RUNTIME_PACKAGES: Record<Target, string> = {
   "bun-linux-arm64": "@oven/bun-linux-aarch64",
   "bun-darwin-x64": "@oven/bun-darwin-x64",
   "bun-darwin-arm64": "@oven/bun-darwin-aarch64",
+};
+
+// Keychain addon each Darwin target embeds (src/credentials/keychain-binding.ts).
+// Linux targets embed no addon.
+const ADDON_PACKAGES: Partial<Record<Target, string>> = {
+  "bun-darwin-x64": "@napi-rs/keyring-darwin-x64",
+  "bun-darwin-arm64": "@napi-rs/keyring-darwin-arm64",
 };
 
 export function isTarget(value: string): value is Target {
@@ -100,23 +112,59 @@ export function pinnedBunVersion(): string {
   return version;
 }
 
-/** Path to the Bun executable for `target`, from the installed @oven/bun-* package. */
-export function bunExecutable(target: Target): string {
-  const pkg = RUNTIME_PACKAGES[target];
+function resolveFromBun(pkg: string): string | undefined {
   // The runtime packages are optional dependencies of `bun`, so pnpm links
   // them next to it in the store; resolve from there.
   const fromBun = createRequire(
     createRequire(join(CLI_ROOT, "package.json")).resolve("bun/package.json"),
   );
-  let manifestPath: string;
   try {
-    manifestPath = fromBun.resolve(`${pkg}/package.json`);
+    return fromBun.resolve(`${pkg}/package.json`);
   } catch {
-    throw new Error(
-      `${pkg} is not installed, so ${target} cannot be built. Run 'pnpm install'; ` +
-        "pnpm-workspace.yaml supportedArchitectures must list this OS and CPU.",
-    );
+    return undefined;
   }
+}
+
+function resolveFromCli(pkg: string): string | undefined {
+  try {
+    return createRequire(join(CLI_ROOT, "package.json")).resolve(`${pkg}/package.json`);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Platform packages `target` needs that this install lacks. Empty for the host;
+ * for other targets usually not, because pnpm installs only the host's optional
+ * platform packages.
+ */
+export function missingTargetPackages(target: Target): string[] {
+  const missing: string[] = [];
+  if (resolveFromBun(RUNTIME_PACKAGES[target]) === undefined)
+    missing.push(RUNTIME_PACKAGES[target]);
+  const addon = ADDON_PACKAGES[target];
+  if (addon !== undefined && resolveFromCli(addon) === undefined) missing.push(addon);
+  return missing;
+}
+
+function targetNotInstalled(target: Target, missing: readonly string[]): Error {
+  return new Error(
+    `cannot build ${target} here: ${missing.join(", ")} not installed. pnpm installs only ` +
+      `this host's platform packages, so build ${target} on a native ${target.slice(4)} ` +
+      "runner (see .github/workflows/cli-native.yml), or run 'pnpm install' if this is the host.",
+  );
+}
+
+function assertTargetInstalled(target: Target): void {
+  const missing = missingTargetPackages(target);
+  if (missing.length > 0) throw targetNotInstalled(target, missing);
+}
+
+/** Path to the Bun executable for `target`, from the installed @oven/bun-* package. */
+export function bunExecutable(target: Target): string {
+  const pkg = RUNTIME_PACKAGES[target];
+  const manifestPath = resolveFromBun(pkg);
+  if (manifestPath === undefined) throw targetNotInstalled(target, missingTargetPackages(target));
   const version = readJson(manifestPath).version;
   const pinned = pinnedBunVersion();
   if (version !== pinned) {
@@ -146,6 +194,9 @@ export interface BuildPlan {
 export function planBuild(options: BuildOptions = {}): BuildPlan {
   const host = hostTarget();
   const target = options.target ?? host;
+  // Checked up front: a missing Darwin addon would otherwise surface as an
+  // unresolved require deep in Bun's output.
+  assertTargetInstalled(target);
   const entry = options.entry ?? "src/index.ts";
   const outfile = resolve(
     CLI_ROOT,
