@@ -12,6 +12,7 @@ import { sql } from "drizzle-orm";
 import { env } from "../env";
 import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from "../lib/auth-config";
 import { getDb } from "./db";
+import { guardDeviceCodeDecisions } from "./device-code-guard";
 
 // Threat model notes (ADR-0006):
 // - Preview deployments sign in through production with oAuthProxy, because a
@@ -78,6 +79,15 @@ export const DEVICE_CODE_POLLING_INTERVAL = "5s";
  * `verification_uri_complete` adds `?user_code=...`.
  */
 export const DEVICE_VERIFICATION_PATH = "/device";
+
+/**
+ * The device plugin's approve and deny routes answer 404 over HTTP. The
+ * `/device` page's server action calls them through `auth.api`, with the
+ * browser's cookie login session only, after showing the user code. Over HTTP
+ * they would also accept a bearer login session token, so a CLI token could
+ * approve further device codes for its User.
+ */
+export const DEVICE_DECISION_PATHS_DISABLED = ["/device/approve", "/device/deny"];
 
 /**
  * Every Project key starts with this, so `/api/v1` can tell one from a login
@@ -176,14 +186,20 @@ export function createAuth(opts: CreateAuthOptions) {
   const { db } = opts;
   return betterAuth({
     basePath: AUTH_BASE_PATH,
-    disabledPaths: [...ORGANIZATION_PATHS_DISABLED_UNTIL_M3, ...API_KEY_PATHS_DISABLED],
+    disabledPaths: [
+      ...ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+      ...DEVICE_DECISION_PATHS_DISABLED,
+      ...API_KEY_PATHS_DISABLED,
+    ],
     baseURL: {
       allowedHosts: opts.allowedHosts,
       // No fallback: a request from any other host fails instead of being
       // treated as production.
     },
     secret: opts.secret,
-    database: drizzleAdapter(db, { provider: "pg", schema, transaction: true }),
+    database: guardDeviceCodeDecisions(
+      drizzleAdapter(db, { provider: "pg", schema, transaction: true }),
+    ),
     socialProviders: {
       github: {
         clientId: opts.github.clientId,

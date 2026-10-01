@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.6",
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@hivemind/config": "workspace:*",
+    "@playwright/test": "1.63.0",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "@types/react": "^19.3.0",

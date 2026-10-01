@@ -16,6 +16,24 @@ describe("proxy", () => {
     expect(getRedirectUrl(response)).toBe("https://hive-mind.example/sign-in");
   });
 
+  it("carries the requested page to /sign-in as a return path", () => {
+    const response = proxy(new NextRequest("https://hive-mind.example/device?user_code=ABCD-EFGH"));
+    expect(getRedirectUrl(response)).toBe(
+      "https://hive-mind.example/sign-in?returnTo=%2Fdevice%3Fuser_code%3DABCD-EFGH",
+    );
+  });
+
+  it("never carries a path that leaves the origin", () => {
+    // `//evil.example` as a request path is `/evil.example` on this origin
+    // after URL parsing, so the worst case is a same-origin path.
+    const response = proxy(new NextRequest("https://hive-mind.example//evil.example/x"));
+    const target = new URL(getRedirectUrl(response) ?? "");
+    expect(target.origin).toBe("https://hive-mind.example");
+    expect(target.pathname).toBe("/sign-in");
+    const returnTo = target.searchParams.get("returnTo");
+    expect(returnTo === null || new URL(returnTo, target).origin === target.origin).toBe(true);
+  });
+
   it.each(["hivemind.session_token", "__Secure-hivemind.session_token"])(
     "lets a request with a %s cookie through",
     (cookie) => {
@@ -37,9 +55,12 @@ describe("proxy", () => {
 });
 
 describe("proxy matcher", () => {
-  it.each(["/", "/settings", "/projects/abc", "/apiary", "/sign-in-help"])("matches %s", (url) => {
-    expect(matches(url)).toBe(true);
-  });
+  it.each(["/", "/device", "/settings", "/projects/abc", "/apiary", "/sign-in-help"])(
+    "matches %s",
+    (url) => {
+      expect(matches(url)).toBe(true);
+    },
+  );
 
   it.each([
     "/api",

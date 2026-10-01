@@ -741,9 +741,13 @@ describeDb("createAuth", () => {
       const { device_code, user_code } = (await started.json()) as Record<string, string>;
       // Opening the code in the browser binds it to the signed-in user.
       expect((await apiRequest(user.id, `/device?user_code=${user_code}`)).status).toBe(200);
+      // Approval is server-only (the /device page's action); its HTTP route is disabled.
       expect((await apiRequest(user.id, "/device/approve", { userCode: user_code })).status).toBe(
-        200,
+        404,
       );
+      const headers = await test.getAuthHeaders({ userId: user.id });
+      headers.set("host", PREVIEW_HOSTS[0] ?? "");
+      await auth.api.deviceApprove({ headers, body: { userCode: String(user_code) } });
 
       const token = await auth.handler(
         new Request(`${PREVIEW_ORIGIN}/api/auth/device/token`, {

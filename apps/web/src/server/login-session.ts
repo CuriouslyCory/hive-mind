@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { signInPath } from "../lib/return-path";
 import { type Auth, auth } from "./auth";
 
 type LoginSessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
@@ -28,15 +29,16 @@ export const getLoginSession = cache(async (): Promise<SignedIn | null> => {
 });
 
 /**
- * Like `getLoginSession`, but redirects to `/sign-in` when signed out. Call it
+ * Like `getLoginSession`, but redirects to `/sign-in` when signed out, with
+ * `returnPath` (validated there) as where to come back to. Call it
  * in every page and layout data read that needs a User: the proxy only checks
  * that a cookie exists, so this is the check that counts.
  *
  * `activeOrganizationId` on the login session is a UI default. Authorize
  * access to data through membership, never through it.
  */
-export async function requireLoginSession(): Promise<SignedIn> {
+export async function requireLoginSession(returnPath = "/"): Promise<SignedIn> {
   const signedIn = await getLoginSession();
-  if (!signedIn) redirect("/sign-in");
+  if (!signedIn) redirect(signInPath(returnPath));
   return signedIn;
 }
