@@ -13,7 +13,9 @@
 // service name and HIVEMIND_PROBE_TIMEOUT_MS the secret-tool deadline.
 
 import { randomBytes } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BUILD_COMMIT, BUILD_TARGET, BUILD_VERSION, DEFAULT_ORIGIN } from "../../src/build-info.ts";
 import {
   type CredentialStore,
@@ -23,7 +25,9 @@ import {
   isInteractive,
   selectStores,
 } from "../../src/credentials/index.ts";
-import { nativeExtractDir } from "../../src/credentials/keychain-binding.ts";
+import { embeddedAddonPath, nativeExtractDir } from "../../src/credentials/keychain-binding.ts";
+
+const STARTED = Date.now();
 
 function print(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -72,14 +76,51 @@ async function roundtrip(store: CredentialStore): Promise<boolean> {
     if (!ok) break;
   }
   const passed = steps.length === plan.length && steps.every((step) => step.ok);
-  // Native check for withPrivateTmpdir: the addon must have been extracted into
-  // the private directory, not the shared TMPDIR.
-  const extracted =
-    store.id === "keychain"
-      ? readdirSync(nativeExtractDir()).filter((name) => name.endsWith(".node"))
-      : undefined;
-  print({ store: store.id, passed, steps, extracted });
-  return passed && (extracted === undefined || extracted.length > 0);
+  const addon = store.id === "keychain" ? addonCheck() : undefined;
+  print({ store: store.id, passed, steps, addon });
+  return passed && (addon === undefined || addon.ok);
+}
+
+/**
+ * Native check for loadKeyringBinding: the addon this binary embeds sits in the
+ * private extraction directory as an exact 0600 copy, and Bun extracted no
+ * addon of its own into the temp directory during this run.
+ */
+function addonCheck() {
+  const embedded = embeddedAddonPath();
+  const bytes = embedded === null ? undefined : readFileSync(embedded);
+  const dir = nativeExtractDir();
+  const uid = process.geteuid?.();
+  const dirStats = lstatSync(dir);
+  const privateDir =
+    dirStats.isDirectory() && dirStats.uid === uid && (dirStats.mode & 0o777) === 0o700;
+  const copy = readdirSync(dir)
+    .filter((name) => name.endsWith(".node"))
+    .map((name) => join(dir, name))
+    .find((path) => {
+      const stats = lstatSync(path);
+      return (
+        stats.isFile() &&
+        stats.uid === uid &&
+        (stats.mode & 0o777) === 0o600 &&
+        bytes !== undefined &&
+        readFileSync(path).equals(bytes)
+      );
+    });
+  // Bun names its own extractions `.bun-<euid>-<hash>.node`.
+  const temp = tmpdir();
+  const tmpdirAddons = readdirSync(temp).filter(
+    (name) => name.endsWith(".node") && lstatSync(join(temp, name)).mtimeMs >= STARTED - 1000,
+  );
+  return {
+    ok: privateDir && copy !== undefined && tmpdirAddons.length === 0,
+    dir,
+    dirMode: (dirStats.mode & 0o777).toString(8),
+    privateDir,
+    copy: copy ?? null,
+    tmpdir: temp,
+    tmpdirAddons,
+  };
 }
 
 async function main(): Promise<number> {

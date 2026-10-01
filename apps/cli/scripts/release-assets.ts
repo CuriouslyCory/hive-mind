@@ -155,7 +155,8 @@ export function inspectBinary(binary: Buffer, target: Target, addon?: Buffer): s
     if (binary.readUInt32LE(0) !== 0xfeedfacf) problems.push("not a 64-bit Mach-O file");
     else {
       if (binary.readUInt32LE(4) !== MACHO_CPU[arch]) problems.push(`Mach-O CPU is not ${arch}`);
-      // Bun signs the binary ad hoc; Apple silicon refuses to run unsigned code.
+      // build.ts signs Darwin binaries ad hoc; Apple silicon refuses to run
+      // unsigned code. Validity is checked by codesign in scripts/smoke.ts.
       if (!machoLoadCommands(binary).includes(LC_CODE_SIGNATURE)) {
         problems.push("no LC_CODE_SIGNATURE load command");
       }

@@ -223,6 +223,21 @@ export async function smoke(options: SmokeOptions): Promise<boolean> {
       assert(problems.length === 0, problems.join("; "));
     });
 
+    if (os === "darwin") {
+      // An invalid signature still runs on Intel, so check it explicitly. The
+      // archived binary is what ships; see signAdHoc in build.ts.
+      await check("binary has a valid code signature", () => {
+        const result = spawnSync(
+          "/usr/bin/codesign",
+          ["--verify", "--strict", "--verbose", binary],
+          {
+            encoding: "utf8",
+          },
+        );
+        assert(result.status === 0, `codesign --verify: ${result.stderr}`);
+      });
+    }
+
     await check("runtime PATH has no node or bun", () => {
       for (const tool of ["node", "bun"]) {
         assert(!existsSync(join(pathDir, tool)), `${tool} is on the runtime PATH`);
@@ -314,15 +329,38 @@ export async function smoke(options: SmokeOptions): Promise<boolean> {
     });
 
     if (os === "darwin") {
-      // Same user, real login keychain. The probe uses a unique service name
-      // and deletes its item; it also checks the addon was extracted to the
-      // private directory, not a shared TMPDIR.
+      // Same user, real login keychain (so the real HOME). The probe uses a
+      // unique service name and deletes its item. It also checks that the
+      // addon was loaded from an exact 0600 copy in the private 0700
+      // ~/Library/Caches/hivemind/native, and that Bun extracted nothing into
+      // TMPDIR (see src/credentials/keychain-binding.ts).
+      const keychainEnv = { ...baseEnv, HOME: process.env.HOME ?? home };
+      let copy: string | undefined;
       await check("credential roundtrip: keychain", async () => {
         const result = await runAsync(options.probe, ["roundtrip", "keychain"], {
-          env: { ...baseEnv, HOME: process.env.HOME ?? home },
+          env: keychainEnv,
           cwd,
         });
         assert(result.status === 0, describe(result));
+        const { addon } = oneJsonObject(result.stdout) as { addon?: { copy?: unknown } };
+        process.stdout.write(`     keychain addon: ${JSON.stringify(addon)}\n`);
+        if (typeof addon?.copy === "string") copy = addon.copy;
+      });
+
+      // Bun's own extraction would dlopen a same-size file owned by the user
+      // without reading it. The CLI must compare contents and replace it. Run
+      // with TMPDIR unset, where Bun would otherwise use the shared /private/tmp.
+      await check("keychain replaces a tampered addon copy", async () => {
+        const addon = darwinAddon(target);
+        assert(copy && addon, "no addon copy from the previous roundtrip");
+        writeFileSync(copy, Buffer.alloc(addon.length));
+        // spawn() leaves out variables whose value is undefined.
+        const result = await runAsync(options.probe, ["roundtrip", "keychain"], {
+          env: { ...keychainEnv, TMPDIR: undefined },
+          cwd,
+        });
+        assert(result.status === 0, describe(result));
+        assert(readFileSync(copy).equals(addon), "the addon copy was not restored");
       });
     }
 
