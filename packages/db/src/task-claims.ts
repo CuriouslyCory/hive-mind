@@ -130,8 +130,8 @@ function heldBy(sessionId: string, now: Date): SQL {
  * expired or its holder is not live (stale, ended or abandoned); the old
  * claim is released with a `system` Event effective when it lapsed. A live
  * competing claim is a conflict naming the holder, unless `steal` is set,
- * which takes the claim over and writes `task.stolen` naming the former
- * holder. The holder repeating its valid claim is a no-op: no lease
+ * which takes the claim over; its `task.claimed` Event names the former
+ * holder in `stolenFromSessionId`. The holder repeating its valid claim is a no-op: no lease
  * extension, no Event.
  */
 export async function claimTask(
@@ -203,32 +203,16 @@ export async function claimTask(
         });
       }
     }
-    if (stolenFromSessionId) {
-      await insertEvent(tx, {
-        projectId: input.projectId,
-        type: "task.stolen",
-        payload: {
-          fromSessionId: stolenFromSessionId,
-          leaseExpiresAt: leaseExpiresAt.toISOString(),
-        },
-        actor,
-        planId: claimed.planId,
-        taskId: claimed.id,
-        sessionId: session.id,
-        now,
-      });
-    } else {
-      await insertEvent(tx, {
-        projectId: input.projectId,
-        type: "task.claimed",
-        payload: { leaseExpiresAt: leaseExpiresAt.toISOString() },
-        actor,
-        planId: claimed.planId,
-        taskId: claimed.id,
-        sessionId: session.id,
-        now,
-      });
-    }
+    await insertEvent(tx, {
+      projectId: input.projectId,
+      type: "task.claimed",
+      payload: { stolenFromSessionId, leaseExpiresAt: leaseExpiresAt.toISOString() },
+      actor,
+      planId: claimed.planId,
+      taskId: claimed.id,
+      sessionId: session.id,
+      now,
+    });
     return { status: "ok", task: claimed, changed: true, stolenFromSessionId };
   });
 }
@@ -353,7 +337,7 @@ export async function blockTask(
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "task.blocked",
-      payload: { reason: input.reason },
+      payload: { from: before.status, reason: input.reason },
       actor: { ...input.principal, sessionId: session.id },
       planId: blocked.planId,
       taskId: blocked.id,
@@ -397,7 +381,7 @@ export async function doneTask(db: Db, input: TaskActionInput): Promise<TaskActi
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "task.done",
-      payload: {},
+      payload: { from: before.status },
       actor: { ...input.principal, sessionId: session.id },
       planId: done.planId,
       taskId: done.id,

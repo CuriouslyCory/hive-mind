@@ -184,7 +184,11 @@ describeDb("coordination races", () => {
       await taskRow(testDb.db, task.id),
     );
     const events = await eventsOf(testDb.db, project.id);
-    expect(events.map((e) => e.type)).toEqual(["task.claimed", "task.stolen", "session.heartbeat"]);
+    expect(events.map((e) => e.type)).toEqual([
+      "task.claimed",
+      "task.claimed",
+      "session.heartbeat",
+    ]);
   });
 
   it("Session end and a competing claim resolve in either order", async () => {

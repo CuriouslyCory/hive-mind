@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
 import { withCoordinationLock, withCoordinationRead } from "./coordination.ts";
 import { createOnce } from "./creation.ts";
-import { insertEvent } from "./event.ts";
+import { insertEvent, type SessionUpdateField } from "./event.ts";
 import { creationFingerprint, sha256Hex } from "./fingerprint.ts";
 import type { Db } from "./index.ts";
 import {
@@ -148,7 +148,13 @@ export interface OwnedSessionRef {
 
 export interface UpdateSessionInput extends OwnedSessionRef {
   /** Only supplied fields change; `null` clears optional metadata. */
-  changes: Partial<SessionMetadata & { agent: string; intent: string; status: "active" | "idle" }>;
+  changes: Partial<
+    Omit<SessionMetadata, "worktreePath"> & {
+      agent: string;
+      intent: string;
+      status: "active" | "idle";
+    }
+  >;
 }
 
 /**
@@ -175,10 +181,12 @@ export async function updateSession(
     if (terminal) return terminal;
 
     const changes: Partial<Pick<AgentSession, keyof UpdateSessionInput["changes"]>> = {};
-    for (const key of Object.keys(input.changes) as (keyof UpdateSessionInput["changes"])[]) {
+    const fields: SessionUpdateField[] = [];
+    for (const key of SESSION_UPDATE_KEYS) {
       const value = input.changes[key];
       if (value !== undefined && value !== session[key]) {
         Object.assign(changes, { [key]: value });
+        fields.push(key === "machine" ? "hostname" : key);
       }
     }
     if (Object.keys(changes).length === 0) return { status: "ok", session, changed: false };
@@ -192,7 +200,7 @@ export async function updateSession(
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "session.updated",
-      payload: changes,
+      payload: { fields },
       actor: { ...input.principal, sessionId: session.id },
       sessionId: session.id,
       now,
@@ -200,6 +208,16 @@ export async function updateSession(
     return { status: "ok", session: sessionState(row, now), changed: true };
   });
 }
+
+/** The fields `updateSession` can change, in the order its Event lists them. */
+const SESSION_UPDATE_KEYS = [
+  "agent",
+  "intent",
+  "machine",
+  "gitBranch",
+  "gitCommit",
+  "status",
+] as const satisfies readonly (keyof UpdateSessionInput["changes"])[];
 
 /** A Plan by UUID or by its Project-local number (the N of PLAN-N). */
 export type PlanRef = { id: string } | { number: number };
@@ -280,7 +298,7 @@ export async function attachSession(
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "session.attached",
-      payload: { planId, taskId },
+      payload: { previousPlanId: session.attachedPlanId, previousTaskId: session.attachedTaskId },
       actor: { ...input.principal, sessionId: session.id },
       planId,
       taskId,
@@ -309,23 +327,20 @@ export interface CollectionGenerationState {
  * is not complete, coverage was lost, so the sticky `scopeHistoryIncomplete`
  * is set; then the new id is stored with no manifest and not complete. The
  * same `collectionId` resumes the current generation and changes nothing.
- * Returns the columns to write (none on resume) and whether the sticky flag
- * was newly set, which the heartbeat records as `scope.coverage_lost`.
+ * Returns the columns to write (none on resume).
  */
 export function nextCollectionGeneration(
   stored: CollectionGenerationState,
   collectionId: string,
 ):
-  | { newGeneration: true; coverageLost: boolean; columns: CollectionGenerationState }
-  | { newGeneration: false; coverageLost: false; columns: null } {
+  | { newGeneration: true; columns: CollectionGenerationState }
+  | { newGeneration: false; columns: null } {
   if (stored.collectionId === collectionId) {
-    return { newGeneration: false, coverageLost: false, columns: null };
+    return { newGeneration: false, columns: null };
   }
   const previousIncomplete = stored.collectionId !== null && !stored.collectionComplete;
   return {
     newGeneration: true,
-    // True when this generation change is what first lost coverage.
-    coverageLost: previousIncomplete && !stored.scopeHistoryIncomplete,
     columns: {
       collectionId,
       collectionExpectedBatches: null,
@@ -419,36 +434,23 @@ export async function heartbeatSession(
       .returning({ id: task.id });
 
     const generation = nextCollectionGeneration(session, input.collectionId);
-    const status: SessionStatus =
-      input.sessionStatus ?? (previousStatus === "stale" ? "active" : session.status);
+    // Not terminal here, so the previous status is active, idle or stale.
+    const status = input.sessionStatus ?? (previousStatus === "idle" ? "idle" : "active");
     const [row] = await tx
       .update(agentSession)
       .set({ ...generation.columns, status, lastHeartbeatAt: now, updatedAt: now })
       .where(eq(agentSession.id, session.id))
       .returning();
     if (!row) throw new Error("agent_session update returned no row");
-    if (generation.coverageLost) {
-      await insertEvent(tx, {
-        projectId: input.projectId,
-        type: "scope.coverage_lost",
-        payload: {
-          collectionId: session.collectionId,
-          reason: "unfinished_collection",
-          pathCount: session.collectionPathCount ?? 0,
-        },
-        actor,
-        sessionId: session.id,
-        now,
-      });
-    }
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "session.heartbeat",
       payload: {
-        status,
-        previousStatus,
+        from: previousStatus,
+        to: status,
+        renewedClaimCount: renewed.length,
+        releasedClaimCount: released.length,
         collectionId: input.collectionId,
-        newCollection: generation.newGeneration,
       },
       actor,
       sessionId: session.id,
@@ -533,7 +535,7 @@ export async function endSession(
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "session.ended",
-      payload: { summary: input.summary, status: abandoned ? "abandoned" : "ended" },
+      payload: { from: session.effectiveStatus, summary: input.summary },
       actor,
       sessionId: session.id,
       now,

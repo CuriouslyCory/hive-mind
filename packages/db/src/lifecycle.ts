@@ -157,7 +157,7 @@ export async function materializeSessionStatus(
 
   // A Session that skipped the stale step records both crossings, so its
   // history reads the same whether or not a sweep ran in between.
-  const steps: { from: SessionStatus; to: SessionStatus; at: Date }[] = [];
+  const steps: { from: SessionStatus; to: "stale" | "abandoned"; at: Date }[] = [];
   if (session.status !== "stale") {
     steps.push({ from: session.status, to: "stale", at: staleAt(session) });
   }
@@ -175,7 +175,7 @@ export async function materializeSessionStatus(
       effectiveAt: step.at,
     });
   }
-  return steps.map((step) => step.to);
+  return steps.map((step): SessionStatus => step.to);
 }
 
 export interface ReleasedClaim {

@@ -287,7 +287,7 @@ describeDb("coordination schema: Event ordering columns", () => {
       insertEvent(tx, {
         projectId: a.project.id,
         type: "task.done",
-        payload: {},
+        payload: { from: "in_progress" },
         actor: { kind: "system" },
         taskId: a.task.id,
         now,

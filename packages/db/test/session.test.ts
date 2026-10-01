@@ -56,7 +56,6 @@ describe("nextCollectionGeneration", () => {
   it("starts the first generation without marking history incomplete", () => {
     expect(nextCollectionGeneration(base, "c1")).toEqual({
       newGeneration: true,
-      coverageLost: false,
       columns: { ...base, collectionId: "c1" },
     });
   });
@@ -64,7 +63,6 @@ describe("nextCollectionGeneration", () => {
   it("marks history incomplete when the previous generation never completed", () => {
     const stored = { ...base, collectionId: "c1", collectionExpectedBatches: 2 };
     expect(nextCollectionGeneration(stored, "c2")).toMatchObject({
-      coverageLost: true,
       columns: {
         collectionId: "c2",
         collectionExpectedBatches: null,
@@ -75,7 +73,7 @@ describe("nextCollectionGeneration", () => {
     // Already lost: still incomplete, but not newly lost.
     expect(
       nextCollectionGeneration({ ...stored, scopeHistoryIncomplete: true }, "c2"),
-    ).toMatchObject({ coverageLost: false, columns: { scopeHistoryIncomplete: true } });
+    ).toMatchObject({ columns: { scopeHistoryIncomplete: true } });
   });
 
   it("keeps history complete after a complete generation, and keeps a sticky flag", () => {
@@ -97,7 +95,6 @@ describe("nextCollectionGeneration", () => {
   it("resumes the same generation without changing anything", () => {
     expect(nextCollectionGeneration({ ...base, collectionId: "c1" }, "c1")).toEqual({
       newGeneration: false,
-      coverageLost: false,
       columns: null,
     });
   });
@@ -160,7 +157,7 @@ describeDb("updateSession", () => {
     expect(changed).toMatchObject({ status: "ok", changed: true });
     const events = await eventsOf(testDb.db, project.id);
     expect(events.map((e) => [e.type, e.payload])).toEqual([
-      ["session.updated", { intent: "New intent", status: "idle" }],
+      ["session.updated", { fields: ["intent", "status"] }],
     ]);
 
     expect(
@@ -292,10 +289,11 @@ describeDb("heartbeatSession", () => {
         "session.heartbeat",
         "user",
         {
-          status: "active",
-          previousStatus: "stale",
+          from: "stale",
+          to: "active",
+          renewedClaimCount: 1,
+          releasedClaimCount: 1,
           collectionId: expect.any(String),
-          newCollection: true,
         },
       ],
     ]);
@@ -377,14 +375,10 @@ describeDb("heartbeatSession", () => {
       scopeHistoryIncomplete: true,
     });
     const events = await eventsOf(testDb.db, project.id);
-    expect(events.map((e) => [e.type, e.payload])).toEqual([
-      ["session.heartbeat", expect.objectContaining({ newCollection: true })],
-      ["session.heartbeat", expect.objectContaining({ newCollection: false })],
-      [
-        "scope.coverage_lost",
-        { collectionId: first, reason: "unfinished_collection", pathCount: 2 },
-      ],
-      ["session.heartbeat", expect.objectContaining({ newCollection: true })],
+    expect(events.map((e) => (e.payload as { collectionId?: string }).collectionId)).toEqual([
+      first,
+      first,
+      second,
     ]);
   });
 
@@ -428,7 +422,7 @@ describeDb("endSession", () => {
     const events = await eventsOf(testDb.db, project.id);
     expect(events.map((e) => [e.type, e.payload])).toEqual([
       ["task.released", { reason: "session_ended" }],
-      ["session.ended", { summary: "Done for now", status: "ended" }],
+      ["session.ended", { from: "active", summary: "Done for now" }],
     ]);
 
     expect(await endSession(testDb.db, { ...ref, summary: "Done for now" })).toMatchObject({
@@ -466,7 +460,7 @@ describeDb("endSession", () => {
       ["session.status_changed", "system", { from: "active", to: "stale" }],
       ["session.status_changed", "system", { from: "stale", to: "abandoned" }],
       ["task.released", "system", { reason: "lease_expired" }],
-      ["session.ended", "user", { summary: "Late summary", status: "abandoned" }],
+      ["session.ended", "user", { from: "abandoned", summary: "Late summary" }],
     ]);
     expect(await endSession(testDb.db, { ...ref, summary: "Another" })).toMatchObject({
       status: "conflict",

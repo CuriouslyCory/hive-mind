@@ -38,13 +38,16 @@ function sameSecret(given: string, expected: string): boolean {
  */
 export function createCronHandler(deps: CronDeps): (request: Request) => Promise<Response> {
   return async (request) => {
+    // Outside the try: during `next build`, reading request data throws the
+    // framework's signal to stop prerendering, which must not be caught.
+    const authorization = request.headers.get("authorization");
     try {
+      const token = bearerToken(authorization);
       const secret = deps.cronSecret();
       if (!secret) {
         console.error("/api/cron/coordination: CRON_SECRET is not set; refusing to run.");
         return json({ error: "Cron is not configured." }, 500);
       }
-      const token = bearerToken(request.headers.get("authorization"));
       if (token === null || !sameSecret(token, secret)) {
         return json({ error: "Unauthorized." }, 401);
       }

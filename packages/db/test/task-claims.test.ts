@@ -96,7 +96,12 @@ describeDb("claimTask", () => {
     const events = await eventsOf(testDb.db, project.id);
     expect(events.map((e) => [e.type, e.actorKind, e.sessionId, e.payload])).toEqual([
       ["task.released", "system", a.id, { reason: "lease_expired" }],
-      ["task.claimed", "user", b.id, { leaseExpiresAt: expect.any(String) }],
+      [
+        "task.claimed",
+        "user",
+        b.id,
+        { stolenFromSessionId: null, leaseExpiresAt: expect.any(String) },
+      ],
     ]);
     expect(events[0]?.effectiveAt).toEqual(lapsed);
   });
@@ -127,10 +132,10 @@ describeDb("claimTask", () => {
     });
     const events = await eventsOf(testDb.db, project.id);
     expect(events.at(-1)).toMatchObject({
-      type: "task.stolen",
+      type: "task.claimed",
       sessionId: b.id,
       actorSessionId: b.id,
-      payload: { fromSessionId: a.id },
+      payload: { stolenFromSessionId: a.id, leaseExpiresAt: expect.any(String) },
     });
     const after = await taskRow(testDb.db, task.id);
     expect(after.claimedAt?.getTime()).toBeGreaterThan(before.claimedAt?.getTime() ?? 0);
@@ -204,7 +209,7 @@ describeDb("releaseTask", () => {
     expect(await releaseTask(testDb.db, as(a.id))).toMatchObject({ status: "ok", changed: false });
     const events = await eventsOf(testDb.db, project.id);
     expect(events.map((e) => [e.type, e.payload])).toEqual([
-      ["task.claimed", { leaseExpiresAt: expect.any(String) }],
+      ["task.claimed", { stolenFromSessionId: null, leaseExpiresAt: expect.any(String) }],
       ["task.started", { from: "todo" }],
       ["task.released", { reason: "released" }],
     ]);
