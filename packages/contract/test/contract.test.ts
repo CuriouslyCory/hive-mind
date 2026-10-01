@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
-import { type AnyContractRouter, isContractProcedure } from "@orpc/contract";
+import {
+  type AnyContractProcedure,
+  type AnyContractRouter,
+  isContractProcedure,
+} from "@orpc/contract";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
@@ -59,29 +63,69 @@ function accepts(schema: z.ZodType, value: unknown): boolean {
   return schema.safeParse(value).success;
 }
 
-function flattenRoutes(router: AnyContractRouter, prefix: string[] = []) {
-  const routes: Array<Record<string, unknown>> = [];
-  for (const [name, child] of Object.entries(router)) {
+interface RouteEntry {
+  procedure: string;
+  operationId: string | undefined;
+  method: string | undefined;
+  path: string | undefined;
+  successStatus: number | undefined;
+}
+
+function flattenProcedures(
+  router: AnyContractRouter,
+  prefix: string[] = [],
+): Array<{ procedure: string; contract: AnyContractProcedure }> {
+  return Object.entries(router).flatMap(([name, child]) => {
     const path = [...prefix, name];
-    if (isContractProcedure(child)) {
-      const route = child["~orpc"].route;
-      routes.push({
-        procedure: path.join("."),
-        operationId: route.operationId,
-        method: route.method,
-        path: route.path,
-        successStatus: route.successStatus,
-      });
-    } else {
-      routes.push(...flattenRoutes(child as AnyContractRouter, path));
-    }
-  }
-  return routes;
+    if (isContractProcedure(child)) return [{ procedure: path.join("."), contract: child }];
+    return flattenProcedures(child as AnyContractRouter, path);
+  });
+}
+
+function flattenRoutes(router: AnyContractRouter): RouteEntry[] {
+  return flattenProcedures(router).map(({ procedure, contract }) => {
+    const route = contract["~orpc"].route;
+    return {
+      procedure,
+      operationId: route.operationId,
+      method: route.method,
+      path: route.path,
+      successStatus: route.successStatus,
+    };
+  });
+}
+
+// The route table is the union of two golden fixtures: `routes.json`, the M1
+// routes released CLIs call (never edited), and `routes.coordination.json`,
+// the routes #12 added. A new route is added to a fixture; a changed or
+// missing M1 route fails here.
+const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json"];
+
+function fixtureRoutes(): RouteEntry[] {
+  return ROUTE_FIXTURES.flatMap((name) => fixture(name) as RouteEntry[]);
 }
 
 describe("route table", () => {
-  it("matches the v1 routes, methods and success statuses", () => {
-    expect(flattenRoutes(apiContract)).toEqual(fixture("routes.json"));
+  it("is exactly the union of the M1 and coordination route fixtures", () => {
+    const byProcedure = (a: RouteEntry, b: RouteEntry) => a.procedure.localeCompare(b.procedure);
+    expect(flattenRoutes(apiContract).sort(byProcedure)).toEqual(fixtureRoutes().sort(byProcedure));
+  });
+
+  it("keeps the M1 routes first and unchanged", () => {
+    const m1 = fixture("routes.json") as RouteEntry[];
+    expect(flattenRoutes(apiContract).slice(0, m1.length)).toEqual(m1);
+  });
+
+  it("has unique procedures, operation IDs and method-path pairs", () => {
+    const routes = fixtureRoutes();
+    for (const key of [
+      (route: RouteEntry) => route.procedure,
+      (route: RouteEntry) => route.operationId,
+      (route: RouteEntry) => `${route.method} ${route.path}`,
+    ]) {
+      const values = routes.map(key);
+      expect(new Set(values).size).toBe(values.length);
+    }
   });
 
   it("keeps the /api/v1 prefix out of route paths", () => {
@@ -92,16 +136,8 @@ describe("route table", () => {
   });
 
   it("declares every stable error code with its status on every procedure", () => {
-    const procedures = [
-      apiContract.me,
-      apiContract.organizations.list,
-      apiContract.projects.list,
-      apiContract.projects.create,
-      apiContract.projects.get,
-      apiContract.projects.keys.list,
-      apiContract.projects.keys.create,
-      apiContract.projects.keys.revoke,
-    ];
+    const procedures = flattenProcedures(apiContract).map(({ contract }) => contract);
+    expect(procedures).toHaveLength(fixtureRoutes().length);
     for (const procedure of procedures) {
       const errorMap = procedure["~orpc"].errorMap;
       expect(Object.keys(errorMap).sort()).toEqual([...API_ERROR_CODES].sort());
