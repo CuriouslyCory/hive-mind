@@ -12,7 +12,7 @@ import { type Auth, PROJECT_KEY_PREFIX } from "../auth";
 // Only `Authorization: Bearer <token>` is read. Browser cookies are dropped
 // before any lookup, so an invalid bearer token cannot fall back to the
 // cookie login session of the browser that sent it, and a cross-site request
-// cannot ride on a cookie (no CSRF surface; see notes/api-v1.md, decision 1).
+// cannot ride on a cookie (no CSRF surface; see ADR-0009 and ADR-0013).
 
 export interface UserPrincipal {
   kind: "user";

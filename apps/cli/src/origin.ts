@@ -2,8 +2,8 @@ import { DEFAULT_ORIGIN } from "./build-info.ts";
 import { CLI_ERROR_CODES, CliError } from "./errors.ts";
 
 /**
- * Backend origin resolution and normalization (STATE.md D3, issue #3 "CLI
- * configuration and output").
+ * Backend origin resolution and normalization (docs/cli.md "Choosing the server",
+ * issue #3 "CLI configuration and output").
  *
  * An origin is the only thing the CLI accepts as a backend address: scheme,
  * host and port, nothing else. It is also the key credentials are stored

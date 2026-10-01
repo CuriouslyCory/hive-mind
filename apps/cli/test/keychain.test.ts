@@ -29,7 +29,7 @@ import { PROBE_BINARY } from "./helpers/binaries.ts";
 // a cross-compile can: each Darwin binary embeds exactly its own Keychain addon
 // byte for byte, with no separate .node file and no generic loader. The
 // save/read/replace/delete proof is `probe roundtrip keychain`, run on native
-// macOS runners by the release workflow (see notes/cli-spike.md).
+// macOS runners by scripts/smoke.ts (.github/workflows/cli-native.yml).
 
 /** In-memory stand-in for the addon's Entry class, keyed by service + account. */
 function fakeBinding(): KeyringBinding {
@@ -182,7 +182,7 @@ describe("materializeAddon", () => {
 });
 
 // Each target embeds only what it needs, checked on the binary built for this
-// host. A host can build only its own target (STATE.md D11), so the Darwin
+// host. A host can build only its own target (ADR-0012), so the Darwin
 // binaries are checked on macOS runners, where scripts/smoke.ts runs the same
 // inspection on the release archive and then a real Keychain roundtrip.
 describe("the compiled binary embeds its own Keychain addon", () => {
@@ -199,7 +199,7 @@ describe("the compiled binary embeds its own Keychain addon", () => {
           )
         : undefined;
     expect(inspectBinary(binary, target, addon)).toEqual([]);
-    // Linux binaries carry no Node-API addon at all (D9: libsecret via secret-tool).
+    // Linux binaries carry no Node-API addon at all (Linux uses secret-tool; see ADR-0012).
     if (os === "linux") expect(binary.includes("keyring.darwin")).toBe(false);
   });
 });

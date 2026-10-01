@@ -9,7 +9,7 @@ declare const HIVEMIND_BUILD_TARGET: string;
 declare const HIVEMIND_DEFAULT_ORIGIN: string;
 
 /**
- * The production backend (STATE.md D3, docs/setup.md). The build script embeds
+ * The production backend (docs/cli.md "Choosing the server", docs/setup.md). The build script embeds
  * this unless `--default-origin` overrides it for a non-production build.
  */
 export const PRODUCTION_ORIGIN = "https://hive-mind-web-mu.vercel.app";

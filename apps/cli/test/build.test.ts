@@ -57,7 +57,7 @@ describe("planBuild", () => {
     expect(plan.defines.HIVEMIND_BUILD_TARGET).toBe(JSON.stringify(target));
   });
 
-  // pnpm installs only the host's platform packages (STATE.md D11), so another
+  // pnpm installs only the host's platform packages (ADR-0012), so another
   // target either has them (a deliberately wider install) or must fail up
   // front, naming them, rather than deep inside bun build.
   it.each(TARGETS)("plans %s only when its platform packages are installed", (target) => {
