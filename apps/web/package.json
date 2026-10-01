@@ -13,7 +13,11 @@
   "dependencies": {
     "@better-auth/api-key": "1.7.6",
     "@better-auth/drizzle-adapter": "1.7.6",
+    "@hivemind/contract": "workspace:*",
     "@hivemind/db": "workspace:*",
+    "@orpc/openapi": "catalog:",
+    "@orpc/server": "catalog:",
+    "@orpc/zod": "catalog:",
     "@vercel/functions": "~3.9.9",
     "better-auth": "1.7.6",
     "drizzle-orm": "catalog:",
