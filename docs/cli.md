@@ -247,7 +247,7 @@ Your Sessions are the ones started by the same principal: the same User (through
 - **Plan:** its Project-local key, `PLAN-N` in uppercase (numbered from 1 in creation order), or its UUID.
 - **Task, Session, Scope:** UUID only. `plan show` lists Task ids, `session start` prints the Session id, `scope list` lists Scope ids.
 - Any Plan, Task, Session, Scope or Event of the Project can be read.
-- Changing a Session, or acting through it on a Task or a Scope, needs your own Session. A Session of this Project that someone else owns is `FORBIDDEN` (exit 3). A Session id that does not exist, or belongs to another Project, is `NOT_FOUND` (exit 4). Attribution (above) with a Session that is not yours is also `NOT_FOUND`.
+- Changing a Session, or acting through it on a Task or a Scope, needs your own Session. A Session of this Project that someone else owns is `FORBIDDEN` (exit 3). A Session id that does not exist, or belongs to another Project, is `NOT_FOUND` (exit 4). Attribution (above) follows the same rule: someone else's Session of this Project is `FORBIDDEN`, and a missing or other-Project one is `NOT_FOUND`.
 - Any id from another Project gets the same `NOT_FOUND` as an absent one.
 - A state that does not allow the action is `CONFLICT` (exit 2), with the reason in the message.
 
