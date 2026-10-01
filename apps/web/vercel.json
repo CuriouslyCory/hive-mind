@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "cd ../.. && pnpm --filter @hivemind/db db:migrate && pnpm exec turbo run build --filter=@hivemind/web"
+  "buildCommand": "cd ../.. && pnpm --filter @hivemind/db db:migrate && pnpm exec turbo run build --filter=@hivemind/web",
+  "crons": [
+    {
+      "path": "/api/cron/coordination",
+      "schedule": "* * * * *"
+    }
+  ]
 }

@@ -7,7 +7,14 @@ import type { ScopeSource } from "./schema/scope.ts";
 // Writing Events. Every M2 domain mutation inserts its Event in the same
 // transaction as the change (issue #12), so a rollback removes both.
 
-type Empty = Record<string, never>;
+/** Session fields a `session.updated` Event lists (the contract's `SESSION_UPDATE_FIELDS`). */
+export type SessionUpdateField =
+  | "agent"
+  | "intent"
+  | "hostname"
+  | "gitBranch"
+  | "gitCommit"
+  | "status";
 
 /**
  * The Event types and their payloads, at the payload version in
@@ -17,9 +24,9 @@ type Empty = Record<string, never>;
  * payload's shape means a new version, since stored Events keep the old one.
  */
 export interface EventPayloads {
-  // Plan Events and `task.added` have the names and payloads of the contract's
-  // `eventSchema` (packages/contract/src/event.ts), which Event reads return
-  // as stored.
+  // Plan, Task and Session Events have the names and payloads of the
+  // contract's `eventSchema` (packages/contract/src/event.ts), which Event
+  // reads return as stored.
   /** `key` is the Plan's PLAN-N key. */
   "plan.created": { key: string; title: string; status: PlanStatus };
   /** `title` is the new title, or null if unchanged; the body is not repeated. */
@@ -28,32 +35,53 @@ export interface EventPayloads {
   /** A Plan log entry: bounded markdown. Its Event UUID is the client's entry ID. */
   "plan.log_appended": { message: string };
   "task.added": { title: string; position: number };
-  "task.claimed": { leaseExpiresAt: string };
-  /** A `--steal` takeover. The new holder is the Event's session_id. */
-  "task.stolen": { fromSessionId: string; leaseExpiresAt: string };
-  /** The claim ended without the Task being done. */
+  /**
+   * The new holder is the Event's session_id. A `--steal` takeover of a live
+   * claim names the former holder in `stolenFromSessionId`; otherwise null.
+   * `leaseExpiresAt` is an ISO 8601 timestamp.
+   */
+  "task.claimed": { stolenFromSessionId: string | null; leaseExpiresAt: string };
+  /**
+   * The claim ended without the Task being done. The released holder is the
+   * Event's session_id. `lease_expired` and `session_abandoned` are
+   * time-driven: actor `system`, `effectiveAt` when the threshold was crossed.
+   */
   "task.released": {
-    reason: "released" | "lease_expired" | "session_ended" | "session_stale" | "plan_abandoned";
+    reason:
+      | "released"
+      | "lease_expired"
+      | "session_ended"
+      | "session_stale"
+      | "session_abandoned"
+      | "plan_abandoned";
   };
   "task.started": { from: TaskStatus };
-  "task.blocked": { reason: string };
-  "task.done": Empty;
+  "task.blocked": { from: TaskStatus; reason: string };
+  "task.done": { from: TaskStatus };
   "session.started": { agent: string; intent: string };
-  /** The metadata fields that changed, with their new values. */
-  "session.updated": Partial<{
-    status: SessionStatus;
-    agent: string;
-    intent: string;
-    machine: string | null;
-    gitBranch: string | null;
-    gitCommit: string | null;
-    worktreePath: string | null;
-  }>;
-  "session.attached": { planId: string | null; taskId: string | null };
-  "session.heartbeat": { status: SessionStatus; collectionId: string | null };
-  /** A stored status the sweep or a mutation materialized (stale, abandoned). */
-  "session.status_changed": { from: SessionStatus; to: SessionStatus };
-  "session.ended": { summary: string };
+  /** The names of the fields that changed (`hostname` is the `machine` column). */
+  "session.updated": { fields: SessionUpdateField[] };
+  /** The new focus is the Event's plan_id/task_id (both null when cleared). */
+  "session.attached": { previousPlanId: string | null; previousTaskId: string | null };
+  /**
+   * `from` is the effective status before the heartbeat (`stale` when it
+   * revived the Session), `to` the status it set.
+   */
+  "session.heartbeat": {
+    from: SessionStatus;
+    to: "active" | "idle";
+    renewedClaimCount: number;
+    releasedClaimCount: number;
+    collectionId: string;
+  };
+  /** A Session lapsing to stale or abandoned, written by the sweep or a later mutation. */
+  "session.status_changed": { from: SessionStatus; to: "stale" | "abandoned" };
+  /**
+   * The first accepted final summary. `from` is the effective status before
+   * it: `abandoned` when an abandoned Session accepted its summary and stayed
+   * abandoned.
+   */
+  "session.ended": { from: SessionStatus; summary: string };
   "scope.added": { source: ScopeSource; value: string };
   "scope.removed": { source: ScopeSource; value: string };
   /** Touched paths a collection batch added as new Scopes (at most 16). */
@@ -81,7 +109,6 @@ export const EVENT_PAYLOAD_VERSIONS: { readonly [T in EventType]: number } = {
   "plan.log_appended": 1,
   "task.added": 1,
   "task.claimed": 1,
-  "task.stolen": 1,
   "task.released": 1,
   "task.started": 1,
   "task.blocked": 1,

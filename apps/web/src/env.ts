@@ -31,6 +31,19 @@ export const envSchema = z.object({
   // deployments. Must be the same in Production and Preview.
   OAUTH_PROXY_SECRET: z.string().min(32),
 
+  // Authenticates Vercel Cron's calls to /api/cron/coordination, which Vercel
+  // sends as `Authorization: Bearer <CRON_SECRET>`. Optional so builds and
+  // local development need none; when unset the Cron route refuses every
+  // request. At least 16 printable ASCII characters without spaces, the
+  // characters a bearer token may hold.
+  CRON_SECRET: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z
+      .string()
+      .regex(/^[\x21-\x7e]{16,}$/, "Must be at least 16 printable ASCII characters without spaces.")
+      .optional(),
+  ),
+
   // Vercel system variables. VERCEL_PROJECT_PRODUCTION_URL is the production
   // host name without a scheme, and is set in every Vercel environment.
   VERCEL_ENV: z.enum(["production", "preview", "development"]).optional(),

@@ -17,6 +17,7 @@
         "GITHUB_CLIENT_ID",
         "GITHUB_CLIENT_SECRET",
         "OAUTH_PROXY_SECRET",
+        "CRON_SECRET",
         "VERCEL_*"
       ]
     },
@@ -48,7 +49,8 @@
         "BETTER_AUTH_URL",
         "GITHUB_CLIENT_ID",
         "GITHUB_CLIENT_SECRET",
-        "OAUTH_PROXY_SECRET"
+        "OAUTH_PROXY_SECRET",
+        "CRON_SECRET"
       ]
     },
     "db:generate": {
