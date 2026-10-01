@@ -156,7 +156,7 @@ It never holds a server address or a credential. The file is limited to 16 KiB.
 ### `hivemind init`
 
 ```bash
-hivemind init --name 'Hive Mind' --slug hive-mind     # create or reuse a Project
+hivemind init --name 'Web app' --slug web-app         # create or reuse a Project
 hivemind init --project <id>                           # link an existing Project
 hivemind init                                          # choose interactively
 ```
