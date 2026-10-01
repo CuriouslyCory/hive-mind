@@ -28,10 +28,14 @@
     "test": "turbo run test",
     "format": "biome check --write .",
     "db:generate": "turbo run db:generate",
-    "db:migrate": "turbo run db:migrate"
+    "db:migrate": "turbo run db:migrate",
+    "test:install": "sh scripts/test-install.sh",
+    "changeset": "changeset",
+    "version-packages": "changeset version"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
+    "@changesets/cli": "~3.0.3",
     "@types/node": "catalog:",
     "turbo": "~2.11.5",
     "typescript": "catalog:",
