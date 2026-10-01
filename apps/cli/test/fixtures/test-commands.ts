@@ -95,9 +95,10 @@ export const TEST_COMMANDS: readonly CommandDefinition[] = [
   },
   {
     name: "cred save",
-    summary: "Store the token read from stdin for the resolved origin",
+    summary: "Store the token from TEST_TOKEN or stdin for the resolved origin",
     async run(context) {
-      const token = (await text(process.stdin)).trim();
+      // TEST_TOKEN lets a test run this under a PTY, where stdin is the terminal.
+      const token = context.env.TEST_TOKEN ?? (await text(process.stdin)).trim();
       const result = await context.credentials().save(context.origin().origin, token);
       return { data: result, human: [result.store] };
     },
