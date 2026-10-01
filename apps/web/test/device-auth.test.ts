@@ -278,6 +278,28 @@ describeDb("device authorization", () => {
       expect(await row(code)).toBeUndefined();
     });
 
+    it("lets the CLI revoke its login session with POST /sign-out and the bearer token", async () => {
+      const user = await newUser();
+      const { deviceCode: code, userCode } = await deviceCode();
+      await view(user.id, userCode);
+      await decide(user.id, userCode, "approve");
+      const token = String((await poll(code)).body.access_token);
+      const bearer = { authorization: `Bearer ${token}` };
+
+      const signOut = await auth.handler(
+        new Request(`${ORIGIN}/api/auth/sign-out`, {
+          method: "POST",
+          headers: { ...bearer, "content-type": "application/json" },
+          body: "{}",
+        }),
+      );
+      expect(signOut.status).toBe(200);
+      const loginSession = await auth.handler(
+        new Request(`${ORIGIN}/api/auth/get-session`, { headers: bearer }),
+      );
+      expect(await loginSession.json()).toBeNull();
+    });
+
     it("redeems an approved code at most once under concurrent polling on separate connections", async () => {
       // Two app instances, each with its own pool, as two serverless
       // instances would be. Every request polls at once.
