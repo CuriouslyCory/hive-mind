@@ -189,6 +189,66 @@ describe("API client", () => {
     setTimeout(() => controller.abort(), 50);
     expect((await pending).code).toBe("CANCELLED");
   });
+
+  // The timeout and the abort signal cover the whole exchange, so a server
+  // that sends its headers and then stalls must fail the same way as one that
+  // never answers: TIMEOUT or CANCELLED, never a raw DOMException turned into
+  // INVALID_RESPONSE or INTERNAL_ERROR.
+  const stallAfterHeaders = (status: number) =>
+    serve((_request, response) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.write('{"projectKey":');
+    });
+
+  it("times out while reading a body that stalls after the headers", async () => {
+    const stalled = await stallAfterHeaders(201);
+    const api = createApiClient({
+      origin: stalled.origin,
+      credential: credential(stalled.origin),
+      timeoutMs: 200,
+    });
+    const write = await caught(api.createProjectKey(PROJECT_ID, { name: "ci" }));
+    expect(write.code).toBe("TIMEOUT");
+    expect(write.hint).toContain("may still have completed");
+    const read = await caught(api.me());
+    expect(read.code).toBe("TIMEOUT");
+    expect(read.hint).toBeUndefined();
+    expect(stalled.requests).toHaveLength(2);
+  });
+
+  it("is cancelled by the abort signal while reading a body", async () => {
+    const stalled = await stallAfterHeaders(200);
+    const controller = new AbortController();
+    const pending = caught(
+      createApiClient({
+        origin: stalled.origin,
+        credential: null,
+        signal: controller.signal,
+      }).createProjectKey(PROJECT_ID, { name: "ci" }),
+    );
+    setTimeout(() => controller.abort(), 100);
+    const error = await pending;
+    expect(error.code).toBe("CANCELLED");
+    expect(error.hint).toContain("may still have completed");
+  });
+
+  it("refuses a body over the size cap without reading it all", async () => {
+    const huge = await serve((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      // Never ends: the cap, not the end of the stream, must stop the read.
+      const chunk = "x".repeat(64 * 1024);
+      const pump = () => {
+        while (!response.destroyed && response.write(chunk));
+        if (!response.destroyed) response.once("drain", pump);
+      };
+      pump();
+    });
+    const error = await caught(
+      createApiClient({ origin: huge.origin, credential: null, timeoutMs: 10_000 }).me(),
+    );
+    expect(error.code).toBe("INVALID_RESPONSE");
+    expect(error.message).toContain("larger than");
+  });
 });
 
 describe("createOriginFetch", () => {

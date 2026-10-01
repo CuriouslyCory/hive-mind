@@ -11,7 +11,13 @@ import {
 import type { ApiPrincipal, ApiProject, HivemindApi } from "../client.ts";
 import type { CommandContext, CommandDefinition } from "../command.ts";
 import { type ConfigWriteResult, readConfigFile, writeProjectConfig } from "../config.ts";
-import { CLI_ERROR_CODES, CliError, isCliError, usageError } from "../errors.ts";
+import {
+  CLI_ERROR_CODES,
+  CliError,
+  isCliError,
+  UNCERTAIN_OUTCOME_CODES,
+  usageError,
+} from "../errors.ts";
 import { bindingDirFor } from "../project-resolution.ts";
 
 /**
@@ -229,12 +235,23 @@ async function resolveProject(
   }
   // Create-or-reuse is idempotent on the server (same org, slug and data), so
   // a rerun after a failure here is safe. It is still not retried automatically.
-  const result = await api.createProject({
-    organizationId,
-    name: options.name,
-    slug: options.slug,
-    repoUrl,
-  });
+  let result: Awaited<ReturnType<HivemindApi["createProject"]>>;
+  try {
+    result = await api.createProject({
+      organizationId,
+      name: options.name,
+      slug: options.slug,
+      repoUrl,
+    });
+  } catch (error) {
+    if (isCliError(error) && UNCERTAIN_OUTCOME_CODES.has(error.code)) {
+      throw new CliError(error.code, error.message, {
+        hint: `The Project may have been created anyway. Rerun the same command with --org ${organizationId}: it reuses that Project instead of creating a second one.`,
+        cause: error,
+      });
+    }
+    throw error;
+  }
   return { project: result.project, created: result.created };
 }
 

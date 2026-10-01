@@ -1,8 +1,10 @@
 import { Readable } from "node:stream";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { createOriginFetch } from "../src/client.ts";
 import { createCredentialManager } from "../src/credentials/manager.ts";
 import {
   CLI_CLIENT_ID,
+  createDeviceTransport,
   DEVICE_CODE_PATH,
   DEVICE_GRANT_TYPE,
   DEVICE_TOKEN_PATH,
@@ -10,6 +12,7 @@ import {
   type DeviceResponse,
   type DeviceTransport,
   MAX_BACKOFF_MS,
+  type PollEvent,
   pollForToken,
   requestDeviceCode,
 } from "../src/device-login.ts";
@@ -227,6 +230,42 @@ describe("pollForToken", () => {
     );
     expect(outcome).toMatchObject({ ok: false, error: { code: "CANCELLED" } });
     expect(calls).toHaveLength(1);
+  });
+
+  it("backs off and keeps polling when a token response stalls after its headers", async () => {
+    // A real socket through the real guarded fetch: the first poll gets 400
+    // headers and half a body, then nothing until the request times out.
+    let polls = 0;
+    const server = await startServer((_request, response) => {
+      polls++;
+      if (polls === 1) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.write('{"error":');
+        return;
+      }
+      sendJson(response, 200, granted.body);
+    });
+    try {
+      const clock = fakeClock();
+      const events: PollEvent[] = [];
+      const result = await pollForToken({
+        transport: createDeviceTransport(
+          createOriginFetch({ origin: server.origin, credential: null, timeoutMs: 200 }),
+        ),
+        clock,
+        signal: new AbortController().signal,
+        origin: server.origin,
+        authorization: authorization(),
+        onEvent: (event) => events.push(event),
+      });
+      expect(result).toEqual({ accessToken: TOKEN, requests: 2 });
+      expect(clock.sleeps).toEqual([5_000, 10_000]);
+      expect(events).toEqual([
+        { type: "retrying", reason: expect.stringContaining("did not answer"), waitMs: 10_000 },
+      ]);
+    } finally {
+      await server.close();
+    }
   });
 
   it("rejects a 200 without a usable token", async () => {

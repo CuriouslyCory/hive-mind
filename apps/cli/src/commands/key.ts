@@ -6,7 +6,7 @@ import {
 } from "@hivemind/contract";
 import type { ApiProjectKey } from "../client.ts";
 import type { CommandDefinition, OptionSpec } from "../command.ts";
-import { CLI_ERROR_CODES, CliError, isCliError, usageError } from "../errors.ts";
+import { CliError, isCliError, UNCERTAIN_OUTCOME_CODES, usageError } from "../errors.ts";
 import { resolveProjectId } from "../project-resolution.ts";
 
 /**
@@ -42,7 +42,8 @@ export const keyCreate: CommandDefinition = {
     "> key.txt' writes only the secret.",
     "",
     "Creation is never retried automatically. If the command fails after the",
-    "request was sent (timeout, lost connection), the key may exist anyway:",
+    "request was sent (timeout, lost connection, unreadable answer), the key may",
+    "exist anyway:",
     "check 'hivemind key list' and revoke keys you cannot use.",
   ].join("\n"),
   options: {
@@ -87,12 +88,7 @@ export const keyCreate: CommandDefinition = {
     } catch (error) {
       // The request may have reached the server: point at the safe follow-up
       // instead of encouraging a blind rerun that could mint a second key.
-      if (
-        isCliError(error) &&
-        [CLI_ERROR_CODES.timeout, CLI_ERROR_CODES.network, CLI_ERROR_CODES.cancelled].includes(
-          error.code as never,
-        )
-      ) {
+      if (isCliError(error) && UNCERTAIN_OUTCOME_CODES.has(error.code)) {
         throw new CliError(error.code, error.message, {
           hint: `The key may have been created anyway. Check 'hivemind key list --project ${projectId}' and revoke any key you did not receive.`,
           cause: error,
