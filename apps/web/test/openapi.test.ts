@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { API_BASE_PATH, API_ERRORS } from "@hivemind/contract";
+import { agentSession } from "@hivemind/db/schema";
 import { describeDb } from "@hivemind/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NOT_IMPLEMENTED_MESSAGE } from "../src/server/api/not-implemented";
@@ -20,15 +21,6 @@ const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json"];
  * here and adds a valid request to `bodies` below. Empty before #12 merges.
  */
 const NOT_YET_SERVED = new Set([
-  "listPlans",
-  "createPlan",
-  "getPlan",
-  "updatePlan",
-  "setPlanStatus",
-  "listPlanLog",
-  "appendPlanLog",
-  "listPlanTasks",
-  "addTask",
   "claimTask",
   "releaseTask",
   "startTask",
@@ -42,7 +34,6 @@ const NOT_YET_SERVED = new Set([
   "attachSession",
   "endSession",
   "listSessionClaims",
-  "listSessionEvents",
   "checkSessionOverlaps",
   "listSessionScopes",
   "addSessionScope",
@@ -50,7 +41,6 @@ const NOT_YET_SERVED = new Set([
   "registerCollectionManifest",
   "uploadCollectionBatch",
   "finalizeCollection",
-  "listProjectEvents",
   "getProjectStatus",
 ]);
 
@@ -154,6 +144,29 @@ describeDb("the served API", () => {
 
   it("answers each documented operation with its documented statuses", async () => {
     const key = await api.createKey(owner, projectId);
+    // PLAN-1, which the Plan routes below address.
+    const plan = await api.request(`/projects/${projectId}/plans`, {
+      token: owner.token,
+      body: { planId: crypto.randomUUID(), title: "Addressed" },
+    });
+    expect(plan.status).toBe(200);
+    // A Session whose history the Session event route reads; the Session
+    // routes still stubbed use their own id below.
+    const [readSession] = await api.testDb.db
+      .insert(agentSession)
+      .values({
+        projectId,
+        ownerKind: "user",
+        userId: owner.id,
+        agent: "openapi",
+        intent: "Read",
+        creationFingerprint: "0".repeat(64),
+      })
+      .returning();
+    if (!readSession) throw new Error("Session insert returned no row.");
+    const nestedIdOverrides: Record<string, Record<string, string>> = {
+      listSessionEvents: { "{sessionId}": readSession.id },
+    };
     // A valid request for each operation, as the owner.
     const sessionId = crypto.randomUUID();
     const bodies: Record<string, unknown> = {
@@ -193,7 +206,8 @@ describeDb("the served API", () => {
     };
     for (const operation of await documentedOperations()) {
       let path = operation.path.replace("{id}", projectId).replace("{keyId}", key.id);
-      for (const [parameter, value] of Object.entries(nestedIds)) {
+      const ids = { ...nestedIds, ...nestedIdOverrides[operation.operationId] };
+      for (const [parameter, value] of Object.entries(ids)) {
         path = path.replace(parameter, value);
       }
       const response = await api.request(path, {

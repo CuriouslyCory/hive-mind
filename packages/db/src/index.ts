@@ -46,6 +46,7 @@ export {
   MAX_EVENT_DTO_BYTES,
   MAX_EVENT_PAYLOAD_BYTES,
 } from "./event.ts";
+export { type EventFilter, listEvents, projectHasSession } from "./event-read.ts";
 export {
   type CanonicalJson,
   canonicalJson,
@@ -77,6 +78,40 @@ export {
   SESSION_STALE_AFTER_MS,
   type SessionLiveness,
 } from "./liveness.ts";
+export {
+  type AddTaskOutcome,
+  type AppendPlanLogOutcome,
+  addTask,
+  appendPlanLog,
+  assertStorableText,
+  type CreatePlanOutcome,
+  type CreationFailure,
+  createPlan,
+  getPlan,
+  type InitialPlanStatus,
+  isTerminalPlanStatus,
+  listPlans,
+  listPlanTasks,
+  PLAN_TRANSITIONS,
+  type PlanClosed,
+  type PlanNotFound,
+  type PlanProgress,
+  type PlanView,
+  type PlanWriter,
+  planKey,
+  resolvePlan,
+  type SessionEnded,
+  type SessionNotFound,
+  type SetPlanStatusOutcome,
+  setPlanStatus,
+  type TargetPlanStatus,
+  type TaskView,
+  UnstorableTextError,
+  type UpdatePlanOutcome,
+  type UsableClaim,
+  updatePlan,
+  usableClaim,
+} from "./plan.ts";
 export {
   type Actor,
   creatorColumns,

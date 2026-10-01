@@ -17,12 +17,16 @@ type Empty = Record<string, never>;
  * payload's shape means a new version, since stored Events keep the old one.
  */
 export interface EventPayloads {
-  "plan.created": { number: number; title: string; status: PlanStatus };
-  /** The fields that changed, with their new values. */
-  "plan.edited": { title?: string; body?: string };
-  "plan.status_changed": { from: PlanStatus; to: PlanStatus };
-  /** A Plan log entry: bounded markdown. */
-  "plan.logged": { message: string };
+  // Plan Events and `task.added` have the names and payloads of the contract's
+  // `eventSchema` (packages/contract/src/event.ts), which Event reads return
+  // as stored.
+  /** `key` is the Plan's PLAN-N key. */
+  "plan.created": { key: string; title: string; status: PlanStatus };
+  /** `title` is the new title, or null if unchanged; the body is not repeated. */
+  "plan.updated": { title: string | null; bodyChanged: boolean };
+  "plan.status_changed": { from: PlanStatus; to: Exclude<PlanStatus, "draft"> };
+  /** A Plan log entry: bounded markdown. Its Event UUID is the client's entry ID. */
+  "plan.log_appended": { message: string };
   "task.added": { title: string; position: number };
   "task.claimed": { leaseExpiresAt: string };
   /** A `--steal` takeover. The new holder is the Event's session_id. */
@@ -103,9 +107,9 @@ export type EventType = keyof EventPayloads;
 
 export const EVENT_PAYLOAD_VERSIONS: { readonly [T in EventType]: number } = {
   "plan.created": 1,
-  "plan.edited": 1,
+  "plan.updated": 1,
   "plan.status_changed": 1,
-  "plan.logged": 1,
+  "plan.log_appended": 1,
   "task.added": 1,
   "task.claimed": 1,
   "task.stolen": 1,

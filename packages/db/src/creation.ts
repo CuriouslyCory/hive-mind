@@ -18,7 +18,7 @@ import { type Event, event } from "./schema/event.ts";
 // principal with the record, and a retry is recognized by comparing them,
 // never the record's current (possibly edited) fields.
 
-/** What a caller-supplied UUID creates. A Plan log entry is a `plan.logged` Event. */
+/** What a caller-supplied UUID creates. A Plan log entry is a `plan.log_appended` Event. */
 export type CreationKind = "plan" | "task" | "session" | "plan_log";
 
 export interface CreationRows {
@@ -109,7 +109,7 @@ async function findCreation<K extends CreationKind>(
     row: row as CreationRows[K],
     stored: {
       projectId: row.projectId,
-      sameAction: row.type === "plan.logged",
+      sameAction: row.type === "plan.log_appended",
       principal:
         row.actorKind === "user" && row.actorUserId
           ? { kind: "user", userId: row.actorUserId }

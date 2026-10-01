@@ -94,7 +94,7 @@ async function createPlan(tx: Transaction, now: Date, projectId: string, princip
   await insertEvent(tx, {
     projectId,
     type: "plan.created",
-    payload: { number, title: row.title, status: row.status },
+    payload: { key: `PLAN-${number}`, title: row.title, status: row.status },
     actor: principal,
     planId: row.id,
     now,
@@ -231,7 +231,7 @@ describeDb("createOnce", () => {
         await insertEvent(savepoint, {
           projectId: request.projectId,
           type: "plan.created",
-          payload: { number, title, status: row.status },
+          payload: { key: `PLAN-${number}`, title, status: row.status },
           actor: request.principal,
           planId: row.id,
           now,
@@ -395,7 +395,7 @@ describeDb("createOnce", () => {
             insertEvent(savepoint, {
               id,
               projectId: target.id,
-              type: "plan.logged",
+              type: "plan.log_appended",
               payload: { message: "Progress" },
               actor,
               planId: targetPlan.id,
