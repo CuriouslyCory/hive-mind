@@ -16,6 +16,8 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 Local setup (env, Postgres, migrations, `pnpm dev`): `README.md`.
 
+Production URL: `https://hivemind.curiouslycory.com`. Use it for production links, CLI defaults and OAuth callbacks; environment setup is in `docs/setup.md` (H3–H4).
+
 ### Done
 
 Work is done when all four pass from the repo root:

@@ -524,8 +524,8 @@ export async function getActiveOrganization(instance: Auth, headers: Headers) {
 }
 
 /**
- * The production origin: BETTER_AUTH_URL, which is set only in Production, or
- * else Vercel's production domain on Vercel deployments. Undefined in local
+ * The production origin: BETTER_AUTH_URL, set to the canonical domain in
+ * Production and Preview, or Vercel's production domain as a fallback. Undefined in local
  * development, so oAuthProxy stays out of the way there.
  */
 function productionURLFromEnv(): string | undefined {

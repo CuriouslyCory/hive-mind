@@ -19,7 +19,7 @@ import {
 } from "../src/server/auth";
 import { authPathVariants } from "./support/auth-paths";
 
-const PRODUCTION_URL = "https://hive-mind-web.vercel.app";
+const PRODUCTION_URL = "https://hivemind.curiouslycory.com";
 /** A preview deployment's VERCEL_URL and VERCEL_BRANCH_URL. */
 const PREVIEW_HOSTS = [
   "hive-mind-web-a1b2c3d4e-curiouslycorys-projects.vercel.app",
@@ -63,7 +63,7 @@ describe("allowedHosts", () => {
       productionURL: PRODUCTION_URL,
       deploymentHosts: [PRODUCTION_DEPLOYMENT_HOST, "hive-mind-web-git-main.vercel.app"],
     });
-    expect(hosts).toEqual(["hive-mind-web.vercel.app"]);
+    expect(hosts).toEqual(["hivemind.curiouslycory.com"]);
   });
 
   it("is only the deployment URL and branch alias on a preview", () => {
@@ -395,7 +395,7 @@ describeDb("createAuth", () => {
     });
 
     it("completes the round trip preview -> production -> preview without production trusting the preview", async () => {
-      expect(production.options.baseURL).toEqual({ allowedHosts: ["hive-mind-web.vercel.app"] });
+      expect(production.options.baseURL).toEqual({ allowedHosts: ["hivemind.curiouslycory.com"] });
 
       // 1. The preview starts the sign-in and sends GitHub to production's callback.
       const signIn = await signInWithGitHub(PREVIEW_ORIGIN);

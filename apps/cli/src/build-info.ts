@@ -12,7 +12,7 @@ declare const HIVEMIND_DEFAULT_ORIGIN: string;
  * The production backend (docs/cli.md "Choosing the server", docs/setup.md). The build script embeds
  * this unless `--default-origin` overrides it for a non-production build.
  */
-export const PRODUCTION_ORIGIN = "https://hive-mind-web-mu.vercel.app";
+export const PRODUCTION_ORIGIN = "https://hivemind.curiouslycory.com";
 
 export const BUILD_VERSION: string =
   typeof HIVEMIND_BUILD_VERSION === "string" ? HIVEMIND_BUILD_VERSION : "0.0.0-dev";

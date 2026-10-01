@@ -3,7 +3,7 @@
  * the Linux Secret Service (via `secret-tool`) and a private file.
  *
  * Every store is keyed by a normalized backend origin such as
- * `https://hive-mind-web-mu.vercel.app`; normalizing and validating that origin
+ * `https://hivemind.curiouslycory.com`; normalizing and validating that origin
  * is the caller's job (cli-core), not the store's. Stores never throw for
  * expected conditions. They return a typed result so the caller can decide
  * between "not logged in", "this store is unusable, try the next one" and
