@@ -1,7 +1,7 @@
 name: CLI native
 
 # Builds the hivemind binary for all four release targets, each on its own
-# native runner (STATE.md D7, D11), packs it as the release archive and runs
+# native runner (ADR-0012), packs it as the release archive and runs
 # apps/cli/scripts/smoke.ts against that archive. The routine root build in
 # ci.yml compiles only the host target.
 #
