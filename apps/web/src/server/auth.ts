@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto";
+import { apiKey } from "@better-auth/api-key";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import type { Db } from "@hivemind/db";
 import * as schema from "@hivemind/db/schema";
 import type { BetterAuthPlugin } from "better-auth";
-import { isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
 import { nextCookies } from "better-auth/next-js";
-import { oAuthProxy, organization } from "better-auth/plugins";
+import { bearer, deviceAuthorization, oAuthProxy, organization } from "better-auth/plugins";
 import { sql } from "drizzle-orm";
 import { env } from "../env";
 import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from "../lib/auth-config";
@@ -23,6 +24,13 @@ import { getDb } from "./db";
 //   state, not to a URL taken from the request.
 // - `activeOrganizationId` is a UI default, not an authorization decision.
 //   Authorize through project -> organization membership.
+// - The CLI's device client ID is public and identifies the client; it never
+//   proves who is calling. Approval happens in the browser, under the user's
+//   cookie login session.
+// - A Project key is an organization-owned API key bound to one Project by
+//   the application's `project_api_key` table. It never becomes a login
+//   session, and the plugin's own HTTP routes are disabled, so keys are only
+//   created, listed and revoked by server code that checks the binding.
 
 /** `next dev`. Trusted only outside Vercel deployments. */
 export const LOCAL_DEV_HOST = "localhost:3000";
@@ -48,6 +56,57 @@ export const ORGANIZATION_PATHS_DISABLED_UNTIL_M3 = [
   "/organization/remove-member",
   "/organization/update-member-role",
   "/organization/leave",
+];
+
+/** The device authorization client ID the CLI sends. Public, not a secret. */
+export const CLI_CLIENT_ID = "hivemind-cli";
+
+/** Client IDs allowed to start the device flow. Any other is `invalid_client`. */
+export const DEVICE_CLIENT_IDS: readonly string[] = [CLI_CLIENT_ID];
+
+/**
+ * How long a device code and its user code stay valid, and the minimum
+ * polling interval the CLI is told to use. better-auth's time strings; the
+ * response reports them in seconds (`expires_in`, `interval`).
+ */
+export const DEVICE_CODE_EXPIRES_IN = "10m";
+export const DEVICE_CODE_POLLING_INTERVAL = "5s";
+
+/**
+ * The page where the user enters or confirms the user code, relative to the
+ * request's origin. The device flow returns it as `verification_uri`, and
+ * `verification_uri_complete` adds `?user_code=...`.
+ */
+export const DEVICE_VERIFICATION_PATH = "/device";
+
+/**
+ * Every Project key starts with this, so `/api/v1` can tell one from a login
+ * session token before verifying it. Recognizing the prefix never
+ * authenticates anything.
+ */
+export const PROJECT_KEY_PREFIX = "hm_";
+
+/** Longest Project key name; the contract's limit (issue #3). */
+export const PROJECT_KEY_NAME_MAX_LENGTH = 120;
+
+/** Bounds on a Project key's lifetime when the caller sets one, in days. */
+export const PROJECT_KEY_MIN_EXPIRES_IN_DAYS = 1;
+export const PROJECT_KEY_MAX_EXPIRES_IN_DAYS = 365;
+
+/**
+ * The api-key plugin's HTTP routes in better-auth 1.7.6. They answer 404:
+ * they would let a caller create, change or list organization keys that no
+ * Project binding restricts. Server code calls the matching `auth.api`
+ * methods after its own authorization. The auth route handler also rejects
+ * every `/api-key/*` path (see `isRawApiKeyPath`), so a route added by a
+ * plugin upgrade is not exposed before it is reviewed.
+ */
+export const API_KEY_PATHS_DISABLED = [
+  "/api-key/create",
+  "/api-key/get",
+  "/api-key/update",
+  "/api-key/delete",
+  "/api-key/list",
 ];
 
 export interface CreateAuthOptions {
@@ -117,7 +176,7 @@ export function createAuth(opts: CreateAuthOptions) {
   const { db } = opts;
   return betterAuth({
     basePath: AUTH_BASE_PATH,
-    disabledPaths: ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+    disabledPaths: [...ORGANIZATION_PATHS_DISABLED_UNTIL_M3, ...API_KEY_PATHS_DISABLED],
     baseURL: {
       allowedHosts: opts.allowedHosts,
       // No fallback: a request from any other host fails instead of being
@@ -184,6 +243,38 @@ export function createAuth(opts: CreateAuthOptions) {
         disableOrganizationDeletion: true,
       }),
       oAuthProxy({ productionURL: opts.productionURL, secret: opts.oauthProxySecret }),
+      deviceAuthorization({
+        expiresIn: DEVICE_CODE_EXPIRES_IN,
+        interval: DEVICE_CODE_POLLING_INTERVAL,
+        verificationUri: DEVICE_VERIFICATION_PATH,
+        validateClient: (clientId) => DEVICE_CLIENT_IDS.includes(clientId),
+      }),
+      rejectDeviceUserPreBinding(),
+      // The device flow returns the raw login session token, which is not
+      // signed, so bearer() must accept unsigned tokens. It looks each one up
+      // like a cookie, so a revoked or expired login session fails.
+      bearer({ requireSignature: false }),
+      apiKey({
+        references: "organization",
+        defaultPrefix: PROJECT_KEY_PREFIX,
+        // Only a SHA-256 hash is stored; the key is shown once, at creation.
+        disableKeyHashing: false,
+        // A key must never act as a login session (issue #3): /api/v1 maps it
+        // to a separate Project-key principal instead.
+        enableSessionForAPIKeys: false,
+        // Authorization comes from project_api_key, never from metadata a
+        // caller could set.
+        enableMetadata: false,
+        maximumNameLength: PROJECT_KEY_NAME_MAX_LENGTH,
+        keyExpiration: {
+          defaultExpiresIn: null,
+          minExpiresIn: PROJECT_KEY_MIN_EXPIRES_IN_DAYS,
+          maxExpiresIn: PROJECT_KEY_MAX_EXPIRES_IN_DAYS,
+        },
+        // The plugin's default allows 10 requests a day per key, and counts
+        // them with a write on every verification. Request limits are M7's.
+        rateLimit: { enabled: false },
+      }),
       ...(opts.plugins ?? []),
       nextCookies(),
     ],
@@ -191,6 +282,71 @@ export function createAuth(opts: CreateAuthOptions) {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * Whether a path under the auth base path is, or could normalize to, an
+ * api-key plugin route: any segment that starts with `api-key`, compared
+ * without case after repeated percent-decoding, with a backslash read as `/` and
+ * empty segments dropped. The auth route handler answers 404 for these before
+ * better-auth sees the request, so this does not depend on how better-auth or
+ * its router normalize paths. A path that does not decode cleanly counts as
+ * one, so it fails closed.
+ */
+export function isRawApiKeyPath(pathname: string): boolean {
+  let decoded = pathname;
+  for (let round = 0; ; round++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return true;
+    }
+    if (next === decoded) break;
+    if (round === 4) return true;
+    decoded = next;
+  }
+  return decoded
+    .toLowerCase()
+    .split(/[/\\]+/)
+    .some((segment) => segment.trim().startsWith("api-key"));
+}
+
+/**
+ * Rejects a device authorization request that names a user. better-auth
+ * accepts `user_id` to pre-bind the code to a user, but the caller is an
+ * unauthenticated CLI, so the user must come from the browser approval.
+ * Checked for JSON and form bodies, which the plugin both accepts.
+ */
+function rejectDeviceUserPreBinding(): BetterAuthPlugin {
+  return {
+    id: "hivemind-device-no-user-binding",
+    hooks: {
+      before: [
+        {
+          matcher: (ctx) => ctx.path === "/device/code",
+          handler: createAuthMiddleware(async (ctx) => {
+            const body: unknown = ctx.body;
+            let named = typeof body === "object" && body !== null && "user_id" in body;
+            const contentType = ctx.request?.headers.get("content-type")?.toLowerCase() ?? "";
+            if (
+              !named &&
+              ctx.request &&
+              contentType.includes("application/x-www-form-urlencoded")
+            ) {
+              named = new URLSearchParams(await ctx.request.clone().text()).has("user_id");
+            }
+            if (named) {
+              throw new APIError("BAD_REQUEST", {
+                error: "invalid_request",
+                error_description: "user_id is not accepted",
+              });
+            }
+          }),
+        },
+      ],
+    },
+  };
+}
 
 /**
  * Returns the user's first organization, creating their personal organization

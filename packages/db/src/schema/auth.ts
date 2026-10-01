@@ -1,8 +1,18 @@
 import { relations } from "drizzle-orm";
-import { boolean, index, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  text,
+  unique,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { createdAt, id, timestamptz, updatedAt } from "../columns.ts";
 
-// Tables for better-auth and its organization plugin, as configured in
+// Tables for better-auth and its organization, device authorization and
+// api-key plugins, as configured in
 // apps/web/src/server/auth.ts. Generated with `auth generate`, then edited by
 // hand to follow the database conventions (ADR-0005): the column helpers,
 // timestamptz, snake_case names from Drizzle's casing, and uuid foreign keys.
@@ -130,6 +140,74 @@ export const invitation = pgTable(
   (table) => [
     index("invitation_organization_id_idx").on(table.organizationId),
     index("invitation_email_idx").on(table.email),
+  ],
+);
+
+// Device authorization (RFC 8628) for the CLI's `login`. A row is one device
+// code: pending until a signed-in user approves or denies it in the browser,
+// then redeemed once for a login session.
+export const deviceCode = pgTable(
+  "device_code",
+  {
+    id: id(),
+    // Named here: drizzle-kit's default names keep the camelCase keys.
+    deviceCode: text().notNull().unique("device_code_device_code_unique"),
+    userCode: text().notNull().unique("device_code_user_code_unique"),
+    // The user who opened the code in the browser and may approve or deny it.
+    // Never taken from the device request (see rejectDeviceUserPreBinding in
+    // apps/web/src/server/auth.ts).
+    userId: uuid().references(() => user.id, { onDelete: "cascade" }),
+    expiresAt: timestamptz().notNull(),
+    status: text().notNull(),
+    lastPolledAt: timestamptz(),
+    pollingInterval: integer(),
+    clientId: text(),
+    scope: text(),
+  },
+  (table) => [index("device_code_user_id_idx").on(table.userId)],
+);
+
+// API keys from @better-auth/api-key. Each is owned by an organization
+// (`references: "organization"`), and usable only through its Project binding
+// in project_api_key. `key` holds the SHA-256 hash, never the key itself.
+export const apikey = pgTable(
+  "apikey",
+  {
+    id: id(),
+    configId: text().default("default").notNull(),
+    name: text(),
+    start: text(),
+    // The owning organization. better-auth calls it a reference because a
+    // key can belong to a user instead; this app configures organizations
+    // only, so it is a foreign key.
+    referenceId: uuid()
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    prefix: text(),
+    key: text().notNull().unique(),
+    refillInterval: integer(),
+    refillAmount: integer(),
+    lastRefillAt: timestamptz(),
+    // Not null, so a key is enabled or disabled, never unknown.
+    enabled: boolean().default(true).notNull(),
+    rateLimitEnabled: boolean().default(true),
+    rateLimitTimeWindow: integer().default(86400000),
+    rateLimitMax: integer().default(10),
+    requestCount: integer().default(0),
+    remaining: integer(),
+    lastRequest: timestamptz(),
+    expiresAt: timestamptz(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    permissions: text(),
+    metadata: text(),
+  },
+  (table) => [
+    index("apikey_config_id_idx").on(table.configId),
+    index("apikey_reference_id_idx").on(table.referenceId),
+    // The target of project_api_key's foreign key, which requires a key and
+    // its Project to belong to the same organization.
+    unique("apikey_id_reference_id_unique").on(table.id, table.referenceId),
   ],
 );
 

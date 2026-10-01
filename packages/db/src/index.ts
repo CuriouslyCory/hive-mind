@@ -16,4 +16,12 @@ export function createDb(pool: pg.Pool) {
 
 export type Db = ReturnType<typeof createDb>;
 
+export {
+  type CreateOrReuseProjectResult,
+  createOrReuseProject,
+  type DbOrTransaction,
+  type ProjectInput,
+} from "./project.ts";
+export type { Project } from "./schema/project.ts";
+export type { ProjectApiKey } from "./schema/project-api-key.ts";
 export { schema };

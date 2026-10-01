@@ -15,6 +15,13 @@
       "when": 1790723344477,
       "tag": "0001_account_provider_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790842394712,
+      "tag": "0002_project_device_code_api_key",
+      "breakpoints": true
     }
   ]
 }

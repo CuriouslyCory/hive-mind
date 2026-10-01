@@ -1,12 +1,17 @@
 import { createTestDatabase, describeDb, type TestDatabase } from "@hivemind/db/testing";
+import type { BetterAuthPlugin } from "better-auth";
 import { type TestHelpers, testUtils } from "better-auth/plugins";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  API_KEY_PATHS_DISABLED,
   allowedHosts,
+  CLI_CLIENT_ID,
   createAuth,
   getActiveOrganization,
+  isRawApiKeyPath,
   MAX_SLUG_LENGTH,
   ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+  PROJECT_KEY_PREFIX,
   slugify,
   suffixedSlug,
 } from "../src/server/auth";
@@ -137,6 +142,68 @@ describe("the app's auth instance", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it.each(RAW_API_KEY_PATH_VARIANTS)(
+    "answers 404 for %s before better-auth sees it",
+    async (path) => {
+      // No environment: had the request reached better-auth, creating the
+      // instance would have thrown.
+      unsetEnv();
+      vi.resetModules();
+      const route = await import("../src/app/api/auth/[...all]/route");
+      const url = `http://localhost:3000/api/auth${path}`;
+
+      for (const handler of [route.GET, route.POST, route.PATCH, route.PUT, route.DELETE]) {
+        const response = await handler(new Request(url, { method: "POST" }));
+        expect(response.status).toBe(404);
+      }
+    },
+  );
+});
+
+/**
+ * Paths that are, or that a router could normalize to, api-key plugin routes.
+ * Relative to the auth base path.
+ */
+const RAW_API_KEY_PATH_VARIANTS = [
+  ...API_KEY_PATHS_DISABLED,
+  ...API_KEY_PATHS_DISABLED.map((path) => `${path}/`),
+  "/api-key/create//",
+  "//api-key/create",
+  "/api-key//create",
+  "/api-key%2Fcreate",
+  "/api-key%2fcreate",
+  "/api-key%252Fcreate",
+  "/api-key%5Ccreate",
+  "/%61pi-key/create",
+  "/API-KEY/CREATE",
+  "/Api-Key/list",
+  "/api-key",
+  "/api-key/",
+  "/api-key/verify",
+  "/api-key/delete-all-expired-api-keys",
+  "/api-key/a-route-from-a-future-version",
+  "/organization/..%2Fapi-key/create",
+  "/api-key%/create",
+];
+
+describe("isRawApiKeyPath", () => {
+  it.each(RAW_API_KEY_PATH_VARIANTS)("matches %s", (path) => {
+    expect(isRawApiKeyPath(`/api/auth${path}`)).toBe(true);
+  });
+
+  it.each([
+    "/ok",
+    "/get-session",
+    "/device",
+    "/device/code",
+    "/device/token",
+    "/device/approve",
+    "/organization/get-full-organization",
+    "/sign-in/social",
+  ])("does not match %s", (path) => {
+    expect(isRawApiKeyPath(`/api/auth${path}`)).toBe(false);
   });
 });
 
@@ -552,6 +619,192 @@ describeDb("createAuth", () => {
 
       expect(await getActiveOrganization(auth, headers)).toBeNull();
       expect(await activeOrganizationIdOf(token)).toBeNull();
+    });
+  });
+
+  describe("M1 plugins", () => {
+    it("are registered with nextCookies last", () => {
+      const ids = (auth.options.plugins as BetterAuthPlugin[]).map((plugin) => plugin.id);
+      expect(ids).toEqual([
+        "organization",
+        "oauth-proxy",
+        "device-authorization",
+        "hivemind-device-no-user-binding",
+        "bearer",
+        "api-key",
+        "test-utils",
+        "next-cookies",
+      ]);
+    });
+
+    it("disable every HTTP route the api-key plugin has", () => {
+      const plugin = (auth.options.plugins as BetterAuthPlugin[]).find(
+        (candidate) => candidate.id === "api-key",
+      );
+      const paths = Object.values(plugin?.endpoints ?? {})
+        .map((endpoint) => endpoint.path)
+        .filter((path): path is string => typeof path === "string");
+      // verifyApiKey and deleteAllExpiredApiKeys are server-only: no path.
+      expect(paths.sort()).toEqual([...API_KEY_PATHS_DISABLED].sort());
+      expect(auth.options.disabledPaths).toEqual(expect.arrayContaining(API_KEY_PATHS_DISABLED));
+    });
+
+    it.each(API_KEY_PATHS_DISABLED.flatMap((path) => [path, `${path}/`, `${path}//`]))(
+      "answer 404 for %s from better-auth itself, for an organization owner",
+      async (path) => {
+        const owner = await test.saveUser(test.createUser());
+        const [membership] = await organizationsOf(owner.id);
+        const organizationId = membership?.organizationId;
+        // A real key, so get/update/delete would find it if they were served.
+        const headers = await test.getAuthHeaders({ userId: owner.id });
+        headers.set("host", PREVIEW_HOSTS[0] ?? "");
+        const key = await auth.api.createApiKey({
+          headers,
+          body: { organizationId, name: "server" },
+        });
+
+        const read = path.startsWith("/api-key/get") || path.startsWith("/api-key/list");
+        const response = await apiRequest(
+          owner.id,
+          read ? `${path}?id=${key.id}&organizationId=${organizationId}` : path,
+          read ? undefined : { organizationId, keyId: key.id, name: "raw" },
+        );
+
+        expect(response.status).toBe(404);
+        const keys = await testDb.pool.query(
+          "select id, name from apikey where reference_id = $1",
+          [organizationId],
+        );
+        expect(keys.rows).toEqual([{ id: key.id, name: "server" }]);
+      },
+    );
+
+    /** POST /device/code on the preview, as the unauthenticated CLI. */
+    function requestDeviceCode(body: string, contentType = "application/json") {
+      return auth.handler(
+        new Request(`${PREVIEW_ORIGIN}/api/auth/device/code`, {
+          method: "POST",
+          headers: { "content-type": contentType },
+          body,
+        }),
+      );
+    }
+
+    it("start the device flow for the CLI, with bounded lifetime and polling", async () => {
+      const response = await requestDeviceCode(JSON.stringify({ client_id: CLI_CLIENT_ID }));
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        verification_uri: `${PREVIEW_ORIGIN}/device`,
+        expires_in: 600,
+        interval: 5,
+      });
+      expect(body.verification_uri_complete).toBe(
+        `${PREVIEW_ORIGIN}/device?user_code=${String(body.user_code)}`,
+      );
+    });
+
+    it("reject a device flow from another client", async () => {
+      const response = await requestDeviceCode(JSON.stringify({ client_id: "someone-else" }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_client" });
+    });
+
+    it.each([
+      ["JSON", JSON.stringify({ client_id: CLI_CLIENT_ID, user_id: crypto.randomUUID() })],
+      ["JSON, empty", JSON.stringify({ client_id: CLI_CLIENT_ID, user_id: "" })],
+    ])("reject a device code pre-bound to a user (%s)", async (_case, body) => {
+      const response = await requestDeviceCode(body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_request" });
+    });
+
+    it("reject a device code pre-bound to a user in a form body", async () => {
+      const contentType = "application/x-www-form-urlencoded";
+      const accepted = await requestDeviceCode(`client_id=${CLI_CLIENT_ID}`, contentType);
+      expect(accepted.status).toBe(200);
+
+      const response = await requestDeviceCode(
+        `client_id=${CLI_CLIENT_ID}&user_id=${crypto.randomUUID()}`,
+        contentType,
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_request" });
+    });
+
+    it("let an approved device token act as a bearer login session", async () => {
+      const user = await test.saveUser(test.createUser());
+      const started = await requestDeviceCode(JSON.stringify({ client_id: CLI_CLIENT_ID }));
+      const { device_code, user_code } = (await started.json()) as Record<string, string>;
+      // Opening the code in the browser binds it to the signed-in user.
+      expect((await apiRequest(user.id, `/device?user_code=${user_code}`)).status).toBe(200);
+      expect((await apiRequest(user.id, "/device/approve", { userCode: user_code })).status).toBe(
+        200,
+      );
+
+      const token = await auth.handler(
+        new Request(`${PREVIEW_ORIGIN}/api/auth/device/token`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+            device_code,
+            client_id: CLI_CLIENT_ID,
+          }),
+        }),
+      );
+      expect(token.status).toBe(200);
+      const { access_token } = (await token.json()) as { access_token: string };
+
+      const session = await auth.handler(
+        new Request(`${PREVIEW_ORIGIN}/api/auth/get-session`, {
+          headers: { authorization: `Bearer ${access_token}` },
+        }),
+      );
+      expect(await session.json()).toMatchObject({ user: { id: user.id } });
+    });
+
+    it("create organization-owned, hashed, prefixed keys from server code only", async () => {
+      const owner = await test.saveUser(test.createUser());
+      const [membership] = await organizationsOf(owner.id);
+      const headers = await test.getAuthHeaders({ userId: owner.id });
+      headers.set("host", PREVIEW_HOSTS[0] ?? "");
+
+      const created = await auth.api.createApiKey({
+        headers,
+        body: { organizationId: membership?.organizationId, name: "ci" },
+      });
+
+      expect(created.key.startsWith(PROJECT_KEY_PREFIX)).toBe(true);
+      // `generateId: "uuid"` covers plugin tables; the contract validates key IDs as uuids.
+      expect(created.id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      const stored = await testDb.db.query.apikey.findFirst({
+        where: (row, { eq }) => eq(row.id, created.id),
+      });
+      expect(stored).toMatchObject({
+        referenceId: membership?.organizationId,
+        prefix: PROJECT_KEY_PREFIX,
+        enabled: true,
+        rateLimitEnabled: false,
+      });
+      expect(stored?.key).not.toContain(created.key.slice(PROJECT_KEY_PREFIX.length));
+
+      // Session mocking is off: the key is not a login session.
+      const keyRequests: Record<string, string>[] = [
+        { "x-api-key": created.key },
+        { authorization: `Bearer ${created.key}` },
+      ];
+      for (const keyHeaders of keyRequests) {
+        const session = await auth.handler(
+          new Request(`${PREVIEW_ORIGIN}/api/auth/get-session`, { headers: keyHeaders }),
+        );
+        expect(await session.json()).toBeNull();
+      }
     });
   });
 
