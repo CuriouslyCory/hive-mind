@@ -6,8 +6,9 @@ name: CLI native
 # ci.yml compiles only the host target.
 #
 # Runs on pull requests and pushes to main that touch the CLI, the contract it
-# speaks, the installer or the release workflows; release.yml calls it to build
-# the release assets, which it uploads as hivemind-<target> artifacts.
+# speaks, the installer, the release workflows or the toolchain that runs them
+# (root package.json pins pnpm, .nvmrc pins Node); release.yml calls it to
+# build the release assets, which it uploads as hivemind-<target> artifacts.
 
 on:
   pull_request:
@@ -15,6 +16,8 @@ on:
       - apps/cli/**
       - packages/contract/**
       - scripts/install.sh
+      - package.json
+      - .nvmrc
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - .github/workflows/cli-native.yml
@@ -25,6 +28,8 @@ on:
       - apps/cli/**
       - packages/contract/**
       - scripts/install.sh
+      - package.json
+      - .nvmrc
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - .github/workflows/cli-native.yml
