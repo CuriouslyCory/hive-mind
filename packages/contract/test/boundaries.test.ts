@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // The contract is shared by the server and the compiled CLI. Importing server
@@ -15,7 +16,9 @@ const ALLOWED_DEV_DEPENDENCIES = [
   "vitest",
 ];
 
-const packageRoot = new URL("..", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: pathname keeps percent-encoding (a space
+// is %20), so a checkout path with a space would not be found.
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

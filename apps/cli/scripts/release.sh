@@ -128,14 +128,18 @@ cmd_publish() {
 }
 
 cmd_npm_publish() {
-  local dir
+  local dir work
   dir="$(cd "$1" && pwd)"
-  # npm reads the package.json of its working directory; in the repository
-  # that is the root manifest, whose devEngines (pnpm) fails every npm command.
-  cd "$dir"
+  # npm takes the nearest directory above its working directory that has a
+  # package.json as the project. <dir> has none, and in CI it is dist/npm in
+  # the checkout, so npm would find the root package.json, whose devEngines
+  # (pnpm) fails every npm command. Run npm from an empty temp directory and
+  # give it absolute paths.
+  work="$(mktemp -d)"
+  trap 'rm -rf "$work"' RETURN
+  cd "$work"
   while IFS=$'\t' read -r name version file integrity; do
-    local published err
-    err="$(mktemp)"
+    local published err="$work/npm-view.err"
     if published="$(npm view "$name@$version" dist.integrity 2>"$err")"; then
       :
     elif grep -q E404 "$err"; then
@@ -144,18 +148,17 @@ cmd_npm_publish() {
       cat "$err" >&2
       die "could not check $name@$version on the registry"
     fi
-    rm -f "$err"
     if [ -z "$published" ]; then
       local flags=(--access public)
       [ "${NPM_PROVENANCE:-false}" = true ] && flags+=(--provenance)
-      npm publish "./$file" "${flags[@]}"
+      npm publish "$dir/$file" "${flags[@]}"
       echo "$name@$version: published"
     elif [ "$published" = "$integrity" ]; then
       echo "$name@$version: already published, identical"
     else
       die "$name@$version is already on the registry with different contents ($published); npm versions cannot be replaced"
     fi
-  done < <(jq -r '.[] | [.name, .version, .file, .integrity] | @tsv' npm-packages.json)
+  done < <(jq -r '.[] | [.name, .version, .file, .integrity] | @tsv' "$dir/npm-packages.json")
 }
 
 command="${1:-}"
