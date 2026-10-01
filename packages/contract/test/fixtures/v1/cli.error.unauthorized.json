@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "command": "whoami",
+  "ok": false,
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication is missing, invalid or expired."
+  }
+}

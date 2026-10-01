@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "command": "init",
+  "ok": false,
+  "error": {
+    "code": "CONFIG_UNSUPPORTED_VERSION",
+    "message": ".hivemind.json has version 2; this CLI supports version 1. Upgrade the CLI."
+  }
+}
