@@ -314,15 +314,37 @@ export async function smoke(options: SmokeOptions): Promise<boolean> {
     });
 
     if (os === "darwin") {
-      // Same user, real login keychain. The probe uses a unique service name
-      // and deletes its item; it also checks the addon was extracted to the
-      // private directory, not a shared TMPDIR.
+      // Same user, real login keychain (so the real HOME). The probe uses a
+      // unique service name and deletes its item. It also checks that the
+      // addon was loaded from an exact 0600 copy in the private 0700
+      // ~/Library/Caches/hivemind/native, and that Bun extracted nothing into
+      // TMPDIR (see src/credentials/keychain-binding.ts).
+      const keychainEnv = { ...baseEnv, HOME: process.env.HOME ?? home };
+      let copy: string | undefined;
       await check("credential roundtrip: keychain", async () => {
         const result = await runAsync(options.probe, ["roundtrip", "keychain"], {
-          env: { ...baseEnv, HOME: process.env.HOME ?? home },
+          env: keychainEnv,
           cwd,
         });
         assert(result.status === 0, describe(result));
+        const { addon } = oneJsonObject(result.stdout) as { addon?: { copy?: unknown } };
+        if (typeof addon?.copy === "string") copy = addon.copy;
+      });
+
+      // Bun's own extraction would dlopen a same-size file owned by the user
+      // without reading it. The CLI must compare contents and replace it. Run
+      // with TMPDIR unset, where Bun would otherwise use the shared /private/tmp.
+      await check("keychain replaces a tampered addon copy", async () => {
+        const addon = darwinAddon(target);
+        assert(copy && addon, "no addon copy from the previous roundtrip");
+        writeFileSync(copy, Buffer.alloc(addon.length));
+        // spawn() leaves out variables whose value is undefined.
+        const result = await runAsync(options.probe, ["roundtrip", "keychain"], {
+          env: { ...keychainEnv, TMPDIR: undefined },
+          cwd,
+        });
+        assert(result.status === 0, describe(result));
+        assert(readFileSync(copy).equals(addon), "the addon copy was not restored");
       });
     }
 

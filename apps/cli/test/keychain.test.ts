@@ -1,21 +1,28 @@
 import {
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { CLI_ROOT, hostTarget } from "../scripts/build.ts";
 import { inspectBinary, targetParts } from "../scripts/release-assets.ts";
 import { createKeychainStore } from "../src/credentials/keychain.ts";
 import type { KeyringBinding, KeyringEntry } from "../src/credentials/keychain-binding.ts";
-import { loadKeyringBinding, withPrivateTmpdir } from "../src/credentials/keychain-binding.ts";
+import {
+  embeddedAddonPath,
+  loadKeyringBinding,
+  materializeAddon,
+} from "../src/credentials/keychain-binding.ts";
 import { PROBE_BINARY } from "./helpers/binaries.ts";
 
 // Spike (b). macOS binaries cannot run on this Linux host, so this proves what
@@ -69,7 +76,8 @@ describe("keychain store", () => {
   });
 
   it("is unavailable when the build has no addon or it fails to load", async () => {
-    // Under Node (no build target) the real loader returns null.
+    // Under Node (no build target) nothing is embedded and the loader returns null.
+    expect(embeddedAddonPath()).toBeNull();
     expect(loadKeyringBinding()).toBeNull();
     expect(await createKeychainStore().get("https://a.example")).toMatchObject({
       ok: false,
@@ -109,39 +117,67 @@ describe("keychain store", () => {
   });
 });
 
-describe("withPrivateTmpdir", () => {
+describe("materializeAddon", () => {
   const root = mkdtempSync(join(tmpdir(), "hivemind-extract-"));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const addon = Buffer.from("not really a Mach-O, but bytes all the same");
 
-  it("points TMPDIR at a new 0700 directory during the load, then restores it", () => {
+  it("writes a 0600 copy named by content hash into a new 0700 directory", () => {
     const dir = join(root, "a", "native");
-    vi.stubEnv("TMPDIR", "/shared/tmp");
-    expect(withPrivateTmpdir(() => process.env.TMPDIR, dir)).toBe(dir);
-    expect(process.env.TMPDIR).toBe("/shared/tmp");
+    const path = materializeAddon(addon, dir);
+    expect(path).toMatch(/^.+\/keyring-[0-9a-f]{64}\.node$/);
+    expect(path.startsWith(`${dir}/`)).toBe(true);
+    expect(readFileSync(path).equals(addon)).toBe(true);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(readdirSync(dir)).toEqual([basename(path)]);
   });
 
-  it("restores an unset TMPDIR even when the load throws", () => {
-    vi.stubEnv("TMPDIR", undefined);
-    expect(() =>
-      withPrivateTmpdir(
+  it("reuses an identical copy without rewriting it", () => {
+    const dir = join(root, "reuse");
+    const first = materializeAddon(addon, dir);
+    const inode = statSync(first).ino;
+    expect(materializeAddon(addon, dir)).toBe(first);
+    expect(statSync(first).ino).toBe(inode);
+  });
+
+  it("replaces anything at the path that is not an exact private copy", () => {
+    const dir = join(root, "replace");
+    const path = materializeAddon(addon, dir);
+    const decoy = join(root, "decoy.node");
+    writeFileSync(decoy, addon);
+    const planted: [string, () => void][] = [
+      // Same size and owner: the case Bun's own extraction would trust.
+      ["same-size junk", () => writeFileSync(path, Buffer.alloc(addon.length), { mode: 0o600 })],
+      ["a truncated copy", () => writeFileSync(path, addon.subarray(1), { mode: 0o600 })],
+      [
+        "a copy others can read",
         () => {
-          throw new Error("dlopen failed");
+          writeFileSync(path, addon);
+          chmodSync(path, 0o644);
         },
-        join(root, "b"),
-      ),
-    ).toThrow("dlopen failed");
-    expect(process.env.TMPDIR).toBeUndefined();
+      ],
+      ["a symlink to an identical file", () => symlinkSync(decoy, path)],
+    ];
+    for (const [what, plant] of planted) {
+      rmSync(path);
+      plant();
+      expect(materializeAddon(addon, dir), what).toBe(path);
+      expect(lstatSync(path).isFile(), what).toBe(true);
+      expect(statSync(path).mode & 0o777, what).toBe(0o600);
+      expect(readFileSync(path).equals(addon), what).toBe(true);
+    }
+    expect(readdirSync(dir)).toEqual([basename(path)]);
   });
 
   it("refuses a directory others can access, or a symlink", () => {
     const open = join(root, "open");
     mkdirSync(open, { mode: 0o755 });
     chmodSync(open, 0o755);
-    expect(() => withPrivateTmpdir(() => 1, open)).toThrow(/mode 0700/);
+    expect(() => materializeAddon(addon, open)).toThrow(/mode 0700/);
     const link = join(root, "link");
     symlinkSync(join(root, "a", "native"), link);
-    expect(() => withPrivateTmpdir(() => 1, link)).toThrow(/mode 0700/);
+    expect(() => materializeAddon(addon, link)).toThrow(/mode 0700/);
   });
 });
 
