@@ -1,0 +1,4 @@
+{
+  "extends": "@hivemind/config/tsconfig/library.json",
+  "include": ["src", "test", "vitest.config.ts"]
+}
