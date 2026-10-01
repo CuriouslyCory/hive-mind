@@ -273,7 +273,6 @@ export const apiContract = {
         .input(setPlanStatusInputSchema)
         .output(setPlanStatusOutputSchema),
 
-
       log: {
         list: base
           .route({
@@ -509,7 +508,6 @@ export const apiContract = {
         })
         .input(checkSessionOverlapsInputSchema)
         .output(overlapPageSchema),
-
 
       scopes: {
         list: base
