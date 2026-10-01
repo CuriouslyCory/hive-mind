@@ -17,9 +17,10 @@ export const whoami: CommandDefinition = {
   name: "whoami",
   summary: "Show who the current credential belongs to (a user login or a Project key)",
   description: [
-    "Calls the server with the current credential: HIVEMIND_TOKEN when it is set,",
-    "otherwise the stored login for the server. Shows whether it is a user login",
-    "or a Project key, the server, and the Project bound to this directory.",
+    "Calls the server with the current credential: HIVEMIND_TOKEN when it is set",
+    "to a non-empty value (an empty one counts as unset), otherwise the stored",
+    "login for the server. Shows whether it is a user login or a Project key, the",
+    "server, and the Project bound to this directory.",
     "The token is never printed.",
   ].join("\n"),
   examples: ["hivemind whoami", "hivemind whoami --json", "HIVEMIND_TOKEN=... hivemind whoami"],
