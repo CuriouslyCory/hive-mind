@@ -1,0 +1,69 @@
+{
+  "items": [
+    {
+      "id": "c3d4e5f6-a7b8-4c9d-8e0f-2a3b4c5d6e7f",
+      "projectId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "seq": "42",
+      "writerXid": "9007199254740993",
+      "payloadVersion": 1,
+      "type": "task.claimed",
+      "actor": {
+        "kind": "user",
+        "userId": "0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e"
+      },
+      "actorSessionId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "planId": "6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b",
+      "taskId": "7a2e3d4c-5b6a-4f90-8b1c-2d3e4f5a6b7c",
+      "sessionId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "effectiveAt": "2026-10-01T12:05:00.000Z",
+      "createdAt": "2026-10-01T12:05:00.000Z",
+      "payload": {
+        "stolenFromSessionId": null,
+        "leaseExpiresAt": "2026-10-01T12:10:00.000Z"
+      }
+    },
+    {
+      "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+      "projectId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "seq": "41",
+      "writerXid": "9007199254740993",
+      "payloadVersion": 1,
+      "type": "plan.log_appended",
+      "actor": {
+        "kind": "project_key",
+        "keyId": "4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8"
+      },
+      "actorSessionId": null,
+      "planId": "6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b",
+      "taskId": null,
+      "sessionId": null,
+      "effectiveAt": "2026-10-01T12:05:00.000Z",
+      "createdAt": "2026-10-01T12:05:00.000Z",
+      "payload": {
+        "message": "Contract draft is up for review."
+      }
+    },
+    {
+      "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "projectId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "seq": "40",
+      "writerXid": "9007199254740992",
+      "payloadVersion": 1,
+      "type": "session.status_changed",
+      "actor": {
+        "kind": "system"
+      },
+      "actorSessionId": null,
+      "planId": null,
+      "taskId": null,
+      "sessionId": "5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9",
+      "effectiveAt": "2026-10-01T12:05:00.000Z",
+      "createdAt": "2026-10-01T12:10:00.000Z",
+      "payload": {
+        "from": "active",
+        "to": "stale"
+      }
+    }
+  ],
+  "nextCursor": "eyJzZXEiOiI0MCJ9"
+}

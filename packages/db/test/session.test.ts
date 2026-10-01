@@ -48,6 +48,7 @@ describe("nextCollectionGeneration", () => {
     collectionExpectedBatches: null,
     collectionPathCount: null,
     collectionContentHash: null,
+    collectionOmittedPathCount: null,
     collectionComplete: false,
     scopeHistoryIncomplete: false,
   };
@@ -55,18 +56,26 @@ describe("nextCollectionGeneration", () => {
   it("starts the first generation without marking history incomplete", () => {
     expect(nextCollectionGeneration(base, "c1")).toEqual({
       newGeneration: true,
+      coverageLost: false,
       columns: { ...base, collectionId: "c1" },
     });
   });
 
   it("marks history incomplete when the previous generation never completed", () => {
     const stored = { ...base, collectionId: "c1", collectionExpectedBatches: 2 };
-    expect(nextCollectionGeneration(stored, "c2").columns).toMatchObject({
-      collectionId: "c2",
-      collectionExpectedBatches: null,
-      collectionComplete: false,
-      scopeHistoryIncomplete: true,
+    expect(nextCollectionGeneration(stored, "c2")).toMatchObject({
+      coverageLost: true,
+      columns: {
+        collectionId: "c2",
+        collectionExpectedBatches: null,
+        collectionComplete: false,
+        scopeHistoryIncomplete: true,
+      },
     });
+    // Already lost: still incomplete, but not newly lost.
+    expect(
+      nextCollectionGeneration({ ...stored, scopeHistoryIncomplete: true }, "c2"),
+    ).toMatchObject({ coverageLost: false, columns: { scopeHistoryIncomplete: true } });
   });
 
   it("keeps history complete after a complete generation, and keeps a sticky flag", () => {
@@ -88,6 +97,7 @@ describe("nextCollectionGeneration", () => {
   it("resumes the same generation without changing anything", () => {
     expect(nextCollectionGeneration({ ...base, collectionId: "c1" }, "c1")).toEqual({
       newGeneration: false,
+      coverageLost: false,
       columns: null,
     });
   });
@@ -366,6 +376,16 @@ describeDb("heartbeatSession", () => {
       collectionContentHash: null,
       scopeHistoryIncomplete: true,
     });
+    const events = await eventsOf(testDb.db, project.id);
+    expect(events.map((e) => [e.type, e.payload])).toEqual([
+      ["session.heartbeat", expect.objectContaining({ newCollection: true })],
+      ["session.heartbeat", expect.objectContaining({ newCollection: false })],
+      [
+        "scope.coverage_lost",
+        { collectionId: first, reason: "unfinished_collection", pathCount: 2 },
+      ],
+      ["session.heartbeat", expect.objectContaining({ newCollection: true })],
+    ]);
   });
 
   it("is owner-only", async () => {

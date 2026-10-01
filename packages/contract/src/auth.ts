@@ -2,12 +2,26 @@ import { z } from "zod";
 import { idSchema, pageSchema, paginationInputShape } from "./common.ts";
 
 /**
- * Operations a Project key may perform. M1 keys can only identify themselves
- * and read their bound Project. M2 adds coordination permissions, so clients
- * must accept permission strings they do not know; the output schema checks
- * the `resource:action` form, not membership in this list.
+ * Operations a Project key may perform in its bound Project. The server grants
+ * every permission here to every Project key, including keys created before a
+ * permission was added: adding coordination permissions in M2 lets existing
+ * keys create Plans, run Sessions and claim Tasks (#12). Permissions come
+ * from this constant, never from a request or key metadata. Clients must
+ * accept permission strings they do not know; the output schema checks the
+ * `resource:action` form, not membership in this list.
  */
-export const PROJECT_KEY_PERMISSIONS = ["project:read"] as const;
+export const PROJECT_KEY_PERMISSIONS = [
+  "project:read",
+  "plan:read",
+  "plan:write",
+  "task:read",
+  "task:write",
+  "session:read",
+  "session:write",
+  "scope:read",
+  "scope:write",
+  "event:read",
+] as const;
 
 export type ProjectKeyPermission = (typeof PROJECT_KEY_PERMISSIONS)[number];
 
@@ -83,3 +97,22 @@ export type ListOrganizationsInput = z.input<typeof listOrganizationsInputSchema
 export const organizationPageSchema = pageSchema(organizationSchema);
 
 export type OrganizationPage = z.infer<typeof organizationPageSchema>;
+
+/**
+ * Who performed a coordination change, as recorded on Events and Plans. The
+ * server derives it from the authenticated principal; no request field can
+ * set it. A Project key acts as itself (its key ID is kept after the key is
+ * revoked or deleted), never as the User who created it. `system` is the
+ * maintenance sweep.
+ */
+export const ACTOR_KINDS = ["user", "project_key", "system"] as const;
+
+export type ActorKind = (typeof ACTOR_KINDS)[number];
+
+export const actorSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("user"), userId: idSchema }),
+  z.strictObject({ kind: z.literal("project_key"), keyId: idSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+
+export type Actor = z.infer<typeof actorSchema>;

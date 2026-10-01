@@ -15,7 +15,7 @@ import { allowedHosts, createAuth } from "../../src/server/auth";
 export const ORIGIN = "http://localhost:3000";
 
 export interface RequestOptions {
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   /** Sent as `Authorization: Bearer <token>`. */
   token?: string;
   /** JSON-encoded unless it is already a string. */

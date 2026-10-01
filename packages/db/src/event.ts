@@ -76,6 +76,27 @@ export interface EventPayloads {
   "session.ended": { summary: string; status: "ended" | "abandoned" };
   "scope.added": { source: ScopeSource; value: string };
   "scope.removed": { source: ScopeSource; value: string };
+  /** Touched paths a collection batch added as new Scopes (at most 16). */
+  "scope.touched": { collectionId: string; batchIndex: number; values: string[] };
+  /** A collection was verified against its manifest; its coverage is complete. */
+  "scope.collection_finalized": { collectionId: string; pathCount: number };
+  /**
+   * The Session's sticky scope_history_incomplete was set: `pathCount` paths
+   * were omitted by the client, could not be stored as written, or exceeded
+   * the Session's touched-Scope limit; or (`unfinished_collection`) a
+   * heartbeat started a new collection while `collectionId` was unfinished,
+   * with `pathCount` its registered path count (0 if no manifest). Written
+   * only when the flag changes.
+   */
+  "scope.coverage_lost": {
+    collectionId: string | null;
+    reason:
+      | "omitted_paths"
+      | "unrepresentable_paths"
+      | "touched_capacity"
+      | "unfinished_collection";
+    pathCount: number;
+  };
 }
 
 export type EventType = keyof EventPayloads;
@@ -100,6 +121,9 @@ export const EVENT_PAYLOAD_VERSIONS: { readonly [T in EventType]: number } = {
   "session.ended": 1,
   "scope.added": 1,
   "scope.removed": 1,
+  "scope.touched": 1,
+  "scope.collection_finalized": 1,
+  "scope.coverage_lost": 1,
 };
 
 /**

@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "sessionId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "otherSessionId": "5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9",
+      "scope": {
+        "id": "1d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a",
+        "source": "declared",
+        "value": "packages/contract/**"
+      },
+      "otherScope": {
+        "id": "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d",
+        "source": "declared",
+        "value": "packages/*/src/**"
+      },
+      "kind": "overlap",
+      "witness": "packages/contract/src/a"
+    }
+  ],
+  "nextCursor": null,
+  "complete": false,
+  "incompleteSessionIds": ["5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9"]
+}

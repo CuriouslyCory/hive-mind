@@ -72,3 +72,71 @@ export function pageSchema<T extends z.ZodType>(item: T) {
     nextCursor: cursorSchema.nullable(),
   });
 }
+
+const utf8 = new TextEncoder();
+
+/** Size of `value` in UTF-8, the unit of every byte limit in the contract. */
+export function utf8ByteLength(value: string): number {
+  return utf8.encode(value).byteLength;
+}
+
+/** Largest markdown body, Plan log message, Session summary or block reason. */
+export const MAX_MARKDOWN_BYTES = 8 * 1024;
+
+// Control characters other than tab, line feed and carriage return. Markdown
+// needs line breaks; an escape sequence in stored text would reach terminals.
+const CONTROL_CHARACTERS_EXCEPT_WHITESPACE = /[^\P{Cc}\t\n\r]/u;
+
+/**
+ * Bounded markdown or multi-line plain text: 1 to `maxBytes` bytes of UTF-8,
+ * not only whitespace, no control characters except tab and line breaks, and
+ * well-formed UTF-16 (a lone surrogate has no UTF-8 encoding). The code-unit
+ * `max` is implied by the byte bound and shows the limit in OpenAPI.
+ */
+export function markdownSchema(maxBytes: number = MAX_MARKDOWN_BYTES) {
+  return z
+    .string()
+    .min(1)
+    .max(maxBytes)
+    .refine((value) => value.isWellFormed(), "Must be valid Unicode text.")
+    .refine((value) => utf8ByteLength(value) <= maxBytes, `Must be at most ${maxBytes} bytes.`)
+    .refine((value) => value.trim().length > 0, "Must not be blank.")
+    .refine(
+      (value) => !CONTROL_CHARACTERS_EXCEPT_WHITESPACE.test(value),
+      "Must not contain control characters other than tabs and line breaks.",
+    );
+}
+
+/**
+ * Single-line text such as a Session's agent or intent: `nameSchema` plus
+ * well-formed UTF-16. M1 names keep `nameSchema` unchanged.
+ */
+export function textSchema(max: number) {
+  return nameSchema(max).refine((value) => value.isWellFormed(), "Must be valid Unicode text.");
+}
+
+/**
+ * Unsigned 64-bit integers (an Event's `seq` and `writerXid`) as decimal
+ * strings. A JavaScript number loses precision above 2^53, so they never
+ * travel as numbers.
+ */
+export const decimalStringSchema = z
+  .string()
+  .max(20)
+  .regex(/^(?:0|[1-9][0-9]*)$/, "Must be a decimal integer string.");
+
+/** A non-negative count. */
+export const countSchema = z.int().min(0);
+
+/**
+ * A bounded list inside a larger response (a status section, the claims a
+ * heartbeat renewed). `complete: false` means more records exist than the
+ * response holds; the field's documentation names the paged route that
+ * lists them all. It is never a silent truncation.
+ */
+export function boundedListSchema<T extends z.ZodType>(item: T, max: number) {
+  return z.strictObject({
+    items: z.array(item).max(max),
+    complete: z.boolean(),
+  });
+}

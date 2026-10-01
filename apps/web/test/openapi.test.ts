@@ -2,13 +2,59 @@ import { readFile } from "node:fs/promises";
 import { API_BASE_PATH, API_ERRORS } from "@hivemind/contract";
 import { describeDb } from "@hivemind/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { NOT_IMPLEMENTED_MESSAGE } from "../src/server/api/not-implemented";
 import { generateOpenAPIDocument, OPENAPI_DOCUMENT_PATH } from "../src/server/api/router";
 import { type ApiHarness, createApiHarness, ORIGIN, type SignedInUser } from "./support/api";
 
 // The OpenAPI document is generated from the contract the server implements.
-// These tests pin it to the contract's golden route table and check that the
-// running handler answers each documented operation with its documented
-// success status.
+// These tests pin it to the contract's golden route tables (the M1 routes and
+// the coordination routes of #12) and check that the running handler answers
+// each documented operation with its documented success status.
+
+const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json"];
+
+/**
+ * TEMPORARY: coordination operations whose handler is still a stub in
+ * `src/server/api/not-implemented.ts`. They are checked for their 401 and
+ * for the stub's 500 until implemented; whoever implements one removes it
+ * here and adds a valid request to `bodies` below. Empty before #12 merges.
+ */
+const NOT_YET_SERVED = new Set([
+  "listPlans",
+  "createPlan",
+  "getPlan",
+  "updatePlan",
+  "setPlanStatus",
+  "listPlanLog",
+  "appendPlanLog",
+  "listPlanTasks",
+  "addTask",
+  "claimTask",
+  "releaseTask",
+  "startTask",
+  "blockTask",
+  "completeTask",
+  "listSessions",
+  "startSession",
+  "getSession",
+  "updateSession",
+  "heartbeatSession",
+  "attachSession",
+  "endSession",
+  "listSessionClaims",
+  "listSessionEvents",
+  "checkSessionOverlaps",
+  "listSessionScopes",
+  "addSessionScope",
+  "removeSessionScope",
+  "registerCollectionManifest",
+  "uploadCollectionBatch",
+  "finalizeCollection",
+  "listProjectEvents",
+  "getProjectStatus",
+]);
+
+type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
 interface Operation {
   method: string;
@@ -22,7 +68,7 @@ async function documentedOperations(): Promise<Operation[]> {
   const document = await generateOpenAPIDocument();
   const operations: Operation[] = [];
   for (const [path, item] of Object.entries(document.paths ?? {})) {
-    for (const method of ["get", "post", "delete"] as const) {
+    for (const method of ["get", "post", "patch", "put", "delete"] as const) {
       const operation = item?.[method];
       if (!operation) continue;
       const statuses = Object.keys(operation.responses ?? {}).map(Number);
@@ -41,13 +87,19 @@ async function documentedOperations(): Promise<Operation[]> {
 }
 
 describe("the OpenAPI document", () => {
-  it("matches the contract's golden route table", async () => {
-    const fixture = JSON.parse(
-      await readFile(
-        new URL("../../../packages/contract/test/fixtures/v1/routes.json", import.meta.url),
-        "utf8",
-      ),
-    ) as { operationId: string; method: string; path: string; successStatus: number }[];
+  it("matches the contract's golden route tables", async () => {
+    const fixture: { operationId: string; method: string; path: string; successStatus: number }[] =
+      [];
+    for (const name of ROUTE_FIXTURES) {
+      fixture.push(
+        ...JSON.parse(
+          await readFile(
+            new URL(`../../../packages/contract/test/fixtures/v1/${name}`, import.meta.url),
+            "utf8",
+          ),
+        ),
+      );
+    }
     const operations = await documentedOperations();
     const key = (op: {
       operationId: string;
@@ -103,24 +155,65 @@ describeDb("the served API", () => {
   it("answers each documented operation with its documented statuses", async () => {
     const key = await api.createKey(owner, projectId);
     // A valid request for each operation, as the owner.
+    const sessionId = crypto.randomUUID();
     const bodies: Record<string, unknown> = {
       createProject: { organizationId: owner.organizationId, slug: "openapi", name: "OpenAPI" },
       createProjectKey: { name: "openapi" },
+      createPlan: { planId: crypto.randomUUID(), title: "OpenAPI" },
+      updatePlan: { title: "OpenAPI" },
+      setPlanStatus: { status: "active" },
+      appendPlanLog: { eventId: crypto.randomUUID(), message: "Progress." },
+      addTask: { taskId: crypto.randomUUID(), title: "OpenAPI" },
+      claimTask: { sessionId },
+      releaseTask: { sessionId },
+      startTask: { sessionId },
+      blockTask: { sessionId, reason: "Waiting for review." },
+      completeTask: { sessionId },
+      startSession: { sessionId, agent: "openapi", intent: "Check the OpenAPI document" },
+      updateSession: { status: "idle" },
+      heartbeatSession: {},
+      attachSession: { planRef: null },
+      endSession: { summary: "Checked." },
+      addSessionScope: { pattern: "apps/web/**" },
+      registerCollectionManifest: {
+        pathCount: 0,
+        batchCount: 0,
+        omittedPathCount: 0,
+        contentHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      },
+      uploadCollectionBatch: { batchIndex: 0, paths: ["README.md"] },
+      finalizeCollection: {},
+    };
+    const nestedIds: Record<string, string> = {
+      "{planRef}": "PLAN-1",
+      "{taskId}": crypto.randomUUID(),
+      "{sessionId}": sessionId,
+      "{scopeId}": crypto.randomUUID(),
+      "{collectionId}": crypto.randomUUID(),
     };
     for (const operation of await documentedOperations()) {
-      const path = operation.path.replace("{id}", projectId).replace("{keyId}", key.id);
+      let path = operation.path.replace("{id}", projectId).replace("{keyId}", key.id);
+      for (const [parameter, value] of Object.entries(nestedIds)) {
+        path = path.replace(parameter, value);
+      }
       const response = await api.request(path, {
-        method: operation.method as "GET" | "POST" | "DELETE",
+        method: operation.method as Method,
         token: owner.token,
         body: bodies[operation.operationId],
       });
-      expect([operation.operationId, response.status]).toEqual([
-        operation.operationId,
-        operation.successStatus,
-      ]);
+      if (NOT_YET_SERVED.has(operation.operationId)) {
+        // The request passed input validation and reached the stub.
+        expect([operation.operationId, response.status]).toEqual([operation.operationId, 500]);
+        expect(await response.json()).toMatchObject({ message: NOT_IMPLEMENTED_MESSAGE });
+      } else {
+        expect([operation.operationId, response.status]).toEqual([
+          operation.operationId,
+          operation.successStatus,
+        ]);
+      }
 
       const anonymous = await api.request(path, {
-        method: operation.method as "GET" | "POST" | "DELETE",
+        method: operation.method as Method,
         body: bodies[operation.operationId],
       });
       expect(anonymous.status).toBe(401);

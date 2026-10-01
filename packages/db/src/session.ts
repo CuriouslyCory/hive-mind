@@ -292,11 +292,12 @@ export async function attachSession(
 }
 
 /** The collection columns of a Session that a heartbeat's generation rule reads and writes. */
-export interface CollectionState {
+export interface CollectionGenerationState {
   collectionId: string | null;
   collectionExpectedBatches: number | null;
   collectionPathCount: number | null;
   collectionContentHash: string | null;
+  collectionOmittedPathCount: number | null;
   collectionComplete: boolean;
   scopeHistoryIncomplete: boolean;
 }
@@ -308,21 +309,29 @@ export interface CollectionState {
  * is not complete, coverage was lost, so the sticky `scopeHistoryIncomplete`
  * is set; then the new id is stored with no manifest and not complete. The
  * same `collectionId` resumes the current generation and changes nothing.
- * Returns the columns to write (none on resume).
+ * Returns the columns to write (none on resume) and whether the sticky flag
+ * was newly set, which the heartbeat records as `scope.coverage_lost`.
  */
 export function nextCollectionGeneration(
-  stored: CollectionState,
+  stored: CollectionGenerationState,
   collectionId: string,
-): { newGeneration: true; columns: CollectionState } | { newGeneration: false; columns: null } {
-  if (stored.collectionId === collectionId) return { newGeneration: false, columns: null };
+):
+  | { newGeneration: true; coverageLost: boolean; columns: CollectionGenerationState }
+  | { newGeneration: false; coverageLost: false; columns: null } {
+  if (stored.collectionId === collectionId) {
+    return { newGeneration: false, coverageLost: false, columns: null };
+  }
   const previousIncomplete = stored.collectionId !== null && !stored.collectionComplete;
   return {
     newGeneration: true,
+    // True when this generation change is what first lost coverage.
+    coverageLost: previousIncomplete && !stored.scopeHistoryIncomplete,
     columns: {
       collectionId,
       collectionExpectedBatches: null,
       collectionPathCount: null,
       collectionContentHash: null,
+      collectionOmittedPathCount: null,
       collectionComplete: false,
       scopeHistoryIncomplete: stored.scopeHistoryIncomplete || previousIncomplete,
     },
@@ -418,6 +427,20 @@ export async function heartbeatSession(
       .where(eq(agentSession.id, session.id))
       .returning();
     if (!row) throw new Error("agent_session update returned no row");
+    if (generation.coverageLost) {
+      await insertEvent(tx, {
+        projectId: input.projectId,
+        type: "scope.coverage_lost",
+        payload: {
+          collectionId: session.collectionId,
+          reason: "unfinished_collection",
+          pathCount: session.collectionPathCount ?? 0,
+        },
+        actor,
+        sessionId: session.id,
+        now,
+      });
+    }
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "session.heartbeat",

@@ -226,6 +226,12 @@ export const agentSession = pgTable(
     collectionExpectedBatches: integer(),
     collectionPathCount: integer(),
     collectionContentHash: text(),
+    // Changed paths the client registered as not uploadable (invalid UTF-8,
+    // over 256 bytes, or beyond the manifest's path limit). It is written
+    // with the other manifest columns and read only while
+    // collection_path_count is set, so a new generation that clears the
+    // manifest need not clear it. Any omission loses coverage for good.
+    collectionOmittedPathCount: integer(),
     collectionComplete: boolean().notNull().default(false),
     // Sticky: once historical touched-path coverage is lost (capacity or
     // representation failures, or an unfinished collection superseded), it
@@ -287,6 +293,10 @@ export const agentSession = pgTable(
           "(collection_id is not null and collection_expected_batches >= 0 and collection_path_count >= 0 " +
           "and collection_content_hash is not null)",
       ),
+    ),
+    check(
+      "agent_session_collection_omitted_check",
+      sql.raw("collection_omitted_path_count is null or collection_omitted_path_count >= 0"),
     ),
     check(
       "agent_session_collection_complete_check",
