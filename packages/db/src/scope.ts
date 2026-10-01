@@ -22,12 +22,13 @@
 
 /** UTF-8 bound for one declared pattern or touched path. */
 export const SCOPE_VALUE_MAX_BYTES = 256;
+
+import type { ScopeSource } from "./schema/scope.ts";
+
 /** Product states one declared/declared comparison may visit. */
 export const SCOPE_PAIR_STATE_BUDGET = 65_536;
 /** Matcher comparisons one request may run (see `ScopeMatchContext`). */
 export const SCOPE_COMPARISON_BUDGET = 4_096;
-
-export type ScopeSource = "declared" | "touched";
 
 // ---------------------------------------------------------------------------
 // Validation and normalization
