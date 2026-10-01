@@ -26,6 +26,12 @@ export const CLI_ERROR_CODES = {
   credentialStore: "CREDENTIAL_STORE_ERROR",
   /** A local file could not be read or written (other than `.hivemind.json` parse errors). */
   io: "IO_ERROR",
+  /** `login`: the device code expired before it was approved. */
+  loginExpired: "LOGIN_EXPIRED",
+  /** `login`: the server ended the device flow for another reason (unknown client, code already used). */
+  loginFailed: "LOGIN_FAILED",
+  /** `logout`: the local login was removed, but the server did not confirm it revoked the token. */
+  revocationFailed: "REVOCATION_FAILED",
   /** Interrupted by the user (SIGINT/SIGTERM) or a prompt was dismissed. */
   cancelled: "CANCELLED",
   /** A bug: an exception nothing above explains. */

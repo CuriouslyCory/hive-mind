@@ -1,4 +1,3 @@
-import { createDb } from "@hivemind/db";
 import {
   type APIRequestContext,
   type Browser,
@@ -7,10 +6,11 @@ import {
   request as playwrightRequest,
   test,
 } from "@playwright/test";
-import { type TestHelpers, testUtils } from "better-auth/plugins";
+import type { TestHelpers } from "better-auth/plugins";
 import pg from "pg";
-import { CLI_CLIENT_ID, createAuth } from "../../src/server/auth";
-import { E2E_AUTH_ENV, E2E_BASE_URL, E2E_SERVES_BUILD, e2eDatabaseUrl } from "./e2e-env";
+import { CLI_CLIENT_ID } from "../../src/server/auth";
+import { E2E_BASE_URL, e2eDatabaseUrl } from "./e2e-env";
+import { signedInPage as signedInPageAs, testUsers } from "./support";
 
 // The CLI's device login in a real browser: the CLI side speaks the protocol
 // over HTTP, and a signed-in browser approves or denies on /device. Users and
@@ -26,18 +26,7 @@ let cli: APIRequestContext;
 
 test.beforeAll(async () => {
   pool = new pg.Pool({ connectionString: e2eDatabaseUrl(), max: 2 });
-  const auth = createAuth({
-    db: createDb(pool),
-    secret: E2E_AUTH_ENV.BETTER_AUTH_SECRET,
-    github: {
-      clientId: E2E_AUTH_ENV.GITHUB_CLIENT_ID,
-      clientSecret: E2E_AUTH_ENV.GITHUB_CLIENT_SECRET,
-    },
-    oauthProxySecret: E2E_AUTH_ENV.OAUTH_PROXY_SECRET,
-    allowedHosts: [new URL(E2E_BASE_URL).host],
-    plugins: [testUtils()],
-  });
-  users = ((await auth.$context) as unknown as { test: TestHelpers }).test;
+  users = await testUsers(pool);
   cli = await playwrightRequest.newContext({ baseURL: E2E_BASE_URL });
 });
 
@@ -46,24 +35,8 @@ test.afterAll(async () => {
   await pool?.end();
 });
 
-/** A new User, and a page signed in as them with a login session cookie. */
-async function signedInPage(browser: Browser) {
-  const user = await users.saveUser(users.createUser());
-  const cookies = await users.getCookies({
-    userId: user.id,
-    domain: new URL(E2E_BASE_URL).hostname,
-  });
-  const context = await browser.newContext();
-  // Named as the app server names them, which depends on its NODE_ENV.
-  await context.addCookies(
-    cookies.map((cookie) => {
-      const name = cookie.name.replace(/^__Secure-/, "");
-      return E2E_SERVES_BUILD
-        ? { ...cookie, name: `__Secure-${name}`, secure: true }
-        : { ...cookie, name, secure: false };
-    }),
-  );
-  return { user, page: await context.newPage() };
+function signedInPage(browser: Browser) {
+  return signedInPageAs(browser, users);
 }
 
 interface DeviceCodeResponse {

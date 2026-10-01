@@ -13,7 +13,9 @@ function install(dir: string, body: string): string {
 }
 
 /**
- * Behaves like secret-tool store/lookup/clear against files in `state`. Every
+ * Behaves like secret-tool store/lookup/clear against files in `state`,
+ * including the real tool's exit 1 with no output from `lookup` and `clear`
+ * when nothing matches (Ubuntu 24.04). Every
  * argv is appended to `state/argv.log` and every stdin payload to
  * `state/stdin.log`, so tests can check where the secret travelled.
  */
@@ -29,7 +31,7 @@ key=$(printf '%s' "$*" | od -An -tx1 | tr -d ' \\n')
 case "$cmd" in
   store) cat > "$state/item-$key"; cat "$state/item-$key" >> "$state/stdin.log" ;;
   lookup) [ -f "$state/item-$key" ] || exit 1; cat "$state/item-$key" ;;
-  clear) rm -f "$state/item-$key" ;;
+  clear) [ -f "$state/item-$key" ] || exit 1; rm -f "$state/item-$key" ;;
   *) echo "secret-tool: unknown command" >&2; exit 2 ;;
 esac`,
   );

@@ -66,6 +66,16 @@ describe("libsecret store", () => {
     expect(readFileSync(join(state, "stdin.log"), "utf8")).toBe(`${SECRET}${SECRET}-2`);
   });
 
+  it("deletes a missing item as 'not deleted', like the real secret-tool's silent exit 1", async () => {
+    const base = fresh();
+    const state = join(base, "state");
+    const store = storeWith(workingSecretTool(join(base, "bin"), state));
+    expect(await store.delete(ORIGIN)).toEqual({ ok: true, deleted: false });
+    expect(await store.set(ORIGIN, SECRET)).toEqual({ ok: true });
+    expect(await store.delete(ORIGIN)).toEqual({ ok: true, deleted: true });
+    expect(await store.delete(ORIGIN)).toEqual({ ok: true, deleted: false });
+  });
+
   it("is unavailable when secret-tool is not installed", async () => {
     const store = storeWith(join(fresh(), "missing"));
     expect(await store.get(ORIGIN)).toMatchObject({ ok: false, reason: "unavailable" });
@@ -75,6 +85,8 @@ describe("libsecret store", () => {
   it.each([
     "secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY",
     "secret-tool: The name org.freedesktop.secrets was not provided by any .service files",
+    "secret-tool: Object does not exist at path \u201c/org/freedesktop/secrets/collection/login\u201d",
+    "secret-tool: Cannot create an item in a locked collection",
   ])("is unavailable without a Secret Service (%s)", async (stderr) => {
     const store = storeWith(failingSecretTool(join(fresh(), "bin"), stderr));
     expect(await store.get(ORIGIN)).toMatchObject({ ok: false, reason: "unavailable" });
