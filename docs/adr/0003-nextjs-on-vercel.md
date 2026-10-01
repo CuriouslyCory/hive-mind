@@ -26,7 +26,7 @@ The M0 plan ([#2](https://github.com/CuriouslyCory/hive-mind/issues/2)) found tw
 
 - **Every data read carries its own check.** Forgetting `requireLoginSession()` in a new page exposes it even though the proxy still redirects cookieless requests. M3 reviewers should look for it on every new page and Server Action.
 - **A bogus cookie gets a 200, then a streamed redirect.** The proxy sees a cookie and lets the request through; the page's shell renders with status 200; `requireLoginSession()` inside `<Suspense>` then redirects in the stream. A request with no cookie gets a 307 from the proxy. Tests that check gating must account for both.
-- **`/api/*` is never redirected.** M1's bearer-auth routes and M2's `/api/v1` routes must return 401 themselves.
+- **`/api/*` is never redirected.** M1's bearer-auth routes and M2's `/api/v1` routes must return 401 themselves. See ADR-0013.
 - `apps/web/test/proxy.test.ts` uses `unstable_doesMiddlewareMatch` from `next/experimental/testing/server`: Next 16.3 documents `unstable_doesProxyMatch` but doesn't export it.
 - **`jsx: "react-jsx"` is required** by Next 16.3 (not `preserve`), so `packages/config/tsconfig/nextjs.json` sets it. Next won't adjust a `tsconfig.json` that uses `extends`, so `apps/web/tsconfig.json` declares its own `include`.
 - **No `transpilePackages`.** The plan expected it; Turbopack in Next 16.3 resolves `@hivemind/db` and its `.ts` imports without it.
