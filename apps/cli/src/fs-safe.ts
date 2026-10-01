@@ -322,9 +322,12 @@ function ownerIsGone(content: string): boolean {
  * credential the other one just deleted.
  *
  * A lock left by a crashed process is broken when its pid no longer exists on
- * this host, or when it is older than `staleMs`. Breaking renames the file to
- * a unique name first, so of two processes breaking the same stale lock only
- * one succeeds, and it re-checks that what it moved is the stale lock it saw.
+ * this host, or when it is older than `staleMs`. An empty or unparseable lock
+ * (its owner died between creating and writing it) has no pid to check, so
+ * only age breaks it; a lock whose token cannot be written is removed at
+ * once. Breaking renames the file to a unique name first, so of two processes
+ * breaking the same stale lock only one succeeds, and it re-checks (inode and
+ * content) that what it moved is the stale lock it saw.
  */
 export async function withLock<T>(
   lockPath: string,
@@ -338,34 +341,50 @@ export async function withLock<T>(
   let delay = 10;
 
   for (;;) {
+    let created: FileHandle | null = null;
     try {
-      const handle = await open(lockPath, "wx", 0o600);
-      try {
-        await handle.writeFile(token, "utf8");
-      } finally {
-        await handle.close();
-      }
-      break;
+      created = await open(lockPath, "wx", 0o600);
     } catch (error) {
       if (errnoCode(error) !== "EEXIST") throw error;
     }
+    if (created !== null) {
+      let failed: { error: unknown } | null = null;
+      try {
+        await created.writeFile(token, "utf8");
+      } catch (error) {
+        failed = { error };
+      } finally {
+        // Closed before the unlink below: Windows cannot delete an open file.
+        await created.close().catch(() => undefined);
+      }
+      if (failed === null) break;
+      // An empty lock left behind would make every later command wait for it
+      // to go stale. Nobody else can have taken it over yet: a fresh empty
+      // lock is never broken.
+      await unlink(lockPath).catch(() => undefined);
+      throw failed.error;
+    }
 
+    // lstat before reading, and compare the inode after moving it aside, so
+    // the age and content we judge belong to the file we end up breaking.
+    const observedStats = await lstat(lockPath).catch(() => null);
     const observed = await readFile(lockPath, "utf8").catch(() => null);
-    const age = await lstat(lockPath).then(
-      (stats) => Date.now() - stats.mtimeMs,
-      () => 0,
-    );
-    // An empty file is a lock whose owner has not written its token yet.
-    if (observed !== null && observed !== "" && (ownerIsGone(observed) || age > staleMs)) {
+    const age = observedStats ? Date.now() - observedStats.mtimeMs : 0;
+    // An empty (or garbled) file is a lock whose owner has not written its
+    // token yet, or died before it could: only its age can make it stale.
+    if (observed !== null && observedStats && (ownerIsGone(observed) || age > staleMs)) {
       const aside = `${lockPath}.${randomBytes(6).toString("hex")}.stale`;
       const moved = await rename(lockPath, aside).then(
         () => true,
         () => false,
       );
       if (moved) {
+        const movedStats = await lstat(aside).catch(() => null);
         const movedContent = await readFile(aside, "utf8").catch(() => null);
         // Moved a fresh lock by mistake: put it back unless someone took the slot.
-        if (movedContent !== observed) await link(aside, lockPath).catch(() => undefined);
+        if (movedContent !== observed || movedStats?.ino !== observedStats.ino) {
+          await link(aside, lockPath).catch(() => undefined);
+        }
         await unlink(aside).catch(() => undefined);
       }
       continue;
