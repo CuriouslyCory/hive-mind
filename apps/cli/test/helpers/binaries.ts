@@ -9,6 +9,9 @@ export const SHIPPED_BINARY = join(CLI_ROOT, "dist", "hivemind");
 /** The test/native/probe.ts harness, compiled for the host by test/global-setup.ts. */
 export const PROBE_BINARY = join(CLI_ROOT, "dist", "test", "probe");
 
+/** src/cli.ts with test/fixtures/test-commands.ts, compiled by test/global-setup.ts. */
+export const SHELL_BINARY = join(CLI_ROOT, "dist", "test", "shell");
+
 export function shippedBinary(): string {
   if (!existsSync(SHIPPED_BINARY)) {
     throw new Error(
@@ -52,7 +55,7 @@ export function run(
 export function runAsync(
   binary: string,
   args: readonly string[],
-  options: { env?: NodeJS.ProcessEnv; cwd?: string; timeout?: number } = {},
+  options: { env?: NodeJS.ProcessEnv; cwd?: string; timeout?: number; input?: string } = {},
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
@@ -70,7 +73,7 @@ export function runAsync(
     });
     child.on("error", reject);
     child.on("close", (status) => resolve({ status, stdout, stderr }));
-    child.stdin.end();
+    child.stdin.end(options.input);
   });
 }
 

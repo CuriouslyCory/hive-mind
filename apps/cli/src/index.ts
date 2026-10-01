@@ -1,34 +1,37 @@
-import { BUILD_COMMIT, BUILD_TARGET, BUILD_VERSION, DEFAULT_ORIGIN } from "./build-info.ts";
+import { runCli } from "./cli.ts";
+import { COMMANDS } from "./commands/index.ts";
 
-// Placeholder entrypoint from the M1 spike: only --version and --help. The
-// command shell (login, whoami, init, key, JSON output, exit codes) replaces
-// this file in cli-core; keep it free of logic worth preserving.
+// Entrypoint of the compiled `hivemind` binary. Everything testable lives in
+// cli.ts; this file only wires the real process to it.
 
-const HELP = `hivemind - command-line client for Hive Mind
-
-Usage:
-  hivemind [--version | --help]
-
-Options:
-  --version   Print the version, build commit and target
-  -h, --help  Show this help
-
-Default server: ${DEFAULT_ORIGIN}
-`;
-
-export function main(argv: readonly string[]): number {
-  const [arg, ...rest] = argv;
-  if (rest.length === 0 && arg === "--version") {
-    process.stdout.write(`hivemind ${BUILD_VERSION} (${BUILD_COMMIT}, ${BUILD_TARGET})\n`);
-    return 0;
-  }
-  if (arg === undefined || (rest.length === 0 && (arg === "--help" || arg === "-h"))) {
-    process.stdout.write(HELP);
-    return 0;
-  }
-  // Arguments are not echoed back: a mistyped command line may contain a token.
-  process.stderr.write("hivemind: unknown command or option. Run 'hivemind --help'.\n");
-  return 1;
+// A closed pipe (`hivemind ... | head -1`) is not an error worth a stack trace.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") process.exit(process.exitCode ?? 0);
+    throw error;
+  });
 }
 
-process.exitCode = main(process.argv.slice(2));
+// First SIGINT/SIGTERM asks the running command to stop (device polling,
+// prompts and requests watch this signal); a second one exits at once.
+const interrupt = new AbortController();
+for (const name of ["SIGINT", "SIGTERM"] as const) {
+  process.on(name, () => {
+    if (interrupt.signal.aborted) process.exit(130);
+    interrupt.abort(new Error(`received ${name}`));
+  });
+}
+
+process.exitCode = await runCli(
+  {
+    argv: process.argv.slice(2),
+    env: process.env,
+    cwd: process.cwd(),
+    platform: process.platform,
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    signal: interrupt.signal,
+  },
+  COMMANDS,
+);

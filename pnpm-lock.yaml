@@ -164,7 +164,13 @@ settings:
 
 catalogs:
   default:
+    '@orpc/client':
+      specifier: 1.15.4
+      version: 1.15.4
     '@orpc/contract':
+      specifier: 1.15.4
+      version: 1.15.4
+    '@orpc/openapi-client':
       specifier: 1.15.4
       version: 1.15.4
     '@types/node':
@@ -223,8 +229,17 @@ importers:
       '@hivemind/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@hivemind/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
       '@orpc/client':
-        specifier: 1.15.4
+        specifier: 'catalog:'
+        version: 1.15.4
+      '@orpc/contract':
+        specifier: 'catalog:'
+        version: 1.15.4
+      '@orpc/openapi-client':
+        specifier: 'catalog:'
         version: 1.15.4
       '@types/node':
         specifier: 'catalog:'
@@ -241,6 +256,9 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 5.0.2(@types/node@24.19.0)(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
     optionalDependencies:
       '@napi-rs/keyring-darwin-arm64':
         specifier: 2.1.0
@@ -1436,6 +1454,9 @@ packages:
 
   '@orpc/contract@1.15.4':
     resolution: {integrity: sha512-mxH+kuIsKz7BGsoqDHShnMjKG7GvCMGpvxTtJnkpbowIp2iBz8XiWosiWBybZcUl1Dy9W77TyOk6pNqG5I4D6w==}
+
+  '@orpc/openapi-client@1.15.4':
+    resolution: {integrity: sha512-z+8gRUp9bhVuA2tFlzJDCaUbLV/whZec25fmYb0VtP2N6iPfY0d7hYZvX47F/WrcuwaLCTqkbVAzK8Xb2cKF/w==}
 
   '@orpc/shared@1.15.4':
     resolution: {integrity: sha512-syNylxXmv1WnroSDUvtYjuvu0YMAYzkLTjFPa0CggnaF3DH2YmAnRS5GGGzSPRAbhMtRAXArIoM7GVrRNKHxng==}
@@ -3430,6 +3451,15 @@ snapshots:
       '@orpc/shared': 1.15.4
       '@standard-schema/spec': 1.1.0
       openapi-types: 12.1.3
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+
+  '@orpc/openapi-client@1.15.4':
+    dependencies:
+      '@orpc/client': 1.15.4
+      '@orpc/contract': 1.15.4
+      '@orpc/shared': 1.15.4
+      '@orpc/standard-server': 1.15.4
     transitivePeerDependencies:
       - '@opentelemetry/api'
 
