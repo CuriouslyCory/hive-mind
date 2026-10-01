@@ -9,6 +9,7 @@ import { POST as authCatchallPost } from "../src/app/api/auth/[...all]/route";
 import { bearerToken } from "../src/server/api/principal";
 import { createApiHandler } from "../src/server/api/router";
 import { CLI_CLIENT_ID, PROJECT_KEY_PREFIX } from "../src/server/auth";
+import { decideDeviceRequest } from "../src/server/device-approval";
 import {
   type ApiHarness,
   createApiHarness,
@@ -186,9 +187,11 @@ describeDb("/api/v1 authentication", () => {
         }),
       );
       expect(opened.status).toBe(200);
-      expect((await deviceRequest("/device/approve", { userCode: user_code }, cookie)).status).toBe(
-        200,
-      );
+      // Approval is the /device page's server action; its HTTP route is disabled.
+      const browser = new Headers({ cookie, origin: ORIGIN, host: new URL(ORIGIN).host });
+      expect(await decideDeviceRequest(api.auth, browser, String(user_code), "approve")).toEqual({
+        kind: "approved",
+      });
       const issued = await deviceRequest("/device/token", {
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
         device_code,
