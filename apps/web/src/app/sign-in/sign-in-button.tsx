@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { authClient } from "../../lib/auth-client";
 
-export function SignInButton() {
+/** `callbackURL` must already be a validated same-origin path. */
+export function SignInButton({ callbackURL }: { callbackURL: string }) {
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -12,7 +13,7 @@ export function SignInButton() {
     setFailed(false);
     // Redirects the browser to GitHub on success. An error response resolves
     // with `error`; a network failure rejects.
-    const started = await authClient.signIn.social({ provider: "github", callbackURL: "/" }).then(
+    const started = await authClient.signIn.social({ provider: "github", callbackURL }).then(
       ({ error }) => !error,
       () => false,
     );
