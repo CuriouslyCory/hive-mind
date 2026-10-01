@@ -151,6 +151,44 @@ describe("whoami", () => {
   });
 });
 
+describe("login over a stored login", () => {
+  const signOuts = () => api.requests.filter((request) => request.url === "/api/auth/sign-out");
+
+  it("revokes the replaced login on the server once the new one is stored", async () => {
+    await loginAs();
+    const result = await run(["login", "--json"]);
+    expect(result.code, result.stderr).toBe(0);
+    const [issued] = api.issuedTokens;
+    expect((await manager().readStored(api.origin))?.token).toBe(issued);
+    expect(signOuts()).toEqual([
+      expect.objectContaining({ method: "POST", authorization: `Bearer ${USER_TOKEN}` }),
+    ]);
+    expect(api.users.has(USER_TOKEN)).toBe(false);
+    expect(data(result.stdout)).toMatchObject({ user: { email: "ada@example.com" } });
+    expect(result.stderr).not.toContain("warning:");
+    expect(result.stdout + result.stderr).not.toContain(USER_TOKEN);
+  });
+
+  it("still logs in, with a warning, when the server does not revoke the replaced login", async () => {
+    await loginAs();
+    api.signOutStatus = 503;
+    const result = await run(["login", "--json"]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(onlyJsonLine(result.stdout)).toMatchObject({ ok: true, command: "login" });
+    expect((await manager().readStored(api.origin))?.token).toBe(api.issuedTokens[0]);
+    expect(result.stderr).toContain(
+      `warning: The previous login for ${api.origin} was replaced but not revoked on the server (HTTP 503)`,
+    );
+    expect(result.stdout + result.stderr).not.toContain(USER_TOKEN);
+  });
+
+  it("revokes nothing when no login was stored", async () => {
+    const result = await run(["login", "--json"]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(signOuts()).toEqual([]);
+  });
+});
+
 describe("logout", () => {
   it("revokes the stored login on the server and removes it locally", async () => {
     await loginAs();

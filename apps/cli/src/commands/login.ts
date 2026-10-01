@@ -6,7 +6,7 @@ import {
   requestDeviceCode,
 } from "../device-login.ts";
 import { isCliError } from "../errors.ts";
-import { hivemindTokenSet, STORE_DESCRIPTIONS } from "./shared.ts";
+import { hivemindTokenSet, revokeLoginToken, STORE_DESCRIPTIONS } from "./shared.ts";
 
 /** Per-request timeout while polling; a slow answer is retried with backoff, not fatal. */
 const DEVICE_REQUEST_TIMEOUT_MS = 15_000;
@@ -33,6 +33,9 @@ export const login: CommandDefinition = {
     "The login is stored for this server only, in the macOS Keychain or Secret",
     "Service when available (interactive terminals only), otherwise in a private",
     "credentials.json file. The token is never printed.",
+    "",
+    "A login already stored for this server is replaced, and the server is asked",
+    "to revoke it; if that fails, a warning says so and the login still succeeds.",
     "",
     "If HIVEMIND_TOKEN is set, the login is still stored, but HIVEMIND_TOKEN keeps",
     "taking precedence until you unset it.",
@@ -87,8 +90,25 @@ export const login: CommandDefinition = {
       },
     });
 
+    // Read the login being replaced before `save` overwrites it. Best effort:
+    // one this run cannot read (an OS store without a terminal, a broken
+    // entry) is replaced without being revoked.
+    const previous = await context
+      .credentials()
+      .readStored(origin)
+      .catch(() => null);
     const saved = await context.credentials().save(origin, accessToken);
     for (const warning of saved.warnings) context.report.warn(warning);
+    if (previous && previous.token !== accessToken) {
+      // Only after the new login is stored, so a failure here never leaves the
+      // user logged out; the old token would otherwise stay valid until it expires.
+      const failure = await revokeLoginToken(context, previous);
+      if (failure !== null) {
+        context.report.warn(
+          `The previous login for ${origin} was replaced but not revoked on the server (${failure}); it stays valid until it expires.`,
+        );
+      }
+    }
 
     let user: LoginData["user"] = null;
     try {
