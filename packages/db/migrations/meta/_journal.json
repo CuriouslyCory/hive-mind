@@ -22,6 +22,13 @@
       "when": 1790842394712,
       "tag": "0002_project_device_code_api_key",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790896160810,
+      "tag": "0003_m2_coordination",
+      "breakpoints": true
     }
   ]
 }
