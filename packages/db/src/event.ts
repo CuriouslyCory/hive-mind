@@ -27,9 +27,19 @@ export interface EventPayloads {
   "task.claimed": { leaseExpiresAt: string };
   /** A `--steal` takeover. The new holder is the Event's session_id. */
   "task.stolen": { fromSessionId: string; leaseExpiresAt: string };
-  /** The claim ended without the Task being done. */
+  /**
+   * The claim ended without the Task being done. The released holder is the
+   * Event's session_id. `lease_expired` and `session_abandoned` are
+   * time-driven: actor `system`, `effectiveAt` when the threshold was crossed.
+   */
   "task.released": {
-    reason: "released" | "lease_expired" | "session_ended" | "session_stale" | "plan_abandoned";
+    reason:
+      | "released"
+      | "lease_expired"
+      | "session_ended"
+      | "session_stale"
+      | "session_abandoned"
+      | "plan_abandoned";
   };
   "task.started": { from: TaskStatus };
   "task.blocked": { reason: string };
@@ -46,10 +56,24 @@ export interface EventPayloads {
     worktreePath: string | null;
   }>;
   "session.attached": { planId: string | null; taskId: string | null };
-  "session.heartbeat": { status: SessionStatus; collectionId: string | null };
+  /**
+   * `previousStatus` is the effective status before the heartbeat (`stale`
+   * when it revived the Session). `newCollection` is true when the heartbeat
+   * started a new touched-path collection generation.
+   */
+  "session.heartbeat": {
+    status: SessionStatus;
+    previousStatus: SessionStatus;
+    collectionId: string;
+    newCollection: boolean;
+  };
   /** A stored status the sweep or a mutation materialized (stale, abandoned). */
   "session.status_changed": { from: SessionStatus; to: SessionStatus };
-  "session.ended": { summary: string };
+  /**
+   * The first accepted final summary. `status` is `ended`, or `abandoned`
+   * when an abandoned Session accepted its summary and stayed abandoned.
+   */
+  "session.ended": { summary: string; status: "ended" | "abandoned" };
   "scope.added": { source: ScopeSource; value: string };
   "scope.removed": { source: ScopeSource; value: string };
 }

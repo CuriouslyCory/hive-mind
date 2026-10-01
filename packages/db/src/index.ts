@@ -55,6 +55,17 @@ export {
   sha256Hex,
 } from "./fingerprint.ts";
 export {
+  type Conflict,
+  claimConflictMessage,
+  effectiveSessionStatusSql,
+  type Forbidden,
+  MAX_CONFLICT_INTENT_LENGTH,
+  type NotFound,
+  type ReleasedClaim,
+  type SessionState,
+  sessionState,
+} from "./lifecycle.ts";
+export {
   CLAIM_LEASE_MS,
   effectiveSessionStatus,
   HEARTBEAT_INTERVAL_MS,
@@ -123,4 +134,44 @@ export {
   type ScopeValue,
   type TouchedPathResult,
 } from "./scope.ts";
+export {
+  type AttachSessionInput,
+  attachSession,
+  type CollectionState,
+  DEFAULT_PAGE_LIMIT,
+  type EndSessionInput,
+  endSession,
+  getSession,
+  type HeartbeatResult,
+  type HeartbeatSessionInput,
+  heartbeatSession,
+  type InvalidCursor,
+  listSessionClaims,
+  listSessions,
+  MAX_PAGE_LIMIT,
+  nextCollectionGeneration,
+  type OwnedSessionRef,
+  type Page,
+  type PlanRef,
+  pageLimit,
+  type SessionListFilter,
+  type SessionMetadata,
+  type SessionResult,
+  type StartSessionInput,
+  type StartSessionOutcome,
+  startSession,
+  type UpdateSessionInput,
+  updateSession,
+} from "./session.ts";
+export { type SweepOptions, type SweepResult, sweepCoordination } from "./sweep.ts";
+export {
+  blockTask,
+  type ClaimConflict,
+  claimTask,
+  doneTask,
+  releaseTask,
+  startTask,
+  type TaskActionInput,
+  type TaskActionOutcome,
+} from "./task-claims.ts";
 export { schema };
