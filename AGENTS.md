@@ -53,6 +53,13 @@ pnpm build
 - Internal packages: `workspace:*`. Versions shared across workspaces go in `catalog` in `pnpm-workspace.yaml` and are referenced as `catalog:`.
 - `packages/db` depends only on `drizzle-orm` and `pg`, plus an optional `vitest` peer that only its `./testing` export (the test harness) uses. It never imports `next`, better-auth or anything in `apps/*`.
 
+### CLI and API
+
+- CLI commands, flags, `--json` output and exit codes: `docs/cli.md`. Building and running the CLI locally: `README.md`.
+- Released CLIs depend on what `packages/contract/test/fixtures/v1/` pins. Removing or changing a route, status, field or error code there breaks them; adding a response field does not. See ADR-0009.
+- After changing device login, `/api/v1` auth or a CLI command, also run `TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres pnpm test:e2e` (Playwright; setup in `README.md`).
+- A user-visible CLI change needs a changeset: `pnpm changeset`.
+
 ### Naming
 
 - Say "login session" (`loginSession`) for better-auth's `session` rows. Session means an agent run. The other qualified terms are in `CONTEXT.md` → Naming rules.

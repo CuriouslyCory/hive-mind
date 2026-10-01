@@ -1,6 +1,6 @@
 # Setup
 
-One-time setup of the Vercel project, the Neon project and the GitHub OAuth apps. Only the repo owner can do these steps. Do them in order: each step needs the ones before it. H5 is optional and can be done at any time. H6 is the check to run after deploying.
+One-time setup of the Vercel project, the Neon project, the GitHub OAuth apps and the CLI releases. Only the repo owner can do these steps. Do them in order: each step needs the ones before it. H5 is optional and can be done at any time. H6 is the check to run after deploying. H7 sets up CLI releases and needs a production deployment that passed H6.
 
 Values in this guide are the current ones for the `hive-mind-web` Vercel project in the `curiouslycorys-projects` team.
 
@@ -109,7 +109,7 @@ vercel env add GITHUB_CLIENT_SECRET development
 
 ## H5. Optional
 
-- [ ] **Branch protection.** Protect `main` and require the status check `Lint, typecheck, test, build` (the job in `.github/workflows/ci.yml`). GitHub lists the check only after it has run once.
+- [ ] **Branch protection.** Protect `main` and require the status checks `Lint, typecheck, test, build` and `Browser tests` (the jobs in `.github/workflows/ci.yml`). GitHub lists a check only after it has run once.
 - [ ] **Turborepo remote cache.** Locally: `pnpm exec turbo login`, then `pnpm exec turbo link`. For GitHub Actions, add a `TURBO_TOKEN` secret and a `TURBO_TEAM` variable and pass both to the workflow's steps as env. `ci.yml` doesn't do that yet.
 
 ## H6. Verify after deploying
@@ -128,3 +128,28 @@ vercel env add GITHUB_CLIENT_SECRET development
 - [ ] Open the preview while logged in to Vercel and sign in with GitHub. You pass through production and land back on the preview, signed in.
 - [ ] In the Neon console, the new row in the `user` table is on the `preview/<git-branch>` database branch, not on the production database branch.
 - [ ] Users created on a preview have no GitHub login stored (oAuthProxy doesn't forward it), so their personal organization's slug comes from the display name. This is expected.
+
+**CLI login** (production, with a CLI built from `main`: `pnpm build`, then use `apps/cli/dist/hivemind`; its default server is production):
+
+- [ ] `hivemind login` prints a URL and a code. Open the URL, sign in, check that the page shows the same code, and approve. The CLI prints `Logged in to https://hive-mind-web-mu.vercel.app` with your name.
+- [ ] `hivemind whoami` shows your User and your personal organization.
+- [ ] In a scratch git repository, `hivemind init --name Scratch --slug scratch` writes `.hivemind.json`. Projects cannot be deleted yet, so use a name you don't mind keeping. `hivemind key create --name check` prints a secret, and `HIVEMIND_TOKEN=<secret> hivemind whoami` shows a Project key.
+- [ ] `hivemind key revoke <keyId>` (the id is in `hivemind key list`), then `hivemind logout`. After that, `hivemind whoami` exits 3.
+
+## H7. CLI releases
+
+The release workflow (`.github/workflows/release.yml`) builds the four CLI binaries, drafts a GitHub release with them, `SHA256SUMS` and `install.sh`, and publishes the draft and the npm packages after an approval. It needs these owner-only settings first.
+
+- [ ] **npm package name.** Confirm that you own the `@curiouslycory` npm scope and want the launcher published as `@curiouslycory/hivemind`. The name is set only in `apps/cli/npm/package.template.json`; the per-platform packages are named after it: `@curiouslycory/hivemind-linux-x64`, `-linux-arm64`, `-darwin-x64` and `-darwin-arm64`. If you choose another name, change that file and `docs/cli.md`.
+- [ ] **License.** Choose a license, add a `LICENSE` file and a `license` field in `apps/cli/npm/package.template.json`. The npm packages have no license until then.
+- [ ] **npm trusted publishing.** For each of the five packages, add a trusted publisher: repository `CuriouslyCory/hive-mind`, workflow `release.yml`, environment `release`. npm only accepts a trusted publisher for a package that exists, so for the first version either create the packages by hand, or add an `NPM_TOKEN` secret to the `release` environment, publish once, configure the trusted publishers and delete the secret.
+- [ ] **`release` environment.** In **Settings → Environments**, create `release`, add yourself as a required reviewer, and limit its deployment branches to `main`. The publish job checks for a required-reviewers rule and refuses to run without one. Optionally turn on immutable releases for the repository.
+- [ ] **Runners.** The repository is private, so check that the `ubuntu-24.04-arm`, `macos-15-intel` and `macos-15` runners are available to it and that the billing is acceptable (macOS minutes cost 10 times Linux minutes). `cli-native.yml` uses them on every PR that touches the CLI.
+- [ ] **Public access.** The curl installer downloads from this repository's GitHub releases, so it works for other people only if the repository, or a public copy of its releases, is public. npm provenance also needs a public repository; the workflow requests it only when the repository is public.
+
+**First release:**
+
+- [ ] Rehearse: run the Release workflow by hand (**Actions → Release → Run workflow**, `rehearsal` checked). It drafts `v<version>-rehearsal.<run>` as a prerelease and publishes nothing. Check the draft's assets, then delete the draft.
+- [ ] Run `pnpm version-packages` on a branch, open a PR with the result (version `0.1.0` and the changelog) and merge it. The push to `main` starts the Release workflow, which drafts `v0.1.0`.
+- [ ] Approve the publish job. It publishes the GitHub release, then the npm packages.
+- [ ] On a clean machine, install with the curl command and with `npm install -g @curiouslycory/hivemind` from [docs/cli.md](cli.md), and check `hivemind --version` and `hivemind login`.
