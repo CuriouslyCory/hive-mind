@@ -19,7 +19,7 @@ One step of a Plan, with a status (`todo`, `in_progress`, `blocked` or `done`). 
 _Avoid_: subtask, todo item
 
 **Session**:
-One agent run, recorded from start to end: which agent, owned by which User or Project key, on which machine, branch and worktree, with its intent, heartbeats and end summary. Sessions are the central concept of hive-mind: every agent run leaves one as its record. A Session can attach to a Plan and Task as its current focus; attaching is not claiming. See ADR-0014.
+One agent run, recorded from start to end: which agent, owned by which User or Project key, on which machine, git branch and commit, with its intent, heartbeats and end summary. Sessions are the central concept of hive-mind: every agent run leaves one as its record. A Session can attach to a Plan and Task as its current focus; attaching is not claiming. See ADR-0014.
 _Avoid_: agent session, run, login session
 
 **Claim**:
