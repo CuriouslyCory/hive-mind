@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { createApiClient } from "../src/client.ts";
+import { createApiClient, createOriginFetch } from "../src/client.ts";
 import { createFileStore } from "../src/credentials/file.ts";
 import { CliError } from "../src/errors.ts";
 import {
@@ -188,6 +188,32 @@ describe("API client", () => {
     );
     setTimeout(() => controller.abort(), 50);
     expect((await pending).code).toBe("CANCELLED");
+  });
+});
+
+describe("createOriginFetch", () => {
+  it("requests paths on the origin, without a bearer when there is no credential", async () => {
+    const server = await serve((_request, response) =>
+      sendJson(response, 200, { device_code: "d" }),
+    );
+    const fetchOnOrigin = createOriginFetch({ origin: server.origin, credential: null });
+    const response = await fetchOnOrigin("/api/auth/device/code", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_id: "hivemind-cli" }),
+    });
+    expect(await response.json()).toEqual({ device_code: "d" });
+    expect(server.requests).toEqual([
+      {
+        method: "POST",
+        url: "/api/auth/device/code",
+        authorization: undefined,
+        body: '{"client_id":"hivemind-cli"}',
+      },
+    ]);
+    const error = await caught(fetchOnOrigin("https://elsewhere.example/api/auth/device/code"));
+    expect(error.code).toBe("INTERNAL_ERROR");
+    expect(server.requests).toHaveLength(1);
   });
 });
 

@@ -203,16 +203,26 @@ function describeNetworkError(error: unknown): string {
 
 // ---------------------------------------------------------------------------
 
-export function createApiClient(options: ApiClientOptions): HivemindApi {
+/**
+ * The guarded fetch every backend request goes through: same-origin only,
+ * bearer attached here and nowhere else, `redirect: "manual"` with any 3xx
+ * turned into UNEXPECTED_REDIRECT, a timeout, the caller's abort signal, and
+ * transport failures mapped to TIMEOUT / CANCELLED / NETWORK_ERROR. Pass a
+ * path (`/api/auth/device/code`) or a Request on the origin. Exported for
+ * routes outside the oRPC contract, such as better-auth's device flow; it
+ * never retries.
+ */
+export function createOriginFetch(
+  options: ApiClientOptions,
+): (input: Request | string, init?: RequestInit) => Promise<Response> {
   const { origin, credential } = options;
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const source = credential?.source ?? null;
-
-  const guardedFetch = async (request: Request): Promise<Response> => {
+  return async (input: Request | string, init?: RequestInit): Promise<Response> => {
+    const request = typeof input === "string" ? new Request(new URL(input, origin), init) : input;
     const url = new URL(request.url);
     if (url.origin !== origin) {
-      // OpenAPILink builds URLs from our base URL, so this would be a bug.
+      // Only paths on the resolved origin are ever requested; anything else is a bug.
       throw new CliError(CLI_ERROR_CODES.internal, `Refusing to send a request outside ${origin}.`);
     }
     const headers = new Headers(request.headers);
@@ -281,6 +291,12 @@ export function createApiClient(options: ApiClientOptions): HivemindApi {
     }
     return response;
   };
+}
+
+export function createApiClient(options: ApiClientOptions): HivemindApi {
+  const { origin, credential } = options;
+  const source = credential?.source ?? null;
+  const guardedFetch = createOriginFetch(options);
 
   const link = new OpenAPILink(apiContract, {
     url: `${origin}${API_BASE_PATH}`,
