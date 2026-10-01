@@ -26,6 +26,7 @@
     "lint:root": "biome check .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
     "format": "biome check --write .",
     "db:generate": "turbo run db:generate",
     "db:migrate": "turbo run db:migrate"
