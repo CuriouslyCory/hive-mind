@@ -49,6 +49,10 @@ const NO_SERVICE_PATTERNS = [
   /could not connect/i,
   /failed to connect/i,
   /not provided by any \.service files/i,
+  // A bus without a `login` collection (Ubuntu 24.04 wording, with curly quotes).
+  /Object does not exist at path/i,
+  // A locked keyring that could not be unlocked without a prompt.
+  /locked collection/i,
 ];
 
 type RunOutcome =
@@ -191,8 +195,14 @@ export function createLibsecretStore(options: LibsecretStoreOptions = {}): Crede
     // `secret-tool clear` does not say whether anything matched, so look first.
     const existing = await get(origin);
     if (!existing.ok) return existing;
+    if (!existing.found) return { ok: true, deleted: false };
     const outcome = await run(["clear", ...attributes(origin)]);
-    return toFailure(outcome, "clear") ?? { ok: true, deleted: existing.found };
+    // Real secret-tool exits 1 with nothing on stderr when no item matched,
+    // e.g. another process cleared it between the lookup and this call.
+    if (outcome.kind === "exit" && outcome.code === 1 && outcome.stderr.trim() === "") {
+      return { ok: true, deleted: false };
+    }
+    return toFailure(outcome, "clear") ?? { ok: true, deleted: true };
   };
 
   return { id: "libsecret", promptCapable: true, get, set, delete: remove };
