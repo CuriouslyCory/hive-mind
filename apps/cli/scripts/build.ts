@@ -28,7 +28,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { PRODUCTION_ORIGIN } from "../src/build-info.ts";
@@ -260,7 +260,33 @@ export function build(options: BuildOptions = {}): string {
   if (result.status !== 0) {
     throw new Error(`bun build failed (exit ${result.status}):\n${result.stderr}${result.stdout}`);
   }
+  if ((options.target ?? hostTarget()).startsWith("bun-darwin-")) signAdHoc(plan.outfile);
   return plan.outfile;
+}
+
+/**
+ * Replaces the binary's code signature with a fresh ad hoc one and verifies it.
+ *
+ * `bun build --compile` writes the bundle into the base Bun executable, which
+ * Oven signs with its Developer ID. Bun 1.4.2 re-signs the result ad hoc only
+ * for arm64 (src/exe_format/macho.rs, `build_and_sign`); an x86_64 binary keeps
+ * Oven's now-invalid signature, and `codesign --verify` rejects it ("code or
+ * signature have been modified"). Keychain access lists bind to the signature,
+ * so both Darwin targets are signed here the same way. A host builds only its
+ * own target, so Darwin binaries are always built on macOS, where codesign is.
+ */
+function signAdHoc(binary: string): void {
+  const steps = [
+    ["--force", "--sign", "-", "--identifier", basename(binary), binary],
+    ["--verify", "--strict", binary],
+  ];
+  for (const args of steps) {
+    const result = spawnSync("/usr/bin/codesign", args, { encoding: "utf8" });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`codesign ${args[0]} failed (exit ${result.status}):\n${result.stderr}`);
+    }
+  }
 }
 
 function runFromCommandLine(): void {

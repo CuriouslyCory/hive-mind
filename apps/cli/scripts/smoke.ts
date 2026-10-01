@@ -223,6 +223,21 @@ export async function smoke(options: SmokeOptions): Promise<boolean> {
       assert(problems.length === 0, problems.join("; "));
     });
 
+    if (os === "darwin") {
+      // An invalid signature still runs on Intel, so check it explicitly. The
+      // archived binary is what ships; see signAdHoc in build.ts.
+      await check("binary has a valid code signature", () => {
+        const result = spawnSync(
+          "/usr/bin/codesign",
+          ["--verify", "--strict", "--verbose", binary],
+          {
+            encoding: "utf8",
+          },
+        );
+        assert(result.status === 0, `codesign --verify: ${result.stderr}`);
+      });
+    }
+
     await check("runtime PATH has no node or bun", () => {
       for (const tool of ["node", "bun"]) {
         assert(!existsSync(join(pathDir, tool)), `${tool} is on the runtime PATH`);

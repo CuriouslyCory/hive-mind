@@ -112,14 +112,14 @@ jobs:
               --commit '$COMMIT' --secret-service"
 
       # The runner's login keychain is unlocked, so the Keychain roundtrip
-      # needs no prompt.
+      # needs no prompt. smoke.ts also runs codesign --verify on the archived
+      # binary.
       - name: Smoke test the archive (macOS)
         if: runner.os == 'macOS'
         working-directory: apps/cli
         env:
           COMMIT: ${{ github.sha }}
         run: |
-          codesign --verify --verbose dist/native/hivemind
           node scripts/smoke.ts --archive dist/release/hivemind-*.tar.gz --probe dist/native/probe \
             --commit "$COMMIT"
 
