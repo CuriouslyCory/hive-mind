@@ -4,7 +4,7 @@ import {
   PROJECT_KEY_PERMISSIONS,
 } from "@hivemind/contract";
 import { describeDb } from "@hivemind/db/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { POST as authCatchallPost } from "../src/app/api/auth/[...all]/route";
 import { bearerToken } from "../src/server/api/principal";
 import { createApiHandler } from "../src/server/api/router";
@@ -355,6 +355,72 @@ describeDb("/api/v1 authentication", () => {
         kind: "projectKey",
         projectId: creatorProject,
       });
+    });
+  });
+
+  // The api-key plugin answers "invalid key" for any exception during
+  // verification, database errors included. A key that could not be checked
+  // must be a 500, as for a login session, not a 401 that tells the CLI and
+  // its operator that the key is bad.
+  describe("a Project key when verification cannot run", () => {
+    it("answers 500, not 401, while the key table cannot be read", async () => {
+      const key = await api.createKey(owner, projectId);
+      const verify = vi.spyOn(api.auth.api, "verifyApiKey");
+      await api.testDb.pool.query("alter table apikey rename to apikey_unavailable");
+      try {
+        for (const token of [key.secret, `${PROJECT_KEY_PREFIX}not-a-real-key`]) {
+          verify.mockClear();
+          const response = await api.request("/me", { token });
+          expect(response.status).toBe(500);
+          expect(response.headers.get("www-authenticate")).toBeNull();
+          expect(await errorCode(response)).toBe("INTERNAL_SERVER_ERROR");
+          expect(verify).toHaveBeenCalledTimes(1);
+        }
+      } finally {
+        await api.testDb.pool.query("alter table apikey_unavailable rename to apikey");
+        verify.mockRestore();
+      }
+      expect((await api.request("/me", { token: key.secret })).status).toBe(200);
+    });
+
+    it("answers 500 when the plugin fails on a live key and the database recovers", async () => {
+      // The plugin reads the key, then fails to record its use; the lookup
+      // after that succeeds and finds the key live, so no verdict was reached.
+      const key = await api.createKey(owner, projectId);
+      await api.testDb.pool.query(`
+        create function fail_apikey_update() returns trigger language plpgsql
+          as $$ begin raise exception 'simulated write failure'; end $$;
+        create trigger fail_apikey_update before update on apikey
+          for each row execute function fail_apikey_update();
+      `);
+      try {
+        const response = await api.request("/me", { token: key.secret });
+        expect(response.status).toBe(500);
+        expect(await errorCode(response)).toBe("INTERNAL_SERVER_ERROR");
+      } finally {
+        await api.testDb.pool.query(`
+          drop trigger fail_apikey_update on apikey;
+          drop function fail_apikey_update();
+        `);
+      }
+      expect((await api.request("/me", { token: key.secret })).status).toBe(200);
+    });
+
+    it("verifies a key once per request, valid or not", async () => {
+      const key = await api.createKey(owner, projectId);
+      const verify = vi.spyOn(api.auth.api, "verifyApiKey");
+      try {
+        for (const [token, status] of [
+          [key.secret, 200],
+          [`${PROJECT_KEY_PREFIX}not-a-real-key`, 401],
+        ] as const) {
+          verify.mockClear();
+          expect((await api.request("/me", { token })).status).toBe(status);
+          expect(verify).toHaveBeenCalledTimes(1);
+        }
+      } finally {
+        verify.mockRestore();
+      }
     });
   });
 

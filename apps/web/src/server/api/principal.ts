@@ -1,3 +1,4 @@
+import { defaultKeyHasher } from "@better-auth/api-key";
 import { PROJECT_KEY_PERMISSIONS, type ProjectKeyPermission } from "@hivemind/contract";
 import type { Db } from "@hivemind/db";
 import { apikey, project, projectApiKey } from "@hivemind/db/schema";
@@ -38,8 +39,9 @@ const DEFAULT_KEY_CONFIG_ID = "default";
 
 /**
  * Resolves the caller from the request's bearer token, or returns `null` when
- * there is none or it is not valid. Never throws for a bad credential; a
- * database failure propagates.
+ * there is none or it is not valid. Never throws for a bad credential. Throws
+ * when the credential could not be checked (a database failure, for either
+ * kind of token), so the caller answers 500 rather than 401.
  */
 export async function resolvePrincipal(
   deps: ApiDeps,
@@ -115,7 +117,10 @@ async function resolveProjectKey(
     headers: withoutCredentials(request),
     body: { key: token },
   });
-  if (!verified.valid || !verified.key) return null;
+  if (!verified.valid || !verified.key) {
+    if (verified.error?.code === UNVERIFIED_CODE) await assertNoLiveKey(db, token);
+    return null;
+  }
 
   const now = new Date();
   // One row only if the key is still live, uses the single expected
@@ -144,13 +149,52 @@ async function resolveProjectKey(
       and(
         eq(apikey.id, verified.key.id),
         eq(apikey.referenceId, verified.key.referenceId),
-        eq(apikey.configId, DEFAULT_KEY_CONFIG_ID),
-        eq(apikey.enabled, true),
-        isNull(apikey.permissions),
-        or(isNull(apikey.expiresAt), gt(apikey.expiresAt, now)),
+        ...liveKey(now),
       ),
     )
     .limit(1);
   if (!bound) return null;
   return { kind: "projectKey", ...bound, permissions: PROJECT_KEY_PERMISSIONS };
+}
+
+/**
+ * The code `verifyApiKey` answers both for a key it did not find and for any
+ * exception that is not a better-auth `APIError`, such as a database error,
+ * which it catches and does not rethrow (better-auth 1.7.6). Its other codes
+ * (disabled, expired, usage or rate limit exceeded) are verdicts on a key it
+ * read, so they are always a 401.
+ */
+const UNVERIFIED_CODE = "INVALID_API_KEY";
+
+/**
+ * Tells "no such key" apart from "verification did not run" after the plugin
+ * answered `UNVERIFIED_CODE`: reads the key by its stored hash and throws if
+ * the read fails or finds a key that is live by the same checks as the
+ * binding query. The plugin only answers that code for a key it found when it
+ * failed before reaching a verdict, so a live key here means the request
+ * could not be authenticated, not that the key is bad. A key that is not live
+ * stays a 401 either way. This is a read, not a second verification: it
+ * records no use of the key.
+ */
+async function assertNoLiveKey(db: Db, token: string): Promise<void> {
+  const [live] = await db
+    .select({ id: apikey.id })
+    .from(apikey)
+    .where(and(eq(apikey.key, await defaultKeyHasher(token)), ...liveKey(new Date())))
+    .limit(1);
+  if (live) {
+    throw new Error(
+      `Project key ${live.id} could not be verified: the api-key plugin failed without a verdict (see its log).`,
+    );
+  }
+}
+
+/** Conditions on `apikey` for a key `/api/v1` accepts at `now`. */
+function liveKey(now: Date) {
+  return [
+    eq(apikey.configId, DEFAULT_KEY_CONFIG_ID),
+    eq(apikey.enabled, true),
+    isNull(apikey.permissions),
+    or(isNull(apikey.expiresAt), gt(apikey.expiresAt, now)),
+  ];
 }
