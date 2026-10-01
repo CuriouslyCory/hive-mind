@@ -8,4 +8,4 @@ import { getDb } from "../../../../server/db";
 // the handler on every request; `proxy.ts` does not cover `/api`.
 const handle = createApiHandler(() => ({ auth, db: getDb() }));
 
-export { handle as DELETE, handle as GET, handle as POST };
+export { handle as DELETE, handle as GET, handle as PATCH, handle as POST };
