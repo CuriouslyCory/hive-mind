@@ -343,6 +343,7 @@ export async function smoke(options: SmokeOptions): Promise<boolean> {
         });
         assert(result.status === 0, describe(result));
         const { addon } = oneJsonObject(result.stdout) as { addon?: { copy?: unknown } };
+        process.stdout.write(`     keychain addon: ${JSON.stringify(addon)}\n`);
         if (typeof addon?.copy === "string") copy = addon.copy;
       });
 
