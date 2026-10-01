@@ -1,9 +1,6 @@
 import type { CommandDefinition } from "../command.ts";
-import { CLI_ERROR_CODES, CliError, isCliError } from "../errors.ts";
-import { hivemindTokenSet } from "./shared.ts";
-
-/** better-auth's sign-out route; with a bearer token it deletes that login session. */
-export const SIGN_OUT_PATH = "/api/auth/sign-out";
+import { CLI_ERROR_CODES, CliError } from "../errors.ts";
+import { hivemindTokenSet, revokeLoginToken } from "./shared.ts";
 
 export interface LogoutData {
   origin: string;
@@ -40,23 +37,11 @@ export const logout: CommandDefinition = {
     const human: string[] = [];
     let revoked: boolean | null = null;
     if (removal.token !== null) {
-      const fetch = await context.originFetch({
-        credential: { origin, token: removal.token, source: "file" },
+      const failure = await revokeLoginToken(context, {
+        origin,
+        token: removal.token,
+        source: "file",
       });
-      let failure: string | null = null;
-      try {
-        const response = await fetch(SIGN_OUT_PATH, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: "{}",
-        });
-        await response.body?.cancel();
-        // 401: the server no longer accepts the token, which is the goal.
-        if (response.ok || response.status === 401) revoked = true;
-        else failure = `HTTP ${response.status}`;
-      } catch (error) {
-        failure = isCliError(error) ? error.message : String(error);
-      }
       if (failure !== null) {
         throw new CliError(
           CLI_ERROR_CODES.revocationFailed,
@@ -66,6 +51,7 @@ export const logout: CommandDefinition = {
           },
         );
       }
+      revoked = true;
       human.push(`Logged out of ${origin}: the login was revoked and deleted.`);
     } else if (removal.removed) {
       // The index pointed at an OS store this run could not read (no TTY).
