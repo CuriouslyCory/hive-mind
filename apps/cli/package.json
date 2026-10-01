@@ -14,11 +14,15 @@
   },
   "devDependencies": {
     "@hivemind/config": "workspace:*",
-    "@orpc/client": "1.15.4",
+    "@hivemind/contract": "workspace:*",
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
+    "@orpc/openapi-client": "catalog:",
     "@types/node": "catalog:",
     "bun": "1.4.2",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }

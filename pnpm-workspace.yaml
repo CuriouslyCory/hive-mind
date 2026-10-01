@@ -6,8 +6,10 @@ packages:
 catalog:
   # Every @orpc/* package must use this same exact version: they depend on each
   # other at exact versions, so a range could install two copies.
+  "@orpc/client": 1.15.4
   "@orpc/contract": 1.15.4
   "@orpc/openapi": 1.15.4
+  "@orpc/openapi-client": 1.15.4
   "@orpc/server": 1.15.4
   "@orpc/zod": 1.15.4
   "@types/node": ^24.19.0
