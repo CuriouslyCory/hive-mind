@@ -1,6 +1,6 @@
 {
   "name": "@curiouslycory/hivemind",
-  "description": "Command-line client for Hive Mind. Runs the standalone hivemind binary for this platform.",
+  "description": "Command-line client for hive-mind. Runs the standalone hivemind binary for this platform.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/CuriouslyCory/hive-mind.git",

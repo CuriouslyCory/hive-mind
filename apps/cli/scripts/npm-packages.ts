@@ -6,7 +6,7 @@
 //
 // The launcher package is npm/package.template.json plus npm/bin/hivemind.js.
 // Its name in that template is the only place the public name is written
-// (STATE.md D2); each binary ships in `<name>-<os>-<arch>`, an optional
+// (ADR-0012, docs/setup.md H7); each binary ships in `<name>-<os>-<arch>`, an optional
 // dependency limited to that platform by os/cpu/libc. Every package gets
 // apps/cli's version, so the published launcher, its binaries and the
 // GitHub release always agree.

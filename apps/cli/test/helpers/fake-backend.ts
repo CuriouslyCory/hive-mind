@@ -10,7 +10,7 @@ import {
 
 /**
  * A small stateful stand-in for the web app's `/api/v1` and the better-auth
- * routes the CLI calls, following the rules in notes/api-v1.md: bearer only,
+ * routes the CLI calls, following ADR-0009 and ADR-0013: bearer only,
  * user vs Project-key principals, 404 for inaccessible Projects, create-or-
  * reuse by organization and slug, owner-only key management, one-time key
  * secrets. Enough to drive every command and exit category without a

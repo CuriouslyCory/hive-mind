@@ -12,7 +12,7 @@ import {
 /**
  * Linux Secret Service store, driven through libsecret's `secret-tool`.
  *
- * A subprocess rather than a native binding (STATE.md D9), because a child can
+ * A subprocess rather than a native binding (ADR-0012), because a child can
  * be killed: the spike showed an in-process Secret Service call blocks forever
  * when the bus accepts the connection but never answers, and neither a
  * JavaScript timeout nor an AbortSignal cancels it. Here every call has a hard

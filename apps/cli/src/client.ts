@@ -316,7 +316,7 @@ export function createOriginFetch(options: ApiClientOptions): OriginFetch {
         CLI_ERROR_CODES.invalidResponse,
         `${origin} sent a response larger than ${MAX_RESPONSE_BYTES / (1024 * 1024)} MiB.`,
         {
-          hint: maybeDone ?? "Check that --server or HIVEMIND_URL points at a Hive Mind backend.",
+          hint: maybeDone ?? "Check that --server or HIVEMIND_URL points at a hive-mind backend.",
         },
       );
     }
@@ -332,7 +332,7 @@ export function createOriginFetch(options: ApiClientOptions): OriginFetch {
   };
 }
 
-/** Management answers are small JSON; anything this large is not a Hive Mind answer. */
+/** Management answers are small JSON; anything this large is not a hive-mind answer. */
 export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 /** The whole body, or null (and the stream cancelled) once it exceeds `limit` bytes. */
@@ -390,7 +390,7 @@ export function createApiClient(options: ApiClientOptions): HivemindApi {
         CLI_ERROR_CODES.invalidResponse,
         `${origin} sent an unreadable response to ${operation}.`,
         {
-          hint: "Check that --server or HIVEMIND_URL points at a Hive Mind backend.",
+          hint: "Check that --server or HIVEMIND_URL points at a hive-mind backend.",
           cause: error,
         },
       );

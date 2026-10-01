@@ -19,7 +19,7 @@
 // lockfile-pinned @oven/bun-* binary itself, both to run `bun build` and as the
 // executable base for the target, so no runtime is downloaded at build time.
 //
-// pnpm installs only the host's optional platform packages (STATE.md D11), so
+// pnpm installs only the host's optional platform packages (ADR-0012), so
 // a host can build only its own target. Release binaries are built on each
 // target's native runner (.github/workflows/cli-native.yml and release.yml),
 // which also runs that binary's native smoke test. Building another target
@@ -76,7 +76,7 @@ export function hostTarget(
 }
 
 /**
- * Accepts https origins, or http only on loopback (STATE.md D3). Rejects
+ * Accepts https origins, or http only on loopback (docs/cli.md, "Choosing the server"). Rejects
  * paths, queries, fragments and userinfo so the embedded value is a bare origin.
  */
 export function validateOrigin(value: string): string {

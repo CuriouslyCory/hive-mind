@@ -7,7 +7,7 @@ import { registerSecret } from "./redact.ts";
 /**
  * The client side of the OAuth 2.0 device authorization grant (RFC 8628)
  * against better-auth's device-authorization plugin, as the web app exposes
- * it (see apps/web and notes/device-approval.md):
+ * it (see ADR-0013 and apps/web/src/server/auth.ts):
  *
  * - `POST /api/auth/device/code` with `{client_id}` starts a request.
  * - `POST /api/auth/device/token` polls. Bodies are JSON, not the RFC's form
@@ -99,7 +99,7 @@ function invalidResponse(origin: string, what: string): CliError {
   return new CliError(
     CLI_ERROR_CODES.invalidResponse,
     `${origin} sent an unexpected response ${what}.`,
-    { hint: "Check that --server or HIVEMIND_URL points at a Hive Mind backend." },
+    { hint: "Check that --server or HIVEMIND_URL points at a hive-mind backend." },
   );
 }
 
