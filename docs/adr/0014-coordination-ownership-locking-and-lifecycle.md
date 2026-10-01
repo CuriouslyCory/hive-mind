@@ -39,13 +39,14 @@ Every new endpoint resolves Project access first, then nested resources, then ca
 | `--steal` takeover | Own live Session in this Project | Own live Session, bound Project and `task:write` |
 | Organization and Project listing, Project creation, key management | ADR-0013 | ADR-0013 |
 
-- An inaccessible Project, or an identifier that belongs to another Project, gets the same 404 as an absent resource. Insufficient capability on a visible resource is 403. Authentication failures stay 401, and a verifier or database failure stays 500 (ADR-0013).
+- An inaccessible Project, or an identifier that belongs to another Project, gets the same 404 as an absent resource. Insufficient capability on a visible resource is 403.
+- Every Session of a Project is visible to any caller who can read that Project's Sessions. Changing a Session, or acting through it, when it belongs to another principal is therefore 403; a Session ID that is absent or belongs to another Project is 404. A Session named only to attribute a Plan write or a new Task must be the caller's own, and any other is 404. Authentication failures stay 401, and a verifier or database failure stays 500 (ADR-0013).
 - Cookies and `activeOrganizationId` are never authorization inputs (ADR-0007, ADR-0009).
 - The fixed permission constant (`PROJECT_KEY_PERMISSIONS` in `packages/contract/src/auth.ts`) is `project:read`, `plan:read`, `plan:write`, `task:read`, `task:write`, `session:read`, `session:write`, `scope:read`, `scope:write` and `event:read`. Status requires the read permission of every record kind it includes. Permissions come from the server, never from request fields or plugin metadata. Key management stays owner-only.
 
 ### Per-Project transaction lock
 
-- Every coordination mutation runs through one `@hivemind/db` transaction helper. It first takes a transaction-level advisory lock for the Project: the two-key form `pg_advisory_xact_lock(<namespace>, hashtext(project_id::text))`, where `<namespace>` is a fixed 32-bit constant defined next to the helper that must never change.
+- Every coordination mutation runs through one `@hivemind/db` transaction helper. It first takes a transaction-level advisory lock for the Project: the two-key form `pg_advisory_xact_lock(<namespace>, hashtext(project_id::text))`, where `<namespace>` is the fixed 32-bit constant `0x484d3243` (`COORDINATION_LOCK_NAMESPACE` in `packages/db/src/coordination.ts`), which must never change.
 - After the lock it reads `clock_timestamp()` once and uses that value as "now" for every eligibility check and timestamp in the transaction. It then rechecks access and ownership, updates state, inserts Events and commits.
 - No network, git, embedding or auth-plugin call happens while the lock is held. Request hashing and validation happen before the lock is taken.
 - A claim is a single conditional `UPDATE … RETURNING` whose `WHERE` clause repeats the eligibility rules. It is never a read followed by an unconditional write.

@@ -10,7 +10,9 @@ M0 (foundations) is done: the monorepo, CI, Neon Postgres with Drizzle migration
 
 M1 (CLI and CLI auth) adds the `hivemind` CLI, browser-approved CLI login, Projects, Project keys and the first `/api/v1` routes. The CLI can log in, bind a repository to a Project and manage Project keys; see [docs/cli.md](docs/cli.md). Its first public release waits on the owner's setup in [docs/setup.md](docs/setup.md#h7-cli-releases).
 
-Next come M2 (plans, tasks and Sessions), M3 (dashboard), M4 (ADRs), M5 (search), M6 (agent skills and hooks) and M7 (hardening). The full plan is in [#1](https://github.com/CuriouslyCory/hive-mind/issues/1); M0's plan is in [#2](https://github.com/CuriouslyCory/hive-mind/issues/2) and M1's in [#3](https://github.com/CuriouslyCory/hive-mind/issues/3).
+M2 (Plans, Tasks and Sessions) is implemented and awaiting review: Plans with logs and ordered Tasks, Task claims with 5-minute leases, Sessions with manual heartbeats, declared and touched Scopes with overlap warnings, an Event for every change, and a minute Cron sweep. See [Coordinating agents](#coordinating-agents) and ADR-0014. M2 is done once it is deployed and this repository's own development has been tracked with it ([docs/dogfooding.md](docs/dogfooding.md)); its plan is [#12](https://github.com/CuriouslyCory/hive-mind/issues/12).
+
+Next come M3 (dashboard), M4 (ADRs), M5 (search), M6 (agent skills and hooks) and M7 (hardening). The full plan is in [#1](https://github.com/CuriouslyCory/hive-mind/issues/1); M0's plan is in [#2](https://github.com/CuriouslyCory/hive-mind/issues/2) and M1's in [#3](https://github.com/CuriouslyCory/hive-mind/issues/3).
 
 ## Workspaces
 
@@ -102,6 +104,38 @@ Tests beyond the four checks below:
 
 A change to the CLI that users will notice needs a changeset: run `pnpm changeset` and commit the file it writes in `.changeset/`.
 
+## Coordinating agents
+
+Each agent run records a Session in the repository's Project, claims the Tasks it works on and reports where in the tree it works. This is the local workflow against `pnpm dev`; [docs/cli.md](docs/cli.md#coordination-plans-tasks-sessions-and-scopes) has every command, option and exit code.
+
+```bash
+export PATH="$PWD/apps/cli/dist:$PATH"     # from the repo root, after pnpm build
+export HIVEMIND_URL=http://localhost:3000
+hivemind login
+mkdir /tmp/hm-scratch && cd /tmp/hm-scratch && git init -q
+hivemind init --name 'Local test' --slug local-test     # writes .hivemind.json
+
+export HIVEMIND_SESSION="$(hivemind session start --agent claude-code --intent 'Try the M2 workflow')"
+hivemind plan create --title 'Try the M2 workflow' --status active   # prints PLAN-1
+hivemind task add PLAN-1 --title 'Claim and finish a Task'            # prints the Task id
+hivemind session attach --plan PLAN-1
+hivemind scope add 'src/**'
+hivemind scope check
+hivemind task claim <taskId>
+hivemind task start <taskId>
+hivemind session heartbeat                                            # every 60 seconds, by hand
+hivemind plan log PLAN-1 --message 'Claimed and started the Task.'
+hivemind task done <taskId>
+hivemind status
+hivemind session end --summary 'Walked through the workflow.'
+unset HIVEMIND_SESSION
+```
+
+- Heartbeats are manual in M2: run `hivemind session heartbeat` from the worktree at least every 60 seconds while working (a background loop is in [docs/cli.md](docs/cli.md#heartbeats)). Five minutes without one makes the Session stale, and its claims can then be taken; after 30 minutes it is abandoned.
+- Each heartbeat also uploads the worktree's changed paths as touched Scopes, so `scope check` warns when two live Sessions work on the same files.
+- To see two agents interact, run a second Session from another worktree of the same repository (`git worktree add`), with its own `HIVEMIND_SESSION`.
+- Stale and abandoned Sessions and expired claims take effect at request time. The minute sweep that stores them runs only on Production; to run it locally, see [docs/setup.md](docs/setup.md#h8-coordination-sweep-cron).
+
 ## Checks
 
 These are the checks CI runs. All four must pass:
@@ -122,7 +156,8 @@ CI also runs the installer tests and the browser tests on every PR. A PR that to
 ## More
 
 - [docs/cli.md](docs/cli.md): installing and using the `hivemind` CLI.
-- [docs/setup.md](docs/setup.md): one-time Vercel, Neon, GitHub OAuth and release setup, and the post-deploy checklist.
+- [docs/setup.md](docs/setup.md): one-time Vercel, Neon, GitHub OAuth, release and Cron setup, and the post-deploy checklist.
+- [docs/dogfooding.md](docs/dogfooding.md): tracking this repository's own development with hive-mind after M2 is deployed.
 - [docs/adr/](docs/adr/): architecture decision records.
 - [CONTEXT.md](CONTEXT.md): the domain glossary and naming rules.
 - [AGENTS.md](AGENTS.md): rules for coding agents working in this repo.
