@@ -51,7 +51,7 @@ npm install -g @curiouslycory/hivemind
 hivemind --help
 ```
 
-The package is a small Node launcher. The binary comes from one of five optional per-platform packages (`@curiouslycory/hivemind-linux-x64`, `-linux-arm64`, `-darwin-x64`, `-darwin-arm64`), so npm's integrity check covers it and no install script runs. Do not install with `--omit=optional`: the launcher then reports that the platform package is missing.
+The package is a small Node launcher and needs Node 18 or newer. The binary comes from one of five optional per-platform packages (`@curiouslycory/hivemind-linux-x64`, `-linux-arm64`, `-darwin-x64`, `-darwin-arm64`), so npm's integrity check covers it and no install script runs. Do not install with `--omit=optional`: the launcher then reports that the platform package is missing.
 
 ### Check the install
 
