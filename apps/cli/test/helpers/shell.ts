@@ -42,6 +42,8 @@ export async function runShell(
       signal: options.signal,
       fetch: options.fetch,
       credentialOptions: options.credentialOptions,
+      clock: options.clock,
+      openUrl: options.openUrl,
     },
     options.commands ?? TEST_COMMANDS,
   );

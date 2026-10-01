@@ -1,4 +1,5 @@
-import type { ApiClientOptions, HivemindApi } from "./client.ts";
+import type { ApiClientOptions, HivemindApi, OriginFetch } from "./client.ts";
+import type { Clock } from "./clock.ts";
 import type { CredentialManager, ResolvedCredential } from "./credentials/manager.ts";
 import type { ResolvedOrigin } from "./origin.ts";
 import type { Reporter } from "./output.ts";
@@ -44,7 +45,18 @@ export interface ApiRequestOptions {
    * `none`: send no Authorization header.
    */
   auth?: "required" | "none";
+  /**
+   * Use this credential instead of resolving one (`login` checks the token it
+   * just received). Takes precedence over `auth`.
+   */
+  credential?: ResolvedCredential;
   timeoutMs?: ApiClientOptions["timeoutMs"];
+}
+
+export interface OriginFetchOptions {
+  /** Sent as the bearer token; null sends no Authorization header. */
+  credential: ResolvedCredential | null;
+  timeoutMs?: number;
 }
 
 export interface CommandContext {
@@ -75,6 +87,19 @@ export interface CommandContext {
   credential(): Promise<ResolvedCredential>;
   /** An API client for `origin()`, authenticated unless `auth: "none"`. */
   api(options?: ApiRequestOptions): Promise<HivemindApi>;
+  /**
+   * The guarded fetch (same origin only, no redirects, timeout, cancel on
+   * SIGINT) for routes outside the `/api/v1` contract, such as better-auth's
+   * device flow and sign-out.
+   */
+  originFetch(options: OriginFetchOptions): Promise<OriginFetch>;
+  /** Time and waiting; a fake in tests. */
+  readonly clock: Clock;
+  /**
+   * Opens a URL in the user's browser. Resolves false when no browser could be
+   * launched. Only call it when `interactive` is true.
+   */
+  openUrl(url: string): Promise<boolean>;
 }
 
 export interface CommandDefinition {

@@ -1,6 +1,8 @@
 import { parseArgs } from "node:util";
 import { EXIT_CODES, type ExitCode } from "@hivemind/contract";
+import { openBrowser } from "./browser.ts";
 import { BUILD_COMMIT, BUILD_TARGET, BUILD_VERSION, DEFAULT_ORIGIN } from "./build-info.ts";
+import { type Clock, systemClock } from "./clock.ts";
 import type { CommandContext, CommandDefinition, Env, OptionSpec } from "./command.ts";
 import { isInteractive } from "./credentials/index.ts";
 import {
@@ -43,6 +45,8 @@ export interface CliRuntime {
   /** Test seams. */
   fetch?: typeof globalThis.fetch;
   credentialOptions?: CredentialManagerOptions;
+  clock?: Clock;
+  openUrl?: (url: string) => Promise<boolean>;
 }
 
 const GLOBAL_OPTIONS = {
@@ -437,9 +441,22 @@ function createContext(
     credential() {
       return context.credentials().require(context.origin().origin);
     },
+    clock: runtime.clock ?? systemClock,
+    openUrl: (url) => (runtime.openUrl ?? ((target) => openBrowser(target, runtime.platform)))(url),
+    async originFetch(options) {
+      const { createOriginFetch } = await import("./client.ts");
+      return createOriginFetch({
+        origin: context.origin().origin,
+        credential: options.credential,
+        fetch: runtime.fetch,
+        timeoutMs: options.timeoutMs,
+        signal,
+      });
+    },
     async api(options = {}) {
       const target = context.origin().origin;
-      const credential = options.auth === "none" ? null : await context.credential();
+      const credential =
+        options.credential ?? (options.auth === "none" ? null : await context.credential());
       // Loaded on first use so --help, --version and local-only commands do
       // not pay for the oRPC client.
       const { createApiClient } = await import("./client.ts");

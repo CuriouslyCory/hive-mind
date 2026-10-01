@@ -1,7 +1,8 @@
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { CONFIG_FILENAME, type HivemindConfig } from "@hivemind/contract";
+import { CONFIG_FILENAME, type HivemindConfig, idSchema } from "@hivemind/contract";
 import { readConfigFile } from "./config.ts";
+import { usageError } from "./errors.ts";
 
 /**
  * `.hivemind.json` discovery: which Project the current directory is bound to.
@@ -80,4 +81,38 @@ export async function bindingDirFor(options: DiscoveryOptions = {}): Promise<str
     if (parent === dir) return start;
     dir = parent;
   }
+}
+
+export type ProjectIdSource = "flag" | "config";
+
+export interface ResolvedProjectId {
+  projectId: string;
+  source: ProjectIdSource;
+  /** The `.hivemind.json` it came from, when `source` is `config`. */
+  configPath: string | null;
+}
+
+/**
+ * The Project a command acts on: `--project <id>` when given, otherwise the
+ * nearest `.hivemind.json`. Neither is a USAGE_ERROR naming both ways to fix
+ * it. A malformed nearest file is its CONFIG_* error, never skipped.
+ */
+export async function resolveProjectId(options: {
+  flag: string | undefined;
+  cwd: string;
+}): Promise<ResolvedProjectId> {
+  if (options.flag !== undefined) {
+    if (!idSchema.safeParse(options.flag).success) {
+      throw usageError("--project must be a Project id (a uuid).");
+    }
+    return { projectId: options.flag, source: "flag", configPath: null };
+  }
+  const found = await findProjectConfig({ cwd: options.cwd });
+  if (!found) {
+    throw usageError(
+      "No Project: this directory has no .hivemind.json and --project was not given.",
+      "Pass --project <id>, or run 'hivemind init' in the repository first.",
+    );
+  }
+  return { projectId: found.config.projectId, source: "config", configPath: found.path };
 }

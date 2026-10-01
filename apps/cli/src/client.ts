@@ -212,9 +212,9 @@ function describeNetworkError(error: unknown): string {
  * routes outside the oRPC contract, such as better-auth's device flow; it
  * never retries.
  */
-export function createOriginFetch(
-  options: ApiClientOptions,
-): (input: Request | string, init?: RequestInit) => Promise<Response> {
+export type OriginFetch = (input: Request | string, init?: RequestInit) => Promise<Response>;
+
+export function createOriginFetch(options: ApiClientOptions): OriginFetch {
   const { origin, credential } = options;
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
