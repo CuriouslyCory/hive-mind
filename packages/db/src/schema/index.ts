@@ -2,3 +2,5 @@
 // generate migrations, and `createDb` passes it to Drizzle for relational
 // queries. Each module holds one area of the schema.
 export * from "./auth.ts";
+export * from "./project.ts";
+export * from "./project-api-key.ts";
