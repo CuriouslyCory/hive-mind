@@ -74,7 +74,7 @@ Every command talks to one backend origin, chosen in this order:
 
 1. `--server <origin>`
 2. `HIVEMIND_URL`
-3. the built-in default, `https://hive-mind-web-mu.vercel.app`
+3. the built-in default, `https://hivemind.curiouslycory.com`
 
 The value must be an origin only: `https://host[:port]` with no path, query, fragment or user info. Plain http is accepted only for `localhost`, `127.0.0.1` and `[::1]`, for local development. Logins are stored per origin, so a login for `http://localhost:3000` is never sent to production. The CLI never follows a redirect from the API. `.hivemind.json` never sets the server.
 

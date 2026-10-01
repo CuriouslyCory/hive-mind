@@ -18,7 +18,7 @@ Preview deployments complicate OAuth: a GitHub OAuth app allows one callback URL
 - **Plugins:** `organization` (restricted in M0; see ADR-0007), `oAuthProxy`, and `nextCookies` (last).
 - **Settings:** base path `/api/auth`; `advanced.cookiePrefix: "hivemind"`; `account.encryptOAuthTokens: true`; `advanced.database.generateId: "uuid"`; `advanced.disableOriginCheck: false`.
 - **Trusted hosts are exact.** `baseURL.allowedHosts` (which also defines the trusted origins) has no wildcards:
-  - Production: its own host only (`BETTER_AUTH_URL`, else `VERCEL_PROJECT_PRODUCTION_URL`).
+  - Production: `hivemind.curiouslycory.com`, configured through `BETTER_AUTH_URL`.
   - Preview: its own `VERCEL_URL` and `VERCEL_BRANCH_URL`.
   - Local: `localhost:3000`.
 - **Preview login goes through production** with oAuthProxy. `OAUTH_PROXY_SECRET` is the same in Production and Preview; `BETTER_AUTH_SECRET` differs per environment. Local development uses a separate dev OAuth app with a localhost callback.
@@ -29,14 +29,14 @@ Preview deployments complicate OAuth: a GitHub OAuth app allows one callback URL
 - **Production does not trust preview hosts.** A test runs the full oAuthProxy round trip (preview → production → preview) on two databases with GitHub's endpoints mocked. Production's instance trusts no preview host, the User and login session land in the preview's database, and production's database stays empty. Production returns the result to the preview named in the encrypted state, not to a URL from the request.
 - **A foreign callback host is rejected.** A `callbackURL` on `hive-mind-x-evil-curiouslycorys-projects.vercel.app` gets a 403 `INVALID_CALLBACK_URL` on both instances. Re-adding a wildcard fails 7 tests.
 - **Origin checks are forced on** because better-auth skips origin and callback URL checks when `NODE_ENV=test`; without the setting, the negative tests could not fail.
-- **Previews need the production URL too.** Without it, oAuthProxy treats a preview as production and skips itself, so `VERCEL_PROJECT_PRODUCTION_URL` is used as the fallback on previews as well as in Production.
+- **Previews need the production URL too.** Set `BETTER_AUTH_URL=https://hivemind.curiouslycory.com` in both Production and Preview so oAuthProxy sends preview callbacks through the canonical domain. `VERCEL_PROJECT_PRODUCTION_URL` remains a fallback when the explicit URL is absent.
 - **Preview-created Users have no `githubLogin`.** oAuthProxy doesn't forward fields added by `mapProfileToUser`, so their personal organization's slug comes from their display name.
 - **`github_login` cannot be changed through `/update-user`.** It must accept input so the profile mapping can set it, so a `user.update.before` hook rejects any update that includes it.
 - **`account (provider_id, account_id)` is unique** (migration `0001`), so concurrent link callbacks cannot create duplicate linked accounts.
 - A request to a host outside `allowedHosts` gets a 500 from better-auth, not a 4xx.
 - Empty Vercel host variables (for example `VERCEL_BRANCH_URL` on a deployment made without git) are treated as unset, so they don't fail env validation.
 - **The base path and cookie prefix become contracts** once M1 ships CLI binaries (`src/lib/auth-config.ts`).
-- **Production domain:** currently the Vercel alias `hive-mind-web-mu.vercel.app`. Adding a custom domain means updating the production OAuth app's callback URL and `BETTER_AUTH_URL`.
+- **Production domain:** `https://hivemind.curiouslycory.com`. The production OAuth app uses `https://hivemind.curiouslycory.com/api/auth/callback/github`; CLI defaults and production links use the same origin.
 - **Preview sign-in cannot work until production runs the same plugin**, so it is verified after merge (setup step H6), along with production sign-in.
 - M1 adds the device-authorization and API-key plugins to `createAuth`, with their tables (ADR-0005). See ADR-0013.
 

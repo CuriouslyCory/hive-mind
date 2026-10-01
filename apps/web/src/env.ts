@@ -15,9 +15,9 @@ const vercelHost = z.preprocess(
 
 export const envSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
-  // The production origin, for example https://hive-mind.example. Set only in
-  // Production; elsewhere src/server/auth.ts falls back to
-  // VERCEL_PROJECT_PRODUCTION_URL.
+  // The canonical production origin, https://hivemind.curiouslycory.com.
+  // Set in Production and Preview; leave unset locally. src/server/auth.ts
+  // falls back to VERCEL_PROJECT_PRODUCTION_URL when absent.
   BETTER_AUTH_URL: z.url().optional(),
 
   // The pooled connection used at runtime. The unpooled URL is read only by the

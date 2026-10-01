@@ -43,13 +43,13 @@ How the database branches map to environments:
 
 ## H3. Production domain and GitHub OAuth apps
 
-**Production domain.** For now it is the Vercel alias `https://hive-mind-web-mu.vercel.app`. (`hive-mind-web.vercel.app` belongs to an unrelated Vercel project.) `BETTER_AUTH_URL` is unset, so the app takes the production host from Vercel's `VERCEL_PROJECT_PRODUCTION_URL`. Production trusts only that one host: sign-in doesn't work through the Vercel project's other aliases.
+**Production domain.** The canonical production URL is `https://hivemind.curiouslycory.com`. Set `BETTER_AUTH_URL=https://hivemind.curiouslycory.com` in both Production and Preview. Production trusts this host, and preview OAuth callbacks go through it. Generated Vercel deployment URLs are for previews, not production links or CLI defaults.
 
 - [ ] Create two GitHub OAuth apps (GitHub → Settings → Developer settings → OAuth Apps → New OAuth App):
 
   | App | Homepage URL | Authorization callback URL | Used by |
   |---|---|---|---|
-  | Production | `https://hive-mind-web-mu.vercel.app` | `https://hive-mind-web-mu.vercel.app/api/auth/callback/github` | Production and Preview |
+  | Production | `https://hivemind.curiouslycory.com` | `https://hivemind.curiouslycory.com/api/auth/callback/github` | Production and Preview |
   | Dev | `http://localhost:3000` | `http://localhost:3000/api/auth/callback/github` | Development and local `pnpm dev` |
 
 **Why previews use the production OAuth app.** A GitHub OAuth app has one callback URL, so previews sign in through production using better-auth's oAuthProxy plugin:
@@ -61,14 +61,14 @@ How the database branches map to environments:
 
 So Preview needs the production app's client ID and secret and the same `OAUTH_PROXY_SECRET` as Production. Preview sign-in only works once production has been deployed with the oAuthProxy plugin.
 
-**If you add a custom domain later:**
+**Configure the production domain:**
 
-- [ ] Add the domain to the Vercel project.
-- [ ] Change the production OAuth app's homepage and callback URLs to the new domain.
-- [ ] Set `BETTER_AUTH_URL=https://<domain>` for Production, then redeploy.
-- [ ] Sign in on a preview. Previews take the production URL from `VERCEL_PROJECT_PRODUCTION_URL`; if that isn't the new domain, set `BETTER_AUTH_URL` for Preview as well.
+- [ ] Add `hivemind.curiouslycory.com` to the Vercel project.
+- [ ] Set the production OAuth app's homepage to `https://hivemind.curiouslycory.com` and callback to `https://hivemind.curiouslycory.com/api/auth/callback/github`.
+- [ ] Set `BETTER_AUTH_URL=https://hivemind.curiouslycory.com` for both Production and Preview, then redeploy each environment.
+- [ ] Verify production and preview sign-in using H6.
 
-Production then trusts only the new domain. Auth requests to `hive-mind-web-mu.vercel.app` fail (better-auth answers a host outside its list with a 500).
+`VERCEL_PROJECT_PRODUCTION_URL` remains a fallback when `BETTER_AUTH_URL` is absent. Explicitly setting the canonical URL in both environments keeps production host validation and preview OAuth callbacks consistent.
 
 ## H4. Environment variables
 
@@ -77,7 +77,7 @@ Production then trusts only the new domain. Auth requests to `hive-mind-web-mu.v
 | Variable | Production | Preview | Development |
 |---|---|---|---|
 | `BETTER_AUTH_SECRET` | its own value | its own value | its own value |
-| `BETTER_AUTH_URL` | unset (set it only for a custom domain, H3) | unset | unset |
+| `BETTER_AUTH_URL` | `https://hivemind.curiouslycory.com` | `https://hivemind.curiouslycory.com` | unset |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | production OAuth app | production OAuth app | dev OAuth app |
 | `OAUTH_PROXY_SECRET` | shared value | **same** shared value | any 32+ characters |
 | `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | set by the Neon integration | set by the Neon integration, per git branch | set by the Neon integration |
@@ -97,6 +97,9 @@ openssl rand -base64 32 | vercel env add BETTER_AUTH_SECRET development
 openssl rand -base64 32 | vercel env add OAUTH_PROXY_SECRET production,preview --sensitive
 openssl rand -base64 32 | vercel env add OAUTH_PROXY_SECRET development
 
+# Canonical production origin, shared by Production and Preview
+vercel env add BETTER_AUTH_URL production,preview        # https://hivemind.curiouslycory.com
+
 # GitHub credentials (the CLI prompts for each value)
 vercel env add GITHUB_CLIENT_ID production,preview       # production OAuth app
 vercel env add GITHUB_CLIENT_SECRET production,preview --sensitive
@@ -114,7 +117,7 @@ vercel env add GITHUB_CLIENT_SECRET development
 
 ## H6. Verify after deploying
 
-**Production** (`https://hive-mind-web-mu.vercel.app`):
+**Production** (`https://hivemind.curiouslycory.com`):
 
 - [ ] The production build log shows `using pnpm v12.8.1` and `migrations applied`. A `SECURITY WARNING` from `pg` about SSL modes being treated as `verify-full` is expected with Neon's `sslmode=require` URLs.
 - [ ] Opening `/` while signed out redirects to `/sign-in`.
@@ -131,7 +134,7 @@ vercel env add GITHUB_CLIENT_SECRET development
 
 **CLI login** (production, with a CLI built from `main`: `pnpm build`, then use `apps/cli/dist/hivemind`; its default server is production):
 
-- [ ] `hivemind login` prints a URL and a code. Open the URL, sign in, check that the page shows the same code, and approve. The CLI prints `Logged in to https://hive-mind-web-mu.vercel.app` with your name.
+- [ ] `hivemind login` prints a URL and a code. Open the URL, sign in, check that the page shows the same code, and approve. The CLI prints `Logged in to https://hivemind.curiouslycory.com` with your name.
 - [ ] `hivemind whoami` shows your User and your personal organization.
 - [ ] In a scratch git repository, `hivemind init --name Scratch --slug scratch` writes `.hivemind.json`. Projects cannot be deleted yet, so use a name you don't mind keeping. `hivemind key create --name check` prints a secret, and `HIVEMIND_TOKEN=<secret> hivemind whoami` shows a Project key.
 - [ ] `hivemind key revoke <keyId>` (the id is in `hivemind key list`), then `hivemind logout`. After that, `hivemind whoami` exits 3.

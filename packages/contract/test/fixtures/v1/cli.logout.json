@@ -3,7 +3,7 @@
   "command": "logout",
   "ok": true,
   "data": {
-    "origin": "https://hive-mind-web-mu.vercel.app",
+    "origin": "https://hivemind.curiouslycory.com",
     "removed": true,
     "revoked": true,
     "hivemindTokenSet": false

@@ -2,6 +2,8 @@
 
 hive-mind gives coding agents that work on the same codebase from different machines a shared, live view of project state: what is planned, who is working on what, what has been decided, and what happened recently. Agents use it through a CLI (`hivemind`) and bundled agent skills; people watch it through a web dashboard. The goal is fewer merge conflicts, less duplicated work, and less rediscovery of past decisions.
 
+Production runs at [https://hivemind.curiouslycory.com](https://hivemind.curiouslycory.com). The CLI uses this URL by default.
+
 ## Status
 
 M0 (foundations) is done: the monorepo, CI, Neon Postgres with Drizzle migrations, GitHub sign-in with better-auth, and personal organizations.
