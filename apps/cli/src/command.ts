@@ -79,6 +79,13 @@ export interface CommandContext {
   readonly report: Reporter;
   /** Interactive questions; throws a USAGE_ERROR when not interactive. */
   readonly prompt: Prompter;
+  /**
+   * Reads stdin to its end, at most `maxBytes` bytes; null when it holds more.
+   * Only for an explicit `-` argument: a command never reads stdin otherwise,
+   * so a non-TTY run with an open stdin never waits. Throws CANCELLED on
+   * SIGINT/SIGTERM.
+   */
+  readStdin(maxBytes: number): Promise<Uint8Array | null>;
   /** `--server`, then HIVEMIND_URL, then the build default. Throws INVALID_SERVER. */
   origin(): ResolvedOrigin;
   /** The credential stores for this platform and terminal state. */
