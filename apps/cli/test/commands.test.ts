@@ -76,6 +76,41 @@ function bound(dir: string): unknown {
   return JSON.parse(readFileSync(join(dir, ".hivemind.json"), "utf8"));
 }
 
+/**
+ * A fetch that forwards to the fake backend, except that a POST to a path
+ * ending in `createSuffix` gets `respond()` instead: the server created the
+ * thing, but the answer is unusable.
+ */
+function failingCreate(createSuffix: string, respond: (init?: RequestInit) => Response) {
+  return async (input: URL | Request | string, init?: RequestInit): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (init?.method === "POST" && url.pathname.endsWith(createSuffix)) return respond(init);
+    return globalThis.fetch(input, init);
+  };
+}
+
+/** Headers and the start of a body, then nothing until the request's signal aborts. */
+function stalledBody(init?: RequestInit): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"partial":'));
+      init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+    },
+  });
+  return new Response(body, { status: 201, headers: { "content-type": "application/json" } });
+}
+
+const garbledBody = () =>
+  new Response("<html>gateway</html>", {
+    status: 201,
+    headers: { "content-type": "application/json" },
+  });
+
+/** Aborts `controller` once the fake fetch has handed out a stalled body. */
+function abortSoon(controller: AbortController): void {
+  setTimeout(() => controller.abort(new Error("received SIGINT")), 50);
+}
+
 describe("registry", () => {
   it("is valid and lists every command in help", async () => {
     expect(validateRegistry(COMMANDS)).toEqual([]);
@@ -403,6 +438,30 @@ describe("init", () => {
     expect(bound(root)).toEqual({ version: 1, projectId: other.id });
   });
 
+  it("says a rerun reuses the Project when the create answer is lost or unreadable", async () => {
+    await loginAs();
+    const controller = new AbortController();
+    const cases = [
+      { respond: stalledBody, code: "CANCELLED", signal: controller.signal },
+      { respond: garbledBody, code: "INVALID_RESPONSE", signal: undefined },
+    ];
+    for (const { respond, code, signal } of cases) {
+      const { root } = gitRepo();
+      if (signal) abortSoon(controller);
+      const result = await run(["init", "--name", "Lost", "--slug", "lost", "--json"], {
+        cwd: root,
+        fetch: failingCreate("/api/v1/projects", respond),
+        signal,
+      });
+      expect(result.code, result.stdout).toBe(1);
+      const error = (onlyJsonLine(result.stdout) as { error: { code: string; message: string } })
+        .error;
+      expect(error.code).toBe(code);
+      expect(error.message).toContain("may have been created anyway");
+      expect(error.message).toContain(`--org ${ORG_A.id}`);
+    }
+  });
+
   it("names the Project id when it was created but the file cannot be written", async () => {
     if (process.getuid?.() === 0) return; // root ignores the read-only directory
     await loginAs();
@@ -552,6 +611,36 @@ describe("key", () => {
     expect(onlyJsonLine(result.stdout)).toMatchObject({
       error: { code: "NETWORK_ERROR", message: expect.stringContaining("hivemind key list") },
     });
+  });
+
+  it("create points at key list when the answer stalls or is unreadable", async () => {
+    const { project, nested } = await boundRepo();
+    const controller = new AbortController();
+    const cases = [
+      { respond: stalledBody, code: "CANCELLED", signal: controller.signal },
+      { respond: garbledBody, code: "INVALID_RESPONSE", signal: undefined },
+      {
+        // Valid JSON without the secret: the key exists, but we cannot show it.
+        respond: () => Response.json({ projectKey: { id: "x" } }, { status: 201 }),
+        code: "INVALID_RESPONSE",
+        signal: undefined,
+      },
+    ];
+    for (const { respond, code, signal } of cases) {
+      if (signal) abortSoon(controller);
+      const result = await run(["key", "create", "--name", "ci", "--json"], {
+        cwd: nested,
+        fetch: failingCreate("/keys", respond),
+        signal,
+      });
+      expect(result.code, result.stdout).toBe(1);
+      expect(onlyJsonLine(result.stdout)).toMatchObject({
+        error: {
+          code,
+          message: expect.stringContaining(`hivemind key list --project ${project.id}`),
+        },
+      });
+    }
   });
 
   it("list shows metadata only; revoke removes the key; a second revoke is exit 4", async () => {

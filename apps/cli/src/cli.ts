@@ -12,7 +12,13 @@ import {
 } from "./credentials/manager.ts";
 import { CLI_ERROR_CODES, CliError, isCliError, usageError } from "./errors.ts";
 import { type ResolvedOrigin, resolveOrigin } from "./origin.ts";
-import { createReporter, type OutputStream, writeError, writeSuccess } from "./output.ts";
+import {
+  createReporter,
+  escapeTerminal,
+  type OutputStream,
+  writeError,
+  writeSuccess,
+} from "./output.ts";
 import { createPrompter } from "./prompt.ts";
 import { redact } from "./redact.ts";
 
@@ -389,7 +395,10 @@ export async function runCli(
   } catch (error) {
     if (isCliError(error)) return fail(error);
     if (runtime.env.HIVEMIND_DEBUG === "1" && error instanceof Error && error.stack) {
-      stderr.write(`${redact(error.stack)}\n`);
+      // Escaped line by line, so the stack keeps its shape but a message from
+      // a server cannot drive the terminal.
+      const stack = redact(error.stack).split("\n").map(escapeTerminal).join("\n");
+      stderr.write(`${stack}\n`);
     }
     const detail = error instanceof Error ? error.message : String(error);
     return fail(

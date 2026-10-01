@@ -177,6 +177,9 @@ describe("output contract", () => {
     expect(envelope(result.stdout)).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
     expect(result.stdout + result.stderr).not.toContain(token);
     expect(result.stderr).toContain("[REDACTED]");
+    // The debug stack is human output too: escaped line by line.
+    expect(result.stderr).toContain("boom\\x9b2J");
+    expect(result.stderr).not.toContain("\u009b");
   });
 
   it("never prompts without a terminal", async () => {

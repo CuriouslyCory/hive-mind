@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "command": "init",
+  "ok": true,
+  "data": {
+    "project": {
+      "id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "organizationId": "2c9e8b71-5d4a-4f3e-8a1b-6c7d8e9f0a1b",
+      "slug": "hive-mind",
+      "name": "hive-mind",
+      "repoUrl": "git@github.com:CuriouslyCory/hive-mind.git",
+      "createdAt": "2026-10-01T12:00:00.000Z",
+      "updatedAt": "2026-10-01T12:00:00.000Z"
+    },
+    "created": true,
+    "config": {
+      "path": "/home/ada/hive-mind/.hivemind.json",
+      "status": "created"
+    }
+  }
+}

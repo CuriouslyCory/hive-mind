@@ -37,6 +37,7 @@ import {
   projectKeySchema,
   projectSchema,
   revokeProjectKeyInputSchema,
+  revokeProjectKeyOutputSchema,
   serializeHivemindConfig,
   successEnvelope,
 } from "../src/index.ts";
@@ -433,6 +434,66 @@ describe("CLI --json envelope", () => {
       const value = fixture(name);
       expect(anyCliEnvelopeSchema.parse(value)).toEqual(value);
     }
+  });
+
+  // The `data` of these commands is documented in docs/cli.md and scripts
+  // read it; the CLI test json-output.test.ts compares real output with these
+  // fixtures (field names, nesting and types).
+  const commandFixtures = {
+    "cli.login.json": "login",
+    "cli.logout.json": "logout",
+    "cli.init.json": "init",
+    "cli.key-create.json": "key create",
+    "cli.key-list.json": "key list",
+    "cli.key-revoke.json": "key revoke",
+  } as const;
+
+  it("parses the per-command v1 fixtures unchanged", () => {
+    for (const [name, command] of Object.entries(commandFixtures)) {
+      const value = fixture(name);
+      expect(anyCliEnvelopeSchema.parse(value)).toEqual(value);
+      expect(value).toMatchObject({ schemaVersion: 1, command, ok: true });
+    }
+  });
+
+  it("pins the documented data fields of login, logout and init", () => {
+    const data = (name: string) => (fixture(name) as { data: Record<string, unknown> }).data;
+    expect(data("cli.login.json")).toEqual({
+      origin: expect.any(String),
+      credentialStore: "file",
+      user: (fixture("me.user.json") as { user: unknown }).user,
+      hivemindTokenSet: false,
+    });
+    expect(data("cli.logout.json")).toEqual({
+      origin: expect.any(String),
+      removed: true,
+      revoked: true,
+      hivemindTokenSet: false,
+    });
+    expect(data("cli.init.json")).toEqual({
+      project: fixture("project.json"),
+      created: true,
+      config: { path: expect.any(String), status: "created" },
+    });
+  });
+
+  it("carries API shapes unchanged in the key command fixtures", () => {
+    expect(successEnvelope("key create", fixture("create-project-key.json"))).toEqual(
+      fixture("cli.key-create.json"),
+    );
+    const list = fixture("cli.key-list.json") as {
+      data: { projectId: string; items: unknown[]; nextCursor: null };
+    };
+    expect(list.data.projectId).toBe(PROJECT_ID);
+    expect(projectKeyPageSchema.parse({ items: list.data.items, nextCursor: null })).toEqual(
+      fixture("project-key-page.json"),
+    );
+    const revoke = fixture("cli.key-revoke.json") as { data: unknown };
+    expect(revokeProjectKeyOutputSchema.parse(revoke.data)).toEqual({
+      id: KEY_ID,
+      projectId: PROJECT_ID,
+      revoked: true,
+    });
   });
 
   it("builds envelopes identical to the fixtures", () => {

@@ -219,7 +219,7 @@ Environment variables: `HIVEMIND_URL` (backend origin), `HIVEMIND_TOKEN` (creden
 
 ## Output
 
-Results go to stdout. Progress, prompts and warnings go to stderr. Text from the server is printed with terminal control characters escaped, and known tokens are redacted from all output.
+Results go to stdout. Progress, prompts and warnings go to stderr. Terminal control characters in text from the server (C0 and C1 controls, DEL, U+2028/U+2029, bidi overrides and isolates) are always escaped: as visible escapes such as `\x1b` in human output, and as `\uXXXX` with `--json`, which parses back to the original text. Known tokens are redacted from errors, warnings and progress lines. Success output is not redacted, since `key create` prints its new key there on purpose.
 
 ### JSON (schema version 1)
 
@@ -247,7 +247,7 @@ With `--json`, stdout carries exactly one JSON object, for success and failure a
 | 3 | not authenticated or not allowed | `UNAUTHORIZED`, `FORBIDDEN` |
 | 4 | not found | `NOT_FOUND` |
 
-The exit code always follows from `error.code`. A second Ctrl+C while a command is stopping exits 130 immediately. The CLI never retries a request on its own; a timed-out or cancelled write says that the server may still have completed it.
+The exit code always follows from `error.code`. A second Ctrl+C while a command is stopping exits 130 immediately; a repeat of the same signal within 500 ms counts as the first one, because the npm launcher forwards the signal the terminal already sent to the binary. The CLI never retries a request on its own; a timed-out or cancelled write says that the server may still have completed it.
 
 ## The API
 

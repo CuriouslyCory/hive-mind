@@ -43,6 +43,18 @@ export const CLI_ERROR_CODES = {
   internal: "INTERNAL_ERROR",
 } as const;
 
+/**
+ * Failures after which a non-idempotent request may still have succeeded on
+ * the server: it was (or may have been) sent, and no usable answer came back.
+ * Commands that create something turn these into "check before rerunning".
+ */
+export const UNCERTAIN_OUTCOME_CODES: ReadonlySet<string> = new Set([
+  CLI_ERROR_CODES.timeout,
+  CLI_ERROR_CODES.network,
+  CLI_ERROR_CODES.cancelled,
+  CLI_ERROR_CODES.invalidResponse,
+]);
+
 export interface CliErrorOptions {
   /** The next step for the user, e.g. "Run `hivemind login`." Shown on its own line. */
   hint?: string;

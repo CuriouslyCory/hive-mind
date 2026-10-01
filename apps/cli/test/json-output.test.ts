@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { anyCliEnvelopeSchema, exitCodeForEnvelope } from "@hivemind/contract";
@@ -83,6 +83,37 @@ async function hivemind(box: Sandbox, argv: string[], env: NodeJS.ProcessEnv = {
     env: { ...box.env, ...env },
   });
   return { result, argv: fullArgv };
+}
+
+/** A golden v1 envelope from packages/contract (what released CLIs promise scripts). */
+function golden(name: string): unknown {
+  const dir = new URL("../../../packages/contract/test/fixtures/v1/", import.meta.url);
+  return JSON.parse(readFileSync(new URL(name, dir), "utf8"));
+}
+
+/**
+ * The structure of a JSON value without its data: object keys, array lengths
+ * and leaf types (null is its own type). Ids, times, paths and origins differ
+ * from run to run, so only the structure is compared.
+ */
+function shape(value: unknown): unknown {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return value.map(shape);
+  if (typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, shape(item)]));
+  }
+  return typeof value;
+}
+
+/**
+ * Every field of the fixture is in the output, with the same type. Extra
+ * output fields pass: adding a field is compatible (AGENTS.md); renaming,
+ * dropping or retyping one is not.
+ */
+function expectGolden(envelope: unknown, name: string): void {
+  const fixture = golden(name) as { command: string };
+  expect(shape(envelope), name).toMatchObject(shape(fixture) as object);
+  expect(envelope).toMatchObject({ schemaVersion: 1, command: fixture.command, ok: true });
 }
 
 describe("compiled binary --json contract", () => {
@@ -222,6 +253,49 @@ describe("compiled binary --json contract", () => {
     }
     const whoami = await hivemind(box, ["whoami"]);
     expect(whoami.result.status).toBe(3);
+  });
+
+  it("matches the golden v1 fixtures for login, init, key create/list/revoke and logout", async () => {
+    const box = sandbox();
+    // `key create` prints its own new secret; nothing else prints any.
+    const run = async (argv: string[], printsNewKey = false) => {
+      const { result, argv: full } = await hivemind(box, argv);
+      expect(result.status, result.stderr).toBe(0);
+      const allowed = printsNewKey ? [[...api.keys.values()].at(-1)?.secret ?? ""] : [];
+      return envelopeOf(result, full, allowed) as { data: Record<string, unknown> };
+    };
+
+    const login = await run(["login"]);
+    expectGolden(login, "cli.login.json");
+    expect(login).toMatchObject({ data: { credentialStore: "file", hivemindTokenSet: false } });
+
+    const init = await run([
+      "init",
+      "--name",
+      "Golden",
+      "--slug",
+      "golden",
+      "--org",
+      ORG_A.id,
+      "--repo-url",
+      "https://github.com/acme/golden.git",
+    ]);
+    expectGolden(init, "cli.init.json");
+    expect(init).toMatchObject({ data: { created: true, config: { status: "created" } } });
+
+    // The fixtures have a created key without expiry (expiresAt null) and a
+    // listed key with one (a string), so: create one without, revoke it, then
+    // create one with an expiry and list that.
+    const created = await run(["key", "create", "--name", "ci"], true);
+    expectGolden(created, "cli.key-create.json");
+    const keyId = (created.data.projectKey as { id: string }).id;
+    expectGolden(await run(["key", "revoke", keyId]), "cli.key-revoke.json");
+    await run(["key", "create", "--name", "ci", "--expires-in-days", "90"], true);
+    expectGolden(await run(["key", "list"]), "cli.key-list.json");
+
+    const logout = await run(["logout"]);
+    expectGolden(logout, "cli.logout.json");
+    expect(logout).toMatchObject({ data: { removed: true, revoked: true } });
   });
 
   it("exit 1 for an unreadable binding, never falling back to an ancestor", async () => {

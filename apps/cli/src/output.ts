@@ -18,8 +18,18 @@ import { redact } from "./redact.ts";
  *
  * Text that can come from a server or a repository (names, slugs, URLs, error
  * messages) is escaped before it reaches a terminal, so it cannot move the
- * cursor, change colors, set the window title or hide text. JSON output needs
- * no escaping: JSON.stringify already encodes every control character.
+ * cursor, change colors, set the window title, hide text or reorder it.
+ * - Human output: every unsafe character (see `isUnsafe`) becomes a visible
+ *   escape such as `\x1b` or `\u202e`.
+ * - `--json`: JSON escaping is the transport. JSON.stringify escapes only
+ *   U+0000-U+001F, so the remaining unsafe characters (DEL, C1 controls,
+ *   U+2028/U+2029, bidi overrides and isolates) are written as `\uXXXX` too.
+ *   That is still standard JSON and parses to exactly the same strings, so it
+ *   is no change to the output contract; it only keeps `--json` run in a
+ *   terminal from being interpreted by it.
+ *
+ * Redaction of known secrets applies to diagnostics (errors, warnings,
+ * progress, debug stacks), not to success data: see redact.ts.
  */
 
 export interface OutputStream {
@@ -81,9 +91,24 @@ export function createReporter(stderr: OutputStream): Reporter {
   };
 }
 
+/**
+ * The unsafe characters JSON.stringify leaves raw. They can only occur inside
+ * string literals (everything JSON.stringify emits outside strings is ASCII
+ * punctuation, digits and keywords), so escaping them keeps the JSON valid.
+ */
+const RAW_IN_JSON = /[\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+/** JSON.stringify, with no terminal control character left raw. */
+export function stringifyForTerminal(value: unknown): string {
+  return JSON.stringify(value).replace(
+    RAW_IN_JSON,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 /** Writes the single `--json` envelope line. */
 export function writeEnvelope(stdout: OutputStream, envelope: CliEnvelope<unknown>): void {
-  stdout.write(`${JSON.stringify(envelope)}\n`);
+  stdout.write(`${stringifyForTerminal(envelope)}\n`);
 }
 
 export function writeSuccess(

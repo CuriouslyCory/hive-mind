@@ -207,7 +207,9 @@ function describeNetworkError(error: unknown): string {
  * The guarded fetch every backend request goes through: same-origin only,
  * bearer attached here and nowhere else, `redirect: "manual"` with any 3xx
  * turned into UNEXPECTED_REDIRECT, a timeout, the caller's abort signal, and
- * transport failures mapped to TIMEOUT / CANCELLED / NETWORK_ERROR. Pass a
+ * transport failures mapped to TIMEOUT / CANCELLED / NETWORK_ERROR. The body
+ * is read in full (size-capped) under the same timeout and mapping, and the
+ * returned Response holds it in memory, so reading it cannot fail. Pass a
  * path (`/api/auth/device/code`) or a Request on the origin. Exported for
  * routes outside the oRPC contract, such as better-auth's device flow; it
  * never retries.
@@ -234,6 +236,40 @@ export function createOriginFetch(options: ApiClientOptions): OriginFetch {
       (signal): signal is AbortSignal => signal !== undefined,
     );
     const idempotent = request.method === "GET" || request.method === "HEAD";
+    const maybeDone = idempotent
+      ? undefined
+      : "The server may still have completed the request; check its state before trying again.";
+    // One mapping for both phases: the timeout and the abort signal cover the
+    // headers and the body alike, so a server that stalls mid-body fails the
+    // same way as one that never answers.
+    const transportError = (error: unknown, phase: "send" | "read"): CliError => {
+      if (timeout.aborted) {
+        return new CliError(
+          CLI_ERROR_CODES.timeout,
+          `${origin} did not answer within ${Math.round(timeoutMs / 1000)} s.`,
+          { hint: maybeDone, cause: error },
+        );
+      }
+      if (options.signal?.aborted || isAbortError(error)) {
+        return new CliError(CLI_ERROR_CODES.cancelled, "Cancelled.", {
+          hint: maybeDone,
+          cause: error,
+        });
+      }
+      return new CliError(
+        CLI_ERROR_CODES.network,
+        phase === "send"
+          ? `Cannot reach ${origin}: ${describeNetworkError(error)}.`
+          : `The connection to ${origin} failed while reading its answer: ${describeNetworkError(error)}.`,
+        {
+          // Once headers arrived, the server has seen the request.
+          hint:
+            (phase === "read" ? maybeDone : undefined) ??
+            "Check your network connection and the server (--server or HIVEMIND_URL).",
+          cause: error,
+        },
+      );
+    };
     let response: Response;
     try {
       response = await fetchImpl(url, {
@@ -246,30 +282,7 @@ export function createOriginFetch(options: ApiClientOptions): OriginFetch {
         signal: AbortSignal.any(signals),
       });
     } catch (error) {
-      const maybeDone = idempotent
-        ? undefined
-        : "The server may still have completed the request; check its state before trying again.";
-      if (timeout.aborted) {
-        throw new CliError(
-          CLI_ERROR_CODES.timeout,
-          `${origin} did not answer within ${Math.round(timeoutMs / 1000)} s.`,
-          { hint: maybeDone, cause: error },
-        );
-      }
-      if (options.signal?.aborted || isAbortError(error)) {
-        throw new CliError(CLI_ERROR_CODES.cancelled, "Cancelled.", {
-          hint: maybeDone,
-          cause: error,
-        });
-      }
-      throw new CliError(
-        CLI_ERROR_CODES.network,
-        `Cannot reach ${origin}: ${describeNetworkError(error)}.`,
-        {
-          hint: "Check your network connection and the server (--server or HIVEMIND_URL).",
-          cause: error,
-        },
-      );
+      throw transportError(error, "send");
     }
     if (response.status >= 300 && response.status < 400) {
       await response.body?.cancel();
@@ -289,8 +302,65 @@ export function createOriginFetch(options: ApiClientOptions): OriginFetch {
         },
       );
     }
-    return response;
+    // The body is read here, inside the guarded section, rather than by
+    // whoever parses it (oRPC, the device flow): their reads would see a raw
+    // TimeoutError/AbortError and report it as an unreadable response or a bug.
+    let bytes: Uint8Array<ArrayBuffer> | null;
+    try {
+      bytes = await readCapped(response, MAX_RESPONSE_BYTES);
+    } catch (error) {
+      throw transportError(error, "read");
+    }
+    if (bytes === null) {
+      throw new CliError(
+        CLI_ERROR_CODES.invalidResponse,
+        `${origin} sent a response larger than ${MAX_RESPONSE_BYTES / (1024 * 1024)} MiB.`,
+        {
+          hint: maybeDone ?? "Check that --server or HIVEMIND_URL points at a Hive Mind backend.",
+        },
+      );
+    }
+    // fetch already decoded the body, so the encoding headers no longer apply.
+    const bodyHeaders = new Headers(response.headers);
+    bodyHeaders.delete("content-encoding");
+    bodyHeaders.delete("content-length");
+    return new Response(bytes.byteLength === 0 ? null : bytes, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: bodyHeaders,
+    });
   };
+}
+
+/** Management answers are small JSON; anything this large is not a Hive Mind answer. */
+export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+/** The whole body, or null (and the stream cancelled) once it exceeds `limit` bytes. */
+async function readCapped(
+  response: Response,
+  limit: number,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (response.body === null) return new Uint8Array(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 export function createApiClient(options: ApiClientOptions): HivemindApi {
