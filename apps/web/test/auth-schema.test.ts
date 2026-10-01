@@ -8,8 +8,9 @@ import { describe, expect, it } from "vitest";
 import { createAuth } from "../src/server/auth";
 
 // Checks packages/db/src/schema/auth.ts against the tables better-auth writes
-// for the plugins configured in createAuth. Adding a plugin (M1) without its
-// tables, or dropping a field, fails here instead of at runtime.
+// for the plugins configured in createAuth (organization, device
+// authorization, api-key). Adding a plugin without its tables, or dropping a
+// field, fails here instead of at runtime.
 
 // The pool never connects: the auth instance is built only to read its options.
 const auth = createAuth({
@@ -29,6 +30,11 @@ const SQL_TYPES: Record<string, string[]> = {
   number: ["integer", "bigint", "double precision"],
 };
 
+/** `deviceCode` -> `device_code`: the SQL name for a better-auth model name. */
+function snakeCase(name: string): string {
+  return name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
 /** One message per mismatch between better-auth's tables and the Drizzle schema. */
 function schemaDrift(expected: BetterAuthDBSchema): string[] {
   const tables = schema as Record<string, unknown>;
@@ -41,7 +47,7 @@ function schemaDrift(expected: BetterAuthDBSchema): string[] {
       continue;
     }
     const config = getTableConfig(table);
-    if (config.name !== modelName) {
+    if (config.name !== snakeCase(modelName)) {
       problems.push(`${modelName}: SQL table is named ${config.name}`);
     }
     const columns = table as unknown as Record<string, PgColumn | undefined>;
@@ -74,7 +80,7 @@ function schemaDrift(expected: BetterAuthDBSchema): string[] {
 describe("auth schema", () => {
   const expected = getAuthTables(auth.options);
 
-  it("covers the core and organization plugin tables", () => {
+  it("covers the core, organization, device authorization and api-key tables", () => {
     expect(Object.values(expected).map((table) => table.modelName)).toEqual(
       expect.arrayContaining([
         "user",
@@ -84,6 +90,8 @@ describe("auth schema", () => {
         "organization",
         "member",
         "invitation",
+        "deviceCode",
+        "apikey",
       ]),
     );
   });

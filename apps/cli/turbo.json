@@ -1,0 +1,15 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "cache": false,
+      "env": ["HIVEMIND_BUILD_COMMIT"],
+      "passThroughEnv": []
+    },
+    "test": {
+      "dependsOn": ["transit", "build"],
+      "env": ["CI"]
+    }
+  }
+}

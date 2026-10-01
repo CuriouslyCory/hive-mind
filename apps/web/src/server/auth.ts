@@ -1,16 +1,18 @@
 import { randomBytes } from "node:crypto";
+import { apiKey } from "@better-auth/api-key";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import type { Db } from "@hivemind/db";
 import * as schema from "@hivemind/db/schema";
 import type { BetterAuthPlugin } from "better-auth";
-import { isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
 import { nextCookies } from "better-auth/next-js";
-import { oAuthProxy, organization } from "better-auth/plugins";
+import { bearer, deviceAuthorization, oAuthProxy, organization } from "better-auth/plugins";
 import { sql } from "drizzle-orm";
 import { env } from "../env";
 import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from "../lib/auth-config";
 import { getDb } from "./db";
+import { guardDeviceCodeDecisions } from "./device-code-guard";
 
 // Threat model notes (ADR-0006):
 // - Preview deployments sign in through production with oAuthProxy, because a
@@ -23,6 +25,13 @@ import { getDb } from "./db";
 //   state, not to a URL taken from the request.
 // - `activeOrganizationId` is a UI default, not an authorization decision.
 //   Authorize through project -> organization membership.
+// - The CLI's device client ID is public and identifies the client; it never
+//   proves who is calling. Approval happens in the browser, under the user's
+//   cookie login session.
+// - A Project key is an organization-owned API key bound to one Project by
+//   the application's `project_api_key` table. It never becomes a login
+//   session, and the plugin's own HTTP routes are disabled, so keys are only
+//   created, listed and revoked by server code that checks the binding.
 
 /** `next dev`. Trusted only outside Vercel deployments. */
 export const LOCAL_DEV_HOST = "localhost:3000";
@@ -35,7 +44,8 @@ export const MAX_SLUG_LENGTH = 39;
  * member management (ADR-0007). Every user has exactly their personal
  * organization until then. Teams are off, so their routes do not exist.
  * `disabledPaths` applies to HTTP requests only; server code can still call
- * the matching `auth.api` methods.
+ * the matching `auth.api` methods. The auth route handler also answers 404 for
+ * every spelling of these paths (see `isClosedAuthPath`).
  */
 export const ORGANIZATION_PATHS_DISABLED_UNTIL_M3 = [
   "/organization/invite-member",
@@ -48,6 +58,67 @@ export const ORGANIZATION_PATHS_DISABLED_UNTIL_M3 = [
   "/organization/remove-member",
   "/organization/update-member-role",
   "/organization/leave",
+];
+
+/** The device authorization client ID the CLI sends. Public, not a secret. */
+export const CLI_CLIENT_ID = "hivemind-cli";
+
+/** Client IDs allowed to start the device flow. Any other is `invalid_client`. */
+export const DEVICE_CLIENT_IDS: readonly string[] = [CLI_CLIENT_ID];
+
+/**
+ * How long a device code and its user code stay valid, and the minimum
+ * polling interval the CLI is told to use. better-auth's time strings; the
+ * response reports them in seconds (`expires_in`, `interval`).
+ */
+export const DEVICE_CODE_EXPIRES_IN = "10m";
+export const DEVICE_CODE_POLLING_INTERVAL = "5s";
+
+/**
+ * The page where the user enters or confirms the user code, relative to the
+ * request's origin. The device flow returns it as `verification_uri`, and
+ * `verification_uri_complete` adds `?user_code=...`.
+ */
+export const DEVICE_VERIFICATION_PATH = "/device";
+
+/**
+ * The device plugin's approve and deny routes answer 404 over HTTP. The
+ * `/device` page's server action calls them through `auth.api`, with the
+ * browser's cookie login session only, after showing the user code. Over HTTP
+ * they would also accept a bearer login session token, so a CLI token could
+ * approve further device codes for its User. The auth route handler also
+ * answers 404 for every spelling of these paths (see `isClosedAuthPath`).
+ */
+export const DEVICE_DECISION_PATHS_DISABLED = ["/device/approve", "/device/deny"];
+
+/**
+ * Every Project key starts with this, so `/api/v1` can tell one from a login
+ * session token before verifying it. Recognizing the prefix never
+ * authenticates anything.
+ */
+export const PROJECT_KEY_PREFIX = "hm_";
+
+/** Longest Project key name; the contract's limit (issue #3). */
+export const PROJECT_KEY_NAME_MAX_LENGTH = 120;
+
+/** Bounds on a Project key's lifetime when the caller sets one, in days. */
+export const PROJECT_KEY_MIN_EXPIRES_IN_DAYS = 1;
+export const PROJECT_KEY_MAX_EXPIRES_IN_DAYS = 365;
+
+/**
+ * The api-key plugin's HTTP routes in better-auth 1.7.6. They answer 404:
+ * they would let a caller create, change or list organization keys that no
+ * Project binding restricts. Server code calls the matching `auth.api`
+ * methods after its own authorization. The auth route handler also rejects
+ * every `/api-key/*` path (see `isRawApiKeyPath`), so a route added by a
+ * plugin upgrade is not exposed before it is reviewed.
+ */
+export const API_KEY_PATHS_DISABLED = [
+  "/api-key/create",
+  "/api-key/get",
+  "/api-key/update",
+  "/api-key/delete",
+  "/api-key/list",
 ];
 
 export interface CreateAuthOptions {
@@ -117,14 +188,20 @@ export function createAuth(opts: CreateAuthOptions) {
   const { db } = opts;
   return betterAuth({
     basePath: AUTH_BASE_PATH,
-    disabledPaths: ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+    disabledPaths: [
+      ...ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+      ...DEVICE_DECISION_PATHS_DISABLED,
+      ...API_KEY_PATHS_DISABLED,
+    ],
     baseURL: {
       allowedHosts: opts.allowedHosts,
       // No fallback: a request from any other host fails instead of being
       // treated as production.
     },
     secret: opts.secret,
-    database: drizzleAdapter(db, { provider: "pg", schema, transaction: true }),
+    database: guardDeviceCodeDecisions(
+      drizzleAdapter(db, { provider: "pg", schema, transaction: true }),
+    ),
     socialProviders: {
       github: {
         clientId: opts.github.clientId,
@@ -184,6 +261,38 @@ export function createAuth(opts: CreateAuthOptions) {
         disableOrganizationDeletion: true,
       }),
       oAuthProxy({ productionURL: opts.productionURL, secret: opts.oauthProxySecret }),
+      deviceAuthorization({
+        expiresIn: DEVICE_CODE_EXPIRES_IN,
+        interval: DEVICE_CODE_POLLING_INTERVAL,
+        verificationUri: DEVICE_VERIFICATION_PATH,
+        validateClient: (clientId) => DEVICE_CLIENT_IDS.includes(clientId),
+      }),
+      rejectDeviceUserPreBinding(),
+      // The device flow returns the raw login session token, which is not
+      // signed, so bearer() must accept unsigned tokens. It looks each one up
+      // like a cookie, so a revoked or expired login session fails.
+      bearer({ requireSignature: false }),
+      apiKey({
+        references: "organization",
+        defaultPrefix: PROJECT_KEY_PREFIX,
+        // Only a SHA-256 hash is stored; the key is shown once, at creation.
+        disableKeyHashing: false,
+        // A key must never act as a login session (issue #3): /api/v1 maps it
+        // to a separate Project-key principal instead.
+        enableSessionForAPIKeys: false,
+        // Authorization comes from project_api_key, never from metadata a
+        // caller could set.
+        enableMetadata: false,
+        maximumNameLength: PROJECT_KEY_NAME_MAX_LENGTH,
+        keyExpiration: {
+          defaultExpiresIn: null,
+          minExpiresIn: PROJECT_KEY_MIN_EXPIRES_IN_DAYS,
+          maxExpiresIn: PROJECT_KEY_MAX_EXPIRES_IN_DAYS,
+        },
+        // The plugin's default allows 10 requests a day per key, and counts
+        // them with a write on every verification. Request limits are M7's.
+        rateLimit: { enabled: false },
+      }),
       ...(opts.plugins ?? []),
       nextCookies(),
     ],
@@ -191,6 +300,122 @@ export function createAuth(opts: CreateAuthOptions) {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * Whether a path under the auth base path is, or could normalize to, an
+ * api-key plugin route: any segment that starts with `api-key` (see
+ * `authPathSegments`). Covers routes a plugin upgrade adds, so they are not
+ * exposed before they are reviewed.
+ */
+export function isRawApiKeyPath(pathname: string): boolean {
+  const segments = authPathSegments(pathname);
+  return segments === null || segments.some((segment) => segment.startsWith("api-key"));
+}
+
+/**
+ * Routes `disabledPaths` closes that the auth route handler also closes in
+ * every spelling, as segments. `disabledPaths` compares a path with only its
+ * trailing slashes removed, so it relies on the router not matching any other
+ * spelling either.
+ */
+const CLOSED_ROUTES = [
+  ...ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+  ...DEVICE_DECISION_PATHS_DISABLED,
+].map((path) => path.split("/").filter(Boolean));
+
+/**
+ * Whether the auth route handler answers 404 for a path before better-auth
+ * sees it: an api-key plugin path (`isRawApiKeyPath`), or a path that a
+ * router could read as one of the routes in `CLOSED_ROUTES`, with dot
+ * segments resolved or ignored. This does not depend on how better-auth or
+ * its router normalize paths, so an upgrade cannot reopen these routes.
+ */
+export function isClosedAuthPath(pathname: string): boolean {
+  const segments = authPathSegments(pathname);
+  if (segments === null || segments.some((segment) => segment.startsWith("api-key"))) return true;
+  const readings = [
+    resolveDotSegments(segments),
+    segments.filter((segment) => segment !== "." && segment !== ".."),
+  ];
+  return readings.some((reading) =>
+    CLOSED_ROUTES.some((route) =>
+      reading.some((_, start) => route.every((part, offset) => reading[start + offset] === part)),
+    ),
+  );
+}
+
+/**
+ * A path's segments as the most lenient router could read them: repeatedly
+ * percent-decoded, lowercased, with a backslash read as `/`, empty segments
+ * dropped and whitespace trimmed. `null` when the path does not decode
+ * cleanly, which callers treat as closed (fail closed).
+ */
+function authPathSegments(pathname: string): string[] | null {
+  let decoded = pathname;
+  for (let round = 0; ; round++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return null;
+    }
+    if (next === decoded) break;
+    if (round === 4) return null;
+    decoded = next;
+  }
+  return decoded
+    .toLowerCase()
+    .split(/[/\\]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+/** `segments` with `.` removed and each `..` removing the segment before it. */
+function resolveDotSegments(segments: string[]): string[] {
+  const resolved: string[] = [];
+  for (const segment of segments) {
+    if (segment === "..") resolved.pop();
+    else if (segment !== ".") resolved.push(segment);
+  }
+  return resolved;
+}
+
+/**
+ * Rejects a device authorization request that names a user. better-auth
+ * accepts `user_id` to pre-bind the code to a user, but the caller is an
+ * unauthenticated CLI, so the user must come from the browser approval.
+ * Checked for JSON and form bodies, which the plugin both accepts.
+ */
+function rejectDeviceUserPreBinding(): BetterAuthPlugin {
+  return {
+    id: "hivemind-device-no-user-binding",
+    hooks: {
+      before: [
+        {
+          matcher: (ctx) => ctx.path === "/device/code",
+          handler: createAuthMiddleware(async (ctx) => {
+            const body: unknown = ctx.body;
+            let named = typeof body === "object" && body !== null && "user_id" in body;
+            const contentType = ctx.request?.headers.get("content-type")?.toLowerCase() ?? "";
+            if (
+              !named &&
+              ctx.request &&
+              contentType.includes("application/x-www-form-urlencoded")
+            ) {
+              named = new URLSearchParams(await ctx.request.clone().text()).has("user_id");
+            }
+            if (named) {
+              throw new APIError("BAD_REQUEST", {
+                error: "invalid_request",
+                error_description: "user_id is not accepted",
+              });
+            }
+          }),
+        },
+      ],
+    },
+  };
+}
 
 /**
  * Returns the user's first organization, creating their personal organization

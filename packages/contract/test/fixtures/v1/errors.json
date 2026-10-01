@@ -1,0 +1,9 @@
+{
+  "BAD_REQUEST": { "status": 400, "exitCode": 1 },
+  "UNAUTHORIZED": { "status": 401, "exitCode": 3 },
+  "FORBIDDEN": { "status": 403, "exitCode": 3 },
+  "NOT_FOUND": { "status": 404, "exitCode": 4 },
+  "CONFLICT": { "status": 409, "exitCode": 2 },
+  "PAYLOAD_TOO_LARGE": { "status": 413, "exitCode": 1 },
+  "INTERNAL_SERVER_ERROR": { "status": 500, "exitCode": 1 }
+}

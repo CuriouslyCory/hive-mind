@@ -32,6 +32,12 @@
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "env": ["CI", "TEST_DATABASE_URL"]
     },
+    "test:e2e": {
+      "dependsOn": ["transit", "@hivemind/cli#build"],
+      "cache": false,
+      "env": ["CI", "TEST_DATABASE_URL", "E2E_SERVER"],
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH"]
+    },
     "dev": {
       "cache": false,
       "persistent": true,

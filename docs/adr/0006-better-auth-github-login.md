@@ -38,7 +38,7 @@ Preview deployments complicate OAuth: a GitHub OAuth app allows one callback URL
 - **The base path and cookie prefix become contracts** once M1 ships CLI binaries (`src/lib/auth-config.ts`).
 - **Production domain:** currently the Vercel alias `hive-mind-web-mu.vercel.app`. Adding a custom domain means updating the production OAuth app's callback URL and `BETTER_AUTH_URL`.
 - **Preview sign-in cannot work until production runs the same plugin**, so it is verified after merge (setup step H6), along with production sign-in.
-- M1 adds the device-authorization and API-key plugins to `createAuth`, with their tables (ADR-0005).
+- M1 adds the device-authorization and API-key plugins to `createAuth`, with their tables (ADR-0005). See ADR-0013.
 
 ## Alternatives considered
 

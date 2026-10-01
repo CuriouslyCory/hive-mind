@@ -1,0 +1,58 @@
+[
+  {
+    "procedure": "me",
+    "operationId": "getMe",
+    "method": "GET",
+    "path": "/me",
+    "successStatus": 200
+  },
+  {
+    "procedure": "organizations.list",
+    "operationId": "listOrganizations",
+    "method": "GET",
+    "path": "/organizations",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.list",
+    "operationId": "listProjects",
+    "method": "GET",
+    "path": "/projects",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.create",
+    "operationId": "createProject",
+    "method": "POST",
+    "path": "/projects",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.get",
+    "operationId": "getProject",
+    "method": "GET",
+    "path": "/projects/{id}",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.keys.list",
+    "operationId": "listProjectKeys",
+    "method": "GET",
+    "path": "/projects/{id}/keys",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.keys.create",
+    "operationId": "createProjectKey",
+    "method": "POST",
+    "path": "/projects/{id}/keys",
+    "successStatus": 201
+  },
+  {
+    "procedure": "projects.keys.revoke",
+    "operationId": "revokeProjectKey",
+    "method": "DELETE",
+    "path": "/projects/{id}/keys/{keyId}",
+    "successStatus": 200
+  }
+]

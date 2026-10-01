@@ -4,6 +4,14 @@ packages:
 
 # Shared version pins. Workspaces reference these with "catalog:".
 catalog:
+  # Every @orpc/* package must use this same exact version: they depend on each
+  # other at exact versions, so a range could install two copies.
+  "@orpc/client": 1.15.4
+  "@orpc/contract": 1.15.4
+  "@orpc/openapi": 1.15.4
+  "@orpc/openapi-client": 1.15.4
+  "@orpc/server": 1.15.4
+  "@orpc/zod": 1.15.4
   "@types/node": ^24.19.0
   "@types/pg": ^8.23.1
   drizzle-orm: ~0.45.3
@@ -11,6 +19,7 @@ catalog:
   typescript: ~6.0.3
   vite: ^8.3.1
   vitest: ^5.0.2
+  zod: ^4.6.5
 
 # Every dependency with a build script must be reviewed here: true runs it,
 # false skips it. strictDepBuilds (default true) fails the install on any
@@ -23,6 +32,13 @@ allowBuilds:
   # script only verifies the platform binary, which pnpm already installs from
   # the matching optional @esbuild/* package, so skipping it is safe.
   esbuild: false
+  # Bun's npm package (apps/cli devDependency, pinned per ADR-0012). Its
+  # postinstall resolves the platform binary from the optional @oven/bun-*
+  # package, then moves it into bun/bin, mutating the store; if that package is
+  # missing it falls back to a nested `npm install` or a registry download with
+  # no integrity check. Skipped: apps/cli/scripts/build.ts resolves the
+  # lockfile-verified @oven/bun-* binary itself, so the bun/bin shim is unused.
+  bun: false
 
 overrides:
   # drizzle-orm has an optional peer on kysely, which better-auth brings into

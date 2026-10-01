@@ -1,6 +1,5 @@
-import { createDb, type Db } from "@hivemind/db";
+import { createDb, createPool, type Db } from "@hivemind/db";
 import { attachDatabasePool } from "@vercel/functions";
-import pg from "pg";
 import { env } from "../env";
 
 let db: Db | undefined;
@@ -12,13 +11,15 @@ let db: Db | undefined;
  * evaluate modules that import this one without database credentials.
  * `attachDatabasePool` keeps a Vercel Fluid compute instance alive until the
  * pool has closed its idle connections, so suspended instances don't leak them.
+ * `createPool` logs and discards an idle connection the server closes (Neon
+ * does this to idle connections) instead of letting it crash the process.
  *
  * The pooler runs PgBouncer in transaction mode, so code using this client
  * cannot rely on `LISTEN` or session-level advisory locks.
  */
 export function getDb(): Db {
   if (!db) {
-    const pool = new pg.Pool({ connectionString: env.DATABASE_URL });
+    const pool = createPool({ connectionString: env.DATABASE_URL });
     attachDatabasePool(pool);
     db = createDb(pool);
   }

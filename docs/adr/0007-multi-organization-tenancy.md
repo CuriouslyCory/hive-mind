@@ -33,7 +33,7 @@ The M0 plan ([#2](https://github.com/CuriouslyCory/hive-mind/issues/2), open que
 - **Users created on a preview deployment** have no GitHub login stored (ADR-0006), so their slug comes from their display name, or the local part of their email.
 - A slug is set once. A later GitHub rename doesn't change it, and `github_login` is a label, never an identity.
 - `session.active_organization_id` is set to null if its organization is deleted.
-- **M2 must follow the authorization rule** in every `/api/v1` route and Server Action: resolve the Project, then check the caller's membership in its organization. Trusting `activeOrganizationId` would let a client choose its own tenant.
+- **M2 must follow the authorization rule** in every `/api/v1` route and Server Action: resolve the Project, then check the caller's membership in its organization. Trusting `activeOrganizationId` would let a client choose its own tenant. See ADR-0013.
 - **Open sign-up** means anyone with a GitHub account can create rows on the public deployment. Revisit in M7 alongside rate limits.
 - The `invitation` table exists now because the organization plugin's schema includes it. Nothing writes to it until M3: the invitation routes are disabled, and a test checks that an invite attempt stores no row.
 - Tests cover personal organization creation with `owner` role, the active organization on a new login session, slug collisions, concurrent first login sessions, and each M0 restriction on the organization API. Removing the organization plugin, either hook, the advisory lock or any of the three restrictions fails them.

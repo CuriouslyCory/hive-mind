@@ -1,0 +1,19 @@
+{
+  "name": "@curiouslycory/hivemind",
+  "description": "Command-line client for hive-mind. Runs the standalone hivemind binary for this platform.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CuriouslyCory/hive-mind.git",
+    "directory": "apps/cli"
+  },
+  "type": "module",
+  "bin": {
+    "hivemind": "bin/hivemind.js"
+  },
+  "files": ["bin/hivemind.js", "README.md"],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["linux", "darwin"],
+  "cpu": ["x64", "arm64"]
+}

@@ -1,0 +1,137 @@
+name: CLI native
+
+# Builds the hivemind binary for all four release targets, each on its own
+# native runner (ADR-0012), packs it as the release archive and runs
+# apps/cli/scripts/smoke.ts against that archive. The routine root build in
+# ci.yml compiles only the host target.
+#
+# Runs on pull requests and pushes to main that touch the CLI, the contract it
+# speaks, the installer, the release workflows or the toolchain that runs them
+# (root package.json pins pnpm, .nvmrc pins Node); release.yml calls it to
+# build the release assets, which it uploads as hivemind-<target> artifacts.
+
+on:
+  pull_request:
+    paths:
+      - apps/cli/**
+      - packages/contract/**
+      - scripts/install.sh
+      - package.json
+      - .nvmrc
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/cli-native.yml
+      - .github/workflows/release.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/cli/**
+      - packages/contract/**
+      - scripts/install.sh
+      - package.json
+      - .nvmrc
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/cli-native.yml
+      - .github/workflows/release.yml
+  workflow_call:
+
+# New pushes to a PR cancel its older run. When release.yml calls this
+# workflow, github.workflow is "Release", so the group is the release's own.
+concurrency:
+  group: ${{ github.workflow }}-native-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      # Every target reports its own result.
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64
+            runner: ubuntu-24.04
+          - target: bun-linux-arm64
+            runner: ubuntu-24.04-arm
+          # Last Intel macOS image GitHub offers (macos-13 was retired).
+          - target: bun-darwin-x64
+            runner: macos-15-intel
+          - target: bun-darwin-arm64
+            runner: macos-15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Installs only this runner's platform packages: the Bun runtime that
+      # becomes the binary and, on macOS, its Keychain addon.
+      - name: Set up pnpm and Node, install dependencies
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: true
+          require-lockfile: true
+
+      # build.ts fails if the runner is not the target's OS and CPU, because
+      # only the host's platform packages are installed. The commit is passed
+      # explicitly (build.ts never reads git) and so is the archive mtime, so
+      # a rebuild of the same commit gives the same archive bytes.
+      - name: Build and pack ${{ matrix.target }}
+        working-directory: apps/cli
+        env:
+          TARGET: ${{ matrix.target }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          node scripts/build.ts --target "$TARGET" --commit "$COMMIT" --outfile dist/native/hivemind
+          node scripts/build.ts --target "$TARGET" --commit "$COMMIT" \
+            --entry test/native/probe.ts --outfile dist/native/probe
+          node scripts/release-assets.ts archive --target "$TARGET" \
+            --binary dist/native/hivemind --out-dir dist/release --mtime "$(git log -1 --format=%ct)"
+
+      - name: Install Secret Service tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsecret-tools gnome-keyring dbus
+
+      # A private session bus with an unlocked gnome-keyring, so the libsecret
+      # roundtrip uses a real Secret Service. smoke.ts also runs secret-tool
+      # without the bus and requires "unavailable".
+      - name: Smoke test the archive (Linux)
+        if: runner.os == 'Linux'
+        working-directory: apps/cli
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          archive="$(ls dist/release/hivemind-*.tar.gz)"
+          dbus-run-session -- sh -c "
+            printf %s ci-keyring-password | gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+            node scripts/smoke.ts --archive '$archive' --probe dist/native/probe \
+              --commit '$COMMIT' --secret-service"
+
+      # The runner's login keychain is unlocked, so the Keychain roundtrip
+      # needs no prompt. smoke.ts also runs codesign --verify on the archived
+      # binary.
+      - name: Smoke test the archive (macOS)
+        if: runner.os == 'macOS'
+        working-directory: apps/cli
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          node scripts/smoke.ts --archive dist/release/hivemind-*.tar.gz --probe dist/native/probe \
+            --commit "$COMMIT"
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hivemind-${{ matrix.target }}
+          path: apps/cli/dist/release/hivemind-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7

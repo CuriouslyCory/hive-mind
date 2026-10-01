@@ -38,7 +38,7 @@ jobs:
           --health-retries 15
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -48,7 +48,7 @@ jobs:
       # if pnpm-lock.yaml is missing). No actions/setup-node needed.
       - name: Set up pnpm and Node, install dependencies
         id: setup
-        uses: pnpm/setup@v3
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           node-version-file: .nvmrc
           cache: true
@@ -66,6 +66,12 @@ jobs:
         run: pnpm test
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      # scripts/install.sh against a local fixture server and file:// mirror.
+      # The npm launcher's pack/install tests run in `pnpm test` (apps/cli).
+      # Native binaries are tested per target in cli-native.yml.
+      - name: Installer tests
+        run: pnpm test:install
 
       # The build reads no env today (auth and the database pool are created on
       # the first request), but env validation is never skipped, so any future
@@ -100,3 +106,102 @@ jobs:
             echo "::error title=Migration drift::Schema changed without a committed migration: run pnpm db:generate and commit the result."
             exit 1
           fi
+
+  e2e:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # global-setup.ts creates and migrates its own hivemind_e2e_<uuid>
+    # database on this server and drops it afterwards.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm and Node, install dependencies
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: true
+          require-lockfile: true
+
+      # The browser build is tied to the Playwright version (pinned exactly in
+      # apps/web/package.json), so the version is the cache key. A cache hit
+      # restores only ~/.cache/ms-playwright; Chromium's system libraries
+      # still come from apt on every run.
+      - name: Read the Playwright version
+        id: playwright
+        working-directory: apps/web
+        run: |
+          version="$(pnpm exec playwright --version)"
+          echo "version=${version#Version }" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright's Chromium
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Chromium and its system dependencies
+        if: ${{ steps.playwright-cache.outputs.cache-hit != 'true' }}
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Install Chromium's system dependencies
+        if: ${{ steps.playwright-cache.outputs.cache-hit == 'true' }}
+        working-directory: apps/web
+        run: pnpm exec playwright install-deps chromium
+
+      # E2E_SERVER=start serves this build with `next start`, so the browser
+      # tests exercise production mode (Secure, __Secure- prefixed cookies).
+      # The placeholders are the same as in the ci job; the app server gets
+      # its own throwaway values from apps/web/test/e2e/e2e-env.ts.
+      - name: Build
+        run: pnpm build
+        env:
+          BETTER_AUTH_SECRET: ci-placeholder-better-auth-secret-not-a-real-secret
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+          DATABASE_URL_UNPOOLED: postgres://ci:ci@localhost:5432/ci
+          GITHUB_CLIENT_ID: ci-placeholder-github-client-id
+          GITHUB_CLIENT_SECRET: ci-placeholder-github-client-secret
+          OAUTH_PROXY_SECRET: ci-placeholder-oauth-proxy-secret
+
+      # turbo.json makes test:e2e depend on @hivemind/cli#build, so the specs
+      # that run the compiled CLI (apps/cli/dist/hivemind) always get one
+      # built from this commit.
+      - name: Browser tests
+        id: e2e
+        run: pnpm test:e2e
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          E2E_SERVER: start
+
+      # The HTML report includes the traces kept for failed tests
+      # (trace: retain-on-failure); test-results has the raw files.
+      - name: Upload the Playwright report
+        if: ${{ failure() && steps.e2e.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

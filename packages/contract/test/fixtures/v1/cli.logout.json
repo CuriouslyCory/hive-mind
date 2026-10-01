@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "command": "logout",
+  "ok": true,
+  "data": {
+    "origin": "https://hive-mind-web-mu.vercel.app",
+    "removed": true,
+    "revoked": true,
+    "hivemindTokenSet": false
+  }
+}

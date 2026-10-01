@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import pg from "pg";
+import type pg from "pg";
 import { describe, it } from "vitest";
+import { createClient, createPool } from "../connection.ts";
 import { createDb, type Db } from "../index.ts";
 import { runMigrations } from "../migrate.ts";
 
@@ -45,7 +46,7 @@ export async function createTestDatabase({ migrate = true } = {}): Promise<TestD
     throw error;
   }
 
-  const pool = new pg.Pool({ connectionString: url.toString() });
+  const pool = createPool({ connectionString: url.toString() });
   return {
     pool,
     db: createDb(pool),
@@ -83,7 +84,7 @@ async function dropDatabase(name: string): Promise<void> {
 }
 
 async function withAdminClient<T>(fn: (client: pg.Client) => Promise<T>): Promise<T> {
-  const client = new pg.Client({ connectionString: testDatabaseUrl });
+  const client = createClient({ connectionString: testDatabaseUrl });
   await client.connect();
   try {
     return await fn(client);

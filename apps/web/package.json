@@ -8,11 +8,17 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@better-auth/api-key": "1.7.6",
     "@better-auth/drizzle-adapter": "1.7.6",
+    "@hivemind/contract": "workspace:*",
     "@hivemind/db": "workspace:*",
+    "@orpc/openapi": "catalog:",
+    "@orpc/server": "catalog:",
+    "@orpc/zod": "catalog:",
     "@vercel/functions": "~3.9.9",
     "better-auth": "1.7.6",
     "drizzle-orm": "catalog:",
@@ -20,10 +26,11 @@
     "pg": "catalog:",
     "react": "~19.3.0",
     "react-dom": "~19.3.0",
-    "zod": "^4.6.5"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@hivemind/config": "workspace:*",
+    "@playwright/test": "1.63.0",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "@types/react": "^19.3.0",

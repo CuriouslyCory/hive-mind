@@ -1,0 +1,264 @@
+name: Release
+
+# Releases the version in apps/cli/package.json, which Changesets sets
+# (`pnpm version-packages` in a PR). Everything happens in this one run, so
+# nothing waits on a tag pushed with GITHUB_TOKEN, which would not start
+# another workflow:
+#
+#   plan     decide the tag, or stop if this version is already fully released
+#   build    cli-native.yml: build and smoke-test each target on its own runner
+#   draft    checksums, npm packages, installer and launcher checks, then a
+#            DRAFT GitHub release with the four archives, SHA256SUMS and install.sh
+#   publish  environment "release" (owner approval): publish the draft, then
+#            the npm packages with provenance
+#
+# A rehearsal (workflow_dispatch, the default) drafts v<version>-rehearsal.<run>
+# as a prerelease and never publishes. Reruns are safe: assets already on the
+# draft and npm versions already published are compared, never replaced.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/cli/package.json
+  workflow_dispatch:
+    inputs:
+      rehearsal:
+        description: Rehearse (draft v<version>-rehearsal.<run>, publish nothing)
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.plan.outputs.proceed }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      rehearsal: ${{ steps.plan.outputs.rehearsal }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Decide what to release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal }}
+        run: |
+          version="$(jq -r .version apps/cli/package.json)"
+          name="$(jq -r .name apps/cli/npm/package.template.json)"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "rehearsal=$REHEARSAL" >>"$GITHUB_OUTPUT"
+          if [ "$REHEARSAL" = true ]; then
+            echo "tag=v$version-rehearsal.$GITHUB_RUN_NUMBER" >>"$GITHUB_OUTPUT"
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::real releases run from main only"; exit 1; }
+          echo "tag=v$version" >>"$GITHUB_OUTPUT"
+          pending="$(find .changeset -name '*.md' ! -name README.md | head -n 1)"
+          if [ "$version" = 0.0.0 ] || [ -n "$pending" ]; then
+            echo "::notice::Nothing to release: version $version, pending changesets: ${pending:-none}. Merge the version PR first."
+            echo "proceed=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Done only when the GitHub release is published (the tags endpoint
+          # ignores drafts) and the launcher, published last, is on npm.
+          # npm runs outside the repository (its devEngines asks for pnpm).
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$version" --jq .id >/dev/null 2>&1 &&
+            (cd "$RUNNER_TEMP" && npm view "$name@$version" version >/dev/null 2>&1); then
+            echo "::notice::v$version is already released."
+            echo "proceed=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build
+    needs: plan
+    if: needs.plan.outputs.proceed == 'true'
+    uses: ./.github/workflows/cli-native.yml
+    permissions:
+      contents: read
+
+  draft:
+    name: Draft release
+    needs: [plan, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      REHEARSAL: ${{ needs.plan.outputs.rehearsal }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The release scripts use only Node built-ins, so no dependency install.
+      # .nvmrc names an exact Node (and so npm) release: gzip output and npm
+      # pack tarballs depend on them, and a rebuild of the same commit must
+      # give the same bytes to pass the "compare, never overwrite" checks.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Collect the four archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: hivemind-bun-*
+          path: dist/release
+          merge-multiple: true
+
+      - name: Write and verify SHA256SUMS
+        run: |
+          node apps/cli/scripts/release-assets.ts checksums --dir dist/release
+          node apps/cli/scripts/release-assets.ts verify --dir dist/release --version "$VERSION"
+          cat dist/release/SHA256SUMS
+
+      - name: Build and verify the npm packages
+        run: |
+          node apps/cli/scripts/npm-packages.ts --assets dist/release --out-dir dist/npm
+          node apps/cli/scripts/npm-packages.ts verify --out-dir dist/npm --assets dist/release
+
+      # The real archives through the real installer, from a file:// mirror
+      # laid out like GitHub's download URLs.
+      - name: Install from the assets with install.sh
+        run: |
+          mirror="$RUNNER_TEMP/mirror"
+          mkdir -p "$mirror/download/v$VERSION"
+          cp dist/release/* "$mirror/download/v$VERSION/"
+          HIVEMIND_RELEASES_URL="file://$mirror" HIVEMIND_VERSION="$VERSION" \
+            HIVEMIND_INSTALL_DIR="$RUNNER_TEMP/bin" sh scripts/install.sh
+          test "$("$RUNNER_TEMP/bin/hivemind" --version)" = "hivemind $VERSION ($GITHUB_SHA, bun-linux-x64)"
+
+      - name: Install and run the npm launcher from the tarballs
+        run: |
+          # The launcher and this runner's package; npm refuses to install
+          # another platform's package when it is named explicitly.
+          name="$(jq -r .name apps/cli/npm/package.template.json)"
+          mapfile -t tarballs < <(jq -r --arg name "$name" --arg dir "$PWD/dist/npm/" \
+            '.[] | select(.name == $name or .name == ($name + "-linux-x64")) | $dir + .file' \
+            dist/npm/npm-packages.json)
+          [ "${#tarballs[@]}" -eq 2 ]
+          # npm runs outside the repository, whose package.json devEngines
+          # (pnpm) makes every npm command fail.
+          (cd "$RUNNER_TEMP" && npm install --global --offline --prefix "$RUNNER_TEMP/npm-prefix" "${tarballs[@]}")
+          test "$("$RUNNER_TEMP/npm-prefix/bin/hivemind" --version)" = "hivemind $VERSION ($GITHUB_SHA, bun-linux-x64)"
+
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Install with the script (Linux and macOS, x64 and arm64):"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/install.sh | HIVEMIND_VERSION=$VERSION sh"
+            echo '```'
+            echo
+            echo "or with npm: \`npm install -g $(jq -r .name apps/cli/npm/package.template.json)@$VERSION\`."
+            echo
+            echo "Commit: $GITHUB_SHA. Checksums: SHA256SUMS."
+            echo
+            # This version's section of the Changesets changelog, if any.
+            awk -v v="## $VERSION" '$0 == v { on = 1; next } /^## / { on = 0 } on' apps/cli/CHANGELOG.md 2>/dev/null || true
+          } >"$RUNNER_TEMP/notes.md"
+          cp scripts/install.sh dist/release/install.sh
+          bash apps/cli/scripts/release.sh draft "$TAG" "$GITHUB_SHA" "hivemind $VERSION" \
+            "$RUNNER_TEMP/notes.md" "$REHEARSAL" dist/release/*
+
+      # Kept for as long as GitHub allows re-running this run's jobs (30
+      # days), so "Re-run failed jobs" can always finish a partial publish.
+      - name: Keep the verified npm tarballs for publishing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-packages
+          path: |
+            dist/npm/*.tgz
+            dist/npm/npm-packages.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish (needs approval)
+    needs: [plan, draft]
+    if: needs.plan.outputs.rehearsal != 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Required reviewers on this environment are the approval gate. The first
+    # step refuses to continue if the environment has none.
+    environment: release
+    permissions:
+      actions: read
+      contents: write
+      id-token: write # npm trusted publishing and provenance
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Require an approval gate on the release environment
+        run: |
+          rules="$(gh api "repos/$GITHUB_REPOSITORY/environments/release" --jq '[.protection_rules[]?.type]')"
+          echo "release environment protection rules: $rules"
+          if ! jq -e 'index("required_reviewers")' <<<"$rules" >/dev/null; then
+            echo "::error::The release environment has no required reviewers, so this job could run without owner approval."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
+      - name: Download the npm tarballs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-packages
+          path: dist/npm
+
+      # What gets published must be what the draft holds: re-download the
+      # draft's assets and check them and the npm binaries against each other.
+      - name: Verify the draft against the npm packages
+        run: |
+          bash apps/cli/scripts/release.sh download "$TAG" "$RUNNER_TEMP/draft"
+          cmp scripts/install.sh "$RUNNER_TEMP/draft/install.sh"
+          rm "$RUNNER_TEMP/draft/install.sh"
+          node apps/cli/scripts/release-assets.ts verify --dir "$RUNNER_TEMP/draft" --version "$VERSION"
+          node apps/cli/scripts/npm-packages.ts verify --out-dir dist/npm --assets "$RUNNER_TEMP/draft"
+
+      - name: Publish the GitHub release
+        run: bash apps/cli/scripts/release.sh publish "$TAG" false
+
+      # Trusted publishing (OIDC) needs npm 11.5.1 or newer. NPM_TOKEN is only
+      # for bootstrapping packages that have no trusted publisher yet; leave it
+      # unset once trusted publishing is configured. npm refuses provenance
+      # from a private repository, so it is requested only for a public one.
+      - name: Publish the npm packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_PROVENANCE: ${{ !github.event.repository.private }}
+        working-directory: ${{ runner.temp }}
+        run: |
+          npm --version
+          node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$(npm --version)" ||
+            { echo "::error::npm $(npm --version) is too old for trusted publishing"; exit 1; }
+          bash "$GITHUB_WORKSPACE/apps/cli/scripts/release.sh" npm-publish "$GITHUB_WORKSPACE/dist/npm"
