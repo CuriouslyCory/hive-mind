@@ -4,7 +4,8 @@ import * as schema from "./schema/index.ts";
 
 /**
  * Creates the Drizzle client for a `pg` pool. The pool owns the connections;
- * the caller creates it (with the pooled `DATABASE_URL` at runtime) and ends it.
+ * the caller creates it (with `createPool`, on the pooled `DATABASE_URL` at
+ * runtime) and ends it.
  *
  * node-postgres supports interactive transactions:
  * `db.transaction(async (tx) => { ... })` runs on one connection checked out of
@@ -16,6 +17,7 @@ export function createDb(pool: pg.Pool) {
 
 export type Db = ReturnType<typeof createDb>;
 
+export { createClient, createPool, describeConnectionError } from "./connection.ts";
 export {
   type CreateOrReuseProjectResult,
   createOrReuseProject,

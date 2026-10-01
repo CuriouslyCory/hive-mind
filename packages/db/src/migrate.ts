@@ -1,11 +1,12 @@
 import path from "node:path";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import pg from "pg";
+import { createClient } from "./connection.ts";
 
 // This file runs directly under Node (`node src/migrate.ts`, using Node 24's
-// type stripping), so it imports only packages and Node builtins, and uses no
-// TypeScript syntax that needs transforming (such as enums).
+// type stripping), so it imports only packages, Node builtins and
+// connection.ts (which follows the same rules), and uses no TypeScript syntax
+// that needs transforming (such as enums).
 
 /** The committed SQL migrations and `meta/_journal.json`, written by `drizzle-kit generate`. */
 export const migrationsFolder = path.join(import.meta.dirname, "..", "migrations");
@@ -28,7 +29,8 @@ export const MIGRATION_LOCK_KEY = "7264193851066320745";
  * crashed run cannot leave it held.
  */
 export async function runMigrations(connectionString: string): Promise<void> {
-  const client = new pg.Client({ connectionString });
+  // A lost connection fails the migration through the rejected query.
+  const client = createClient({ connectionString });
   await client.connect();
   try {
     await client.query("select pg_advisory_lock($1::bigint)", [MIGRATION_LOCK_KEY]);
