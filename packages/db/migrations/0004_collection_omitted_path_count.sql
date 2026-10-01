@@ -1,0 +1,2 @@
+ALTER TABLE "agent_session" ADD COLUMN "collection_omitted_path_count" integer;--> statement-breakpoint
+ALTER TABLE "agent_session" ADD CONSTRAINT "agent_session_collection_omitted_check" CHECK (collection_omitted_path_count is null or collection_omitted_path_count >= 0);
