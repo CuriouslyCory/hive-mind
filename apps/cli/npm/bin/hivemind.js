@@ -53,8 +53,12 @@ try {
 
 const child = spawn(binary, process.argv.slice(2), { stdio: "inherit" });
 
-// A terminal's Ctrl-C reaches both processes already; forwarding covers a
-// signal sent to this process alone, such as `kill <pid>` from a supervisor.
+// Forwarding covers a signal sent to this process alone, such as `kill <pid>`
+// from a supervisor. A terminal's Ctrl-C (or a kill of the whole process
+// group) reaches both processes already, so the binary then gets the signal
+// twice within milliseconds; it treats a repeat of the same signal within a
+// short window as one interruption (src/interrupt.ts in the CLI), so this
+// stays a clean cancel rather than the "second Ctrl-C, exit now" path.
 const forward = (signal) => {
   child.kill(signal);
 };

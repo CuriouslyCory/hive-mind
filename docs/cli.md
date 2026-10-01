@@ -247,7 +247,7 @@ With `--json`, stdout carries exactly one JSON object, for success and failure a
 | 3 | not authenticated or not allowed | `UNAUTHORIZED`, `FORBIDDEN` |
 | 4 | not found | `NOT_FOUND` |
 
-The exit code always follows from `error.code`. A second Ctrl+C while a command is stopping exits 130 immediately. The CLI never retries a request on its own; a timed-out or cancelled write says that the server may still have completed it.
+The exit code always follows from `error.code`. A second Ctrl+C while a command is stopping exits 130 immediately; a repeat of the same signal within 500 ms counts as the first one, because the npm launcher forwards the signal the terminal already sent to the binary. The CLI never retries a request on its own; a timed-out or cancelled write says that the server may still have completed it.
 
 ## The API
 

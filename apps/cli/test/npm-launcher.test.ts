@@ -11,6 +11,7 @@ import {
   platformPackageName,
 } from "../scripts/npm-packages.ts";
 import { cliVersion, readTarGz } from "../scripts/release-assets.ts";
+import { startServer } from "./helpers/api-server.ts";
 import { shippedBinary } from "./helpers/binaries.ts";
 
 // The npm launcher as users get it: packed with `npm pack`, installed globally
@@ -120,6 +121,64 @@ describe("npm launcher with the real binary", () => {
   it("forwards a non-zero exit code", () => {
     expect(spawnSync(installed.bin, ["--no-such-flag"], { encoding: "utf8" }).status).toBe(1);
   });
+
+  // A terminal's Ctrl+C signals the whole foreground process group, so under
+  // the launcher the binary gets SIGINT twice: from the terminal and forwarded
+  // by the launcher. That must still be one clean cancel, exactly as when the
+  // binary runs on its own: exit 1 with the CANCELLED envelope, not exit 130.
+  // `detached` makes the spawned process lead a new group, as a shell does
+  // for a foreground job; the signal goes to the whole group.
+  it.each([
+    { via: "launcher", signal: "SIGINT", stall: "no answer" },
+    { via: "launcher", signal: "SIGTERM", stall: "no answer" },
+    { via: "binary", signal: "SIGINT", stall: "no answer" },
+    { via: "launcher", signal: "SIGINT", stall: "body" },
+  ] as const)(
+    "a $signal to the process group ($via, $stall) ends with one CANCELLED result",
+    async ({ via, signal, stall }) => {
+      let received!: () => void;
+      const requested = new Promise<void>((resolve) => {
+        received = resolve;
+      });
+      const server = await startServer((_request, response) => {
+        if (stall === "body") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.write('{"kind":');
+        }
+        received();
+      });
+      try {
+        const child = spawn(
+          via === "launcher" ? installed.bin : shippedBinary(),
+          ["whoami", "--json"],
+          {
+            detached: true,
+            stdio: ["ignore", "pipe", "pipe"],
+            env: {
+              PATH: process.env.PATH,
+              HOME: root,
+              XDG_CONFIG_HOME: join(root, "group-signal-config"),
+              HIVEMIND_URL: server.origin,
+              HIVEMIND_TOKEN: "hm_group_signal_token_0123456789abcdef",
+            },
+          },
+        );
+        const done = finished(child);
+        await requested;
+        process.kill(-(child.pid as number), signal);
+        const result = await done;
+        expect(result).toMatchObject({ code: 1, signal: null });
+        expect(JSON.parse(result.stdout)).toEqual({
+          schemaVersion: 1,
+          command: "whoami",
+          ok: false,
+          error: { code: "CANCELLED", message: "Cancelled." },
+        });
+      } finally {
+        await server.close();
+      }
+    },
+  );
 });
 
 describe("npm launcher process handling", () => {

@@ -1,5 +1,6 @@
 import { runCli } from "./cli.ts";
 import { COMMANDS } from "./commands/index.ts";
+import { createInterruptHandler } from "./interrupt.ts";
 
 // Entrypoint of the compiled `hivemind` binary. Everything testable lives in
 // cli.ts; this file only wires the real process to it.
@@ -13,13 +14,11 @@ for (const stream of [process.stdout, process.stderr]) {
 }
 
 // First SIGINT/SIGTERM asks the running command to stop (device polling,
-// prompts and requests watch this signal); a second one exits at once.
-const interrupt = new AbortController();
+// prompts and requests watch this signal); a later one exits at once, except
+// a copy of the first that a signal-forwarding wrapper delivers (interrupt.ts).
+const interrupt = createInterruptHandler({ exit: (code) => process.exit(code) });
 for (const name of ["SIGINT", "SIGTERM"] as const) {
-  process.on(name, () => {
-    if (interrupt.signal.aborted) process.exit(130);
-    interrupt.abort(new Error(`received ${name}`));
-  });
+  process.on(name, () => interrupt.handle(name));
 }
 
 process.exitCode = await runCli(
