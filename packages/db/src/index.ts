@@ -26,4 +26,24 @@ export {
 } from "./project.ts";
 export type { Project } from "./schema/project.ts";
 export type { ProjectApiKey } from "./schema/project-api-key.ts";
+export {
+  type DeclaredPatternInvalidReason,
+  type DeclaredPatternResult,
+  displayScopeValue,
+  findScopeOverlaps,
+  normalizeDeclaredPattern,
+  normalizeTouchedPath,
+  SCOPE_COMPARISON_BUDGET,
+  SCOPE_PAIR_STATE_BUDGET,
+  SCOPE_VALUE_MAX_BYTES,
+  type ScopeComparison,
+  type ScopeEntry,
+  type ScopeIncompleteReason,
+  ScopeMatchContext,
+  type ScopeOverlap,
+  type ScopeOverlapReport,
+  type ScopeSource,
+  type ScopeValue,
+  type TouchedPathResult,
+} from "./scope.ts";
 export { schema };
