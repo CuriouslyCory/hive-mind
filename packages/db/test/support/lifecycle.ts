@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { asc, eq, sql } from "drizzle-orm";
 import pg from "pg";
+import { withCoordinationLock } from "../../src/coordination.ts";
 import { createDb, type Db } from "../../src/index.ts";
 import type { Principal } from "../../src/principal.ts";
 import { agentSession, task } from "../../src/schema/coordination.ts";
@@ -121,16 +122,44 @@ export function gate() {
 
 /**
  * Waits until at least `count` backends of the test database are blocked on
- * an advisory lock (the coordination lock).
+ * a lock: `advisory` (the coordination lock) or, with `any`, any heavyweight
+ * lock (advisory, row or transaction).
  */
-export async function waitForAdvisoryWaiters(testDb: TestDatabase, count = 1): Promise<void> {
+export async function waitForLockWaiters(
+  testDb: TestDatabase,
+  count = 1,
+  kind: "advisory" | "any" = "advisory",
+): Promise<void> {
   for (let attempt = 0; attempt < 250; attempt++) {
     const result = await testDb.pool.query<{ count: string }>(
       `select count(*) from pg_stat_activity
-       where datname = current_database() and wait_event_type = 'Lock' and wait_event = 'advisory'`,
+       where datname = current_database() and wait_event_type = 'Lock'
+         and ($1 = 'any' or wait_event = $1)`,
+      [kind],
     );
     if (Number(result.rows[0]?.count) >= count) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error(`Fewer than ${count} connections waited on an advisory lock.`);
+  throw new Error(`Fewer than ${count} connections waited on a ${kind} lock.`);
+}
+
+/**
+ * Holds the Project's coordination lock on `db` (use its own pool) until
+ * `release` is called, so operations started meanwhile queue behind it in
+ * the order they were started.
+ */
+export async function holdProjectLock(db: Db, projectId: string) {
+  const held = gate();
+  const released = gate();
+  const done = withCoordinationLock(db, projectId, async () => {
+    held.open();
+    await released.opened;
+  });
+  await held.opened;
+  return {
+    release: async () => {
+      released.open();
+      await done;
+    },
+  };
 }
