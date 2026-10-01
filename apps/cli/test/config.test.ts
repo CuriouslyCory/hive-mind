@@ -33,6 +33,25 @@ const ID_A = "3e0c4c38-8f3b-4c55-9d2f-0b9f6b1f3a21";
 const ID_B = "9a1d6e2f-4b7c-4d8e-8f9a-1b2c3d4e5f60";
 const config = (projectId: string) => serializeHivemindConfig({ version: 1, projectId });
 
+/**
+ * Runs the shell once per argv, holding every process at a barrier until all
+ * of them have started, then releasing them together. Without it, process
+ * start-up spreads the writers out and a read-then-write race can go unseen.
+ */
+async function released(argvs: string[][], options: { cwd: string; env: NodeJS.ProcessEnv }) {
+  const barrier = mkdtempSync(join(root, "barrier-"));
+  const runs = Promise.all(
+    argvs.map((argv) => runAsync(SHELL_BINARY, [...argv, "--barrier", barrier], options)),
+  );
+  const deadline = Date.now() + 15_000;
+  while (readdirSync(barrier).filter((name) => name.startsWith("ready-")).length < argvs.length) {
+    if (Date.now() > deadline) throw new Error("the writers never reached the barrier");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  writeFileSync(join(barrier, "go"), "");
+  return runs;
+}
+
 async function rejection(promise: Promise<unknown>): Promise<CliError> {
   try {
     await promise;
@@ -270,10 +289,9 @@ describe("writeProjectConfig", () => {
   it("across compiled processes: exactly one create, the rest unchanged or CONFLICT", async () => {
     const env = { HOME: root };
     const same = fresh();
-    const sameRuns = await Promise.all(
-      Array.from({ length: 8 }, () =>
-        runAsync(SHELL_BINARY, ["config", "write", ID_A, "--json"], { cwd: same, env }),
-      ),
+    const sameRuns = await released(
+      Array.from({ length: 8 }, () => ["config", "write", ID_A, "--json"]),
+      { cwd: same, env },
     );
     const statuses = sameRuns.map((run) => JSON.parse(run.stdout).data?.status).sort();
     expect(statuses).toEqual(["created", ...Array(7).fill("unchanged")]);
@@ -283,11 +301,8 @@ describe("writeProjectConfig", () => {
       { length: 8 },
       (_, index) => `9a1d6e2f-4b7c-4d8e-8f9a-${String(index).padStart(12, "0")}`,
     );
-    const runs = await Promise.all(
-      ids.map((id) =>
-        runAsync(SHELL_BINARY, ["config", "write", id, "--json"], { cwd: different, env }),
-      ),
-    );
+    const writes = ids.map((id) => ["config", "write", id, "--json"]);
+    const runs = await released(writes, { cwd: different, env });
     expect(runs.map((run) => run.status).sort()).toEqual([0, 2, 2, 2, 2, 2, 2, 2]);
     const winner = ids[runs.findIndex((run) => run.status === 0)];
     expect(JSON.parse(readFileSync(join(different, CONFIG_FILENAME), "utf8"))).toEqual({

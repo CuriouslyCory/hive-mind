@@ -1,3 +1,5 @@
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { text } from "node:stream/consumers";
 import type { CommandDefinition } from "../../src/command.ts";
 import { writeProjectConfig } from "../../src/config.ts";
@@ -134,8 +136,18 @@ export const TEST_COMMANDS: readonly CommandDefinition[] = [
     name: "config write",
     summary: "Write .hivemind.json in the current directory",
     args: [{ name: "project", description: "Project ID", required: true }],
-    options: { replace: { type: "boolean", description: "Replace a different binding" } },
+    options: {
+      replace: { type: "boolean", description: "Replace a different binding" },
+      barrier: {
+        type: "string",
+        description: "Directory: mark ready there, then wait for its `go` file before writing",
+      },
+    },
     async run(context) {
+      // Lets a test release several processes into the write at once, so a
+      // read-then-write race shows up whatever their start-up times.
+      const barrier = context.options.barrier;
+      if (typeof barrier === "string") await waitAtBarrier(barrier);
       const result = await writeProjectConfig({
         dir: context.cwd,
         projectId: context.args[0] ?? "",
@@ -145,3 +157,12 @@ export const TEST_COMMANDS: readonly CommandDefinition[] = [
     },
   },
 ];
+
+async function waitAtBarrier(dir: string): Promise<void> {
+  writeFileSync(join(dir, `ready-${process.pid}`), "");
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(join(dir, "go"))) {
+    if (Date.now() > deadline) throw new Error(`barrier ${dir} was never released`);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
