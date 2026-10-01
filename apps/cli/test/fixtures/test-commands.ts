@@ -51,7 +51,7 @@ export const TEST_COMMANDS: readonly CommandDefinition[] = [
     summary: "Throw an unexpected error that quotes the credential",
     async run(context) {
       const credential = await context.credentials().resolve(context.origin().origin);
-      throw new Error(`boom Authorization: Bearer ${credential?.token ?? "none"}`);
+      throw new Error(`boom\u009b2J Authorization: Bearer ${credential?.token ?? "none"}`);
     },
   },
   {

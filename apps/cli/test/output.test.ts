@@ -1,6 +1,6 @@
 import { anyCliEnvelopeSchema } from "@hivemind/contract";
 import { afterEach, describe, expect, it } from "vitest";
-import { errorEnvelopeFor, escapeTerminal } from "../src/output.ts";
+import { errorEnvelopeFor, escapeTerminal, writeSuccess } from "../src/output.ts";
 import { clearRegisteredSecrets, redact, registerSecret } from "../src/redact.ts";
 import { HOSTILE } from "./fixtures/test-commands.ts";
 
@@ -43,6 +43,33 @@ describe("redact", () => {
   it("ignores values too short to be tokens", () => {
     registerSecret("abc");
     expect(redact("abc")).toBe("abc");
+  });
+});
+
+describe("--json output", () => {
+  it("escapes C1 controls, line separators and bidi controls, and parses to the same data", () => {
+    const unsafe = [0x00, 0x1f, 0x7f, 0x80, 0x9b, 0x9f, 0x2028, 0x2029, 0x202a, 0x202e, 0x2066]
+      .map((code) => String.fromCharCode(code))
+      .join("");
+    const safe = "\u00a0Bücher\u2027\u202f\u2065\u206a 日本 🐝";
+    const data = { name: `${HOSTILE}\u009b31m`, unsafe, safe, [`key\u202e`]: ["\u2066x\u2069"] };
+    let line = "";
+    writeSuccess(
+      {
+        write: (chunk: string) => {
+          line += chunk;
+        },
+      },
+      { json: true, command: "whoami", data, human: [] },
+    );
+    expect(line.endsWith("\n")).toBe(true);
+    const raw = line
+      .slice(0, -1)
+      .match(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g);
+    expect(raw).toBeNull();
+    expect(line).toContain(safe);
+    expect(line).toContain("\\u009b31m");
+    expect(JSON.parse(line)).toEqual({ schemaVersion: 1, command: "whoami", ok: true, data });
   });
 });
 

@@ -219,7 +219,7 @@ Environment variables: `HIVEMIND_URL` (backend origin), `HIVEMIND_TOKEN` (creden
 
 ## Output
 
-Results go to stdout. Progress, prompts and warnings go to stderr. Text from the server is printed with terminal control characters escaped, and known tokens are redacted from all output.
+Results go to stdout. Progress, prompts and warnings go to stderr. Terminal control characters in text from the server (C0 and C1 controls, DEL, U+2028/U+2029, bidi overrides and isolates) are always escaped: as visible escapes such as `\x1b` in human output, and as `\uXXXX` with `--json`, which parses back to the original text. Known tokens are redacted from errors, warnings and progress lines. Success output is not redacted, since `key create` prints its new key there on purpose.
 
 ### JSON (schema version 1)
 
