@@ -443,6 +443,31 @@ describeDb("device authorization", () => {
       }
     });
 
+    it("shows the request in both of one User's views opening a code at once", async () => {
+      // Two tabs (or the CLI's link and a click on the printed one) on two
+      // app instances with their own pools, so the binding writes race.
+      const pools = [0, 1].map(() => new pg.Pool({ connectionString: testDb.url, max: 2 }));
+      const instances = pools.map((pool) => instance(createDb(pool)));
+      try {
+        for (let round = 0; round < 10; round++) {
+          const user = await newUser();
+          const { deviceCode: code, userCode } = await deviceCode();
+          const headers = await Promise.all(instances.map(() => browserHeaders(user.id)));
+
+          const views = await Promise.all(
+            instances.map((via, index) =>
+              viewDeviceRequest(via, headers[index] ?? new Headers(), userCode),
+            ),
+          );
+
+          expect(views.map((result) => result.kind)).toEqual(["review", "review"]);
+          expect(await row(code)).toEqual({ status: "pending", user_id: user.id });
+        }
+      } finally {
+        await Promise.all(pools.map((pool) => pool.end()));
+      }
+    });
+
     it.each([
       ["approve", "deny"],
       ["deny", "approve"],
