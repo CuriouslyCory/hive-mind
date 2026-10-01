@@ -61,14 +61,14 @@ jobs:
             runner: macos-15
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       # Installs only this runner's platform packages: the Bun runtime that
       # becomes the binary and, on macOS, its Keychain addon.
       - name: Set up pnpm and Node, install dependencies
-        uses: pnpm/setup@v3
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           node-version-file: .nvmrc
           cache: true
@@ -124,7 +124,7 @@ jobs:
             --commit "$COMMIT"
 
       - name: Upload the archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hivemind-${{ matrix.target }}
           path: apps/cli/dist/release/hivemind-*.tar.gz
