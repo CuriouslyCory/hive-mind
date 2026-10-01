@@ -23,7 +23,12 @@ export const logout: CommandDefinition = {
     "deleted, and the command fails with REVOCATION_FAILED (exit 1) because",
     "the token may stay valid on the server until it expires.",
     "",
-    "HIVEMIND_TOKEN is never changed or revoked by logout; unset it yourself.",
+    "Without a terminal, a login kept in the Keychain or Secret Service can be",
+    "neither read nor deleted, so logout changes nothing and fails with",
+    "TERMINAL_REQUIRED (exit 1). Run 'hivemind logout' in a terminal instead.",
+    "",
+    "HIVEMIND_TOKEN is never changed or revoked by logout; unset it yourself",
+    "(an empty HIVEMIND_TOKEN already counts as unset).",
     "To revoke a Project key, use 'hivemind key revoke'.",
   ].join("\n"),
   examples: ["hivemind logout", "hivemind logout --json"],
@@ -54,12 +59,11 @@ export const logout: CommandDefinition = {
       revoked = true;
       human.push(`Logged out of ${origin}: the login was revoked and deleted.`);
     } else if (removal.removed) {
-      // The index pointed at an OS store this run could not read (no TTY).
-      const where =
-        removal.skipped.length > 0 ? " (it is in an OS store, which needs a terminal)" : "";
+      // The index pointed at an OS-store copy that was missing or unreadable.
+      // (Without a terminal, `remove` refuses instead of getting here.)
       throw new CliError(
         CLI_ERROR_CODES.revocationFailed,
-        `Deleted the reference to the stored login for ${origin}, but could not read it to revoke it${where}.`,
+        `Deleted the reference to the stored login for ${origin}, but could not read it to revoke it.`,
         {
           hint: "It is no longer used by hivemind, and stays valid on the server until it expires.",
         },

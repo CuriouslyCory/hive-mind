@@ -32,6 +32,11 @@ export const CLI_ERROR_CODES = {
   loginFailed: "LOGIN_FAILED",
   /** `logout`: the local login was removed, but the server did not confirm it revoked the token. */
   revocationFailed: "REVOCATION_FAILED",
+  /**
+   * `login`/`logout` without a terminal: the stored login is kept in an OS
+   * store, which only an interactive run opens. Nothing was changed.
+   */
+  terminalRequired: "TERMINAL_REQUIRED",
   /** Interrupted by the user (SIGINT/SIGTERM) or a prompt was dismissed. */
   cancelled: "CANCELLED",
   /** A bug: an exception nothing above explains. */

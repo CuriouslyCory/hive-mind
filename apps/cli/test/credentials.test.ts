@@ -2,11 +2,12 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { createFileStore } from "../src/credentials/file.ts";
+import { createFileStore, type FileCredentialStore } from "../src/credentials/file.ts";
 import {
   type CredentialManagerOptions,
   createCredentialManager,
 } from "../src/credentials/manager.ts";
+import { failure } from "../src/credentials/types.ts";
 import { CliError } from "../src/errors.ts";
 import { type MemoryStore, memoryStore } from "./helpers/memory-store.ts";
 
@@ -23,7 +24,7 @@ function setup(
   } = {},
 ) {
   const dir = join(root, String(counter++), "hivemind");
-  const file = createFileStore({ dir });
+  const file = withFailingWrites(createFileStore({ dir }));
   const os: MemoryStore = memoryStore("libsecret");
   const make = (env = options.env ?? {}, interactive = options.interactive ?? true) =>
     createCredentialManager({
@@ -41,6 +42,28 @@ function setup(
     make,
     raw: () => JSON.parse(readFileSync(join(dir, "credentials.json"), "utf8")),
   };
+}
+
+/**
+ * The real file store, but index writes made through `transact` fail while
+ * `failWrites` is set: the "config dir became unwritable mid-login" case.
+ */
+function withFailingWrites(file: FileCredentialStore): FileCredentialStore & {
+  failWrites: boolean;
+} {
+  const wrapped: FileCredentialStore & { failWrites: boolean } = {
+    ...file,
+    failWrites: false,
+    transact: (origin, fn) =>
+      file.transact(origin, (entry, write) =>
+        fn(entry, async (next) =>
+          wrapped.failWrites
+            ? failure("error", "cannot write credentials.json: ENOSPC")
+            : write(next),
+        ),
+      ),
+  };
+  return wrapped;
 }
 
 async function rejection(promise: Promise<unknown>): Promise<CliError> {
@@ -151,6 +174,48 @@ describe("saving and provider availability", () => {
     });
   });
 
+  it("restores the replaced OS-store login when the index cannot be written", async () => {
+    const { manager, os, file, raw } = setup();
+    await manager.save(ORIGIN, "hm_old_os_token");
+    file.failWrites = true;
+    const error = await rejection(manager.save(ORIGIN, "hm_new_os_token"));
+    expect(error.code).toBe("CREDENTIAL_STORE_ERROR");
+    file.failWrites = false;
+    expect(os.items.get(ORIGIN)).toBe("hm_old_os_token");
+    expect(raw().credentials[ORIGIN]).toEqual({ store: "libsecret" });
+    expect(await manager.resolve(ORIGIN)).toMatchObject({ token: "hm_old_os_token" });
+  });
+
+  it("leaves a replaced file login in place when the index cannot be written", async () => {
+    const { manager, os, file } = setup();
+    os.failWith = "unavailable";
+    await manager.save(ORIGIN, "hm_old_file_token");
+    os.failWith = null;
+    file.failWrites = true;
+    await rejection(manager.save(ORIGIN, "hm_new_os_token"));
+    file.failWrites = false;
+    // The new token is not referenced by the index, so it must not linger in the OS store.
+    expect(os.items.has(ORIGIN)).toBe(false);
+    expect(await manager.resolve(ORIGIN)).toMatchObject({ token: "hm_old_file_token" });
+  });
+
+  it("without a terminal, refuses to replace a login kept in an OS store and changes nothing", async () => {
+    const { manager, make, os, raw } = setup();
+    await manager.save(ORIGIN, "hm_os_token");
+    const headless = make({}, false);
+    for (const attempt of [headless.checkReplaceable(ORIGIN), headless.save(ORIGIN, "hm_new")]) {
+      const error = await rejection(attempt);
+      expect([error.code, error.exitCode]).toEqual(["TERMINAL_REQUIRED", 1]);
+      expect(error.hint).toContain("hivemind logout");
+    }
+    expect(os.items.get(ORIGIN)).toBe("hm_os_token");
+    expect(raw().credentials[ORIGIN]).toEqual({ store: "libsecret" });
+    // A file login, or none, can be replaced without a terminal.
+    await expect(
+      make({}, false).checkReplaceable("https://other.example"),
+    ).resolves.toBeUndefined();
+  });
+
   it("without a terminal, never constructs the OS store and says where the login is", async () => {
     const { manager, make } = setup();
     await manager.save(ORIGIN, "hm_os_token");
@@ -208,16 +273,42 @@ describe("logout", () => {
     expect(await manager.resolve(ORIGIN)).toBeNull();
   });
 
-  it("without a terminal, clears the file and reports the skipped OS store", async () => {
-    const { manager, make } = setup();
+  it("without a terminal, refuses to remove a login kept in an OS store and changes nothing", async () => {
+    const { manager, make, os, raw } = setup();
     await manager.save(ORIGIN, "hm_os_token");
-    expect(await make({}, false).remove(ORIGIN)).toEqual({
+    os.calls.length = 0;
+    const error = await rejection(make({}, false).remove(ORIGIN));
+    expect([error.code, error.exitCode]).toEqual(["TERMINAL_REQUIRED", 1]);
+    expect(error.message).toContain("Secret Service");
+    expect(error.hint).toContain("hivemind logout");
+    expect(os.calls).toEqual([]);
+    // The pointer survives, so a later logout in a terminal can still read and revoke it.
+    expect(raw().credentials[ORIGIN]).toEqual({ store: "libsecret" });
+    expect(await manager.remove(ORIGIN)).toMatchObject({ removed: true, token: "hm_os_token" });
+  });
+
+  it("without a terminal, still removes a file login and reports the OS store it skipped", async () => {
+    const { make } = setup();
+    const headless = make({}, false);
+    await headless.save(ORIGIN, "hm_file_token");
+    expect(await headless.remove(ORIGIN)).toEqual({
       removed: true,
-      token: null,
+      token: "hm_file_token",
       warnings: [],
       skipped: ["libsecret"],
     });
-    expect(await manager.resolve(ORIGIN)).toBeNull();
+  });
+
+  it("keeps the OS copy and the pointer when the index cannot be written", async () => {
+    const { manager, os, file, raw } = setup();
+    await manager.save(ORIGIN, "hm_os_token");
+    file.failWrites = true;
+    const error = await rejection(manager.remove(ORIGIN));
+    expect(error.code).toBe("CREDENTIAL_STORE_ERROR");
+    expect(os.items.get(ORIGIN)).toBe("hm_os_token");
+    expect(raw().credentials[ORIGIN]).toEqual({ store: "libsecret" });
+    file.failWrites = false;
+    expect(await manager.remove(ORIGIN)).toMatchObject({ removed: true, token: "hm_os_token" });
   });
 
   it("never touches HIVEMIND_TOKEN", async () => {
