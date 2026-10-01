@@ -12,6 +12,7 @@ import {
   normalizeUserCode,
   viewDeviceRequest,
 } from "../src/server/device-approval";
+import { authPathVariants } from "./support/auth-paths";
 
 // The device login (RFC 8628) end to end against a real database: the
 // protocol the CLI speaks (/device/code, /device/token), and the browser
@@ -555,24 +556,33 @@ describeDb("device authorization", () => {
       expect((await row(code))?.status).toBe("pending");
     });
 
-    it.each(DEVICE_DECISION_PATHS_DISABLED.flatMap((path) => [path, `${path}/`]))(
-      "answers 404 for %s over HTTP, even with a cookie login session",
+    // better-auth on its own, without the route handler's isClosedAuthPath:
+    // `disabledPaths` and the router must not match any spelling either.
+    it.each(DEVICE_DECISION_PATHS_DISABLED.flatMap(authPathVariants))(
+      "answers 404 for %s over HTTP, with a bearer token or a cookie login session",
       async (path) => {
         const user = await newUser();
+        const { token } = await test.login({ userId: user.id });
         const { deviceCode: code, userCode } = await deviceCode();
         await view(user.id, userCode);
-        const headers = await browserHeaders(user.id);
-        headers.set("content-type", "application/json");
+        const withCookie = await browserHeaders(user.id);
+        const withBearer = new Headers({
+          host: HOST,
+          origin: ORIGIN,
+          authorization: `Bearer ${token}`,
+        });
 
-        const response = await auth.handler(
-          new Request(`${ORIGIN}/api/auth${path}`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ userCode }),
-          }),
-        );
-
-        expect(response.status).toBe(404);
+        for (const headers of [withBearer, withCookie]) {
+          headers.set("content-type", "application/json");
+          const response = await auth.handler(
+            new Request(`${ORIGIN}/api/auth${path}`, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ userCode }),
+            }),
+          );
+          expect(response.status).toBe(404);
+        }
         expect((await row(code))?.status).toBe("pending");
       },
     );
