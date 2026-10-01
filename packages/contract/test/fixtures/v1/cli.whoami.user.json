@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "command": "whoami",
+  "ok": true,
+  "data": {
+    "kind": "user",
+    "user": {
+      "id": "7d0f5a2e-3b1c-4e8a-9f6d-1a2b3c4d5e6f",
+      "name": "Ada Lovelace",
+      "email": "ada@example.com"
+    },
+    "organizations": [
+      {
+        "id": "2c9e8b71-5d4a-4f3e-8a1b-6c7d8e9f0a1b",
+        "name": "Ada's organization",
+        "slug": "ada",
+        "role": "owner"
+      }
+    ]
+  }
+}
