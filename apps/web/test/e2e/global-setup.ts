@@ -15,17 +15,28 @@ export default async function globalSetup() {
   // The TEST_DATABASE_URL database, as the Vitest harness uses it.
   const admin = new URL(process.env.TEST_DATABASE_URL ?? "");
 
+  // `with (force)` ends the app server's connections, if it still has any.
+  const dropDatabase = () =>
+    withClient(admin, (client) => client.query(`drop database if exists "${name}" with (force)`));
+
   await withClient(admin, (client) => client.query(`create database "${name}"`));
-  execFileSync("pnpm", ["--filter", "@hivemind/db", "db:migrate"], {
-    env: { ...process.env, DATABASE_URL_UNPOOLED: databaseUrl.toString() },
-    stdio: "inherit",
-  });
+  try {
+    execFileSync("pnpm", ["--filter", "@hivemind/db", "db:migrate"], {
+      env: { ...process.env, DATABASE_URL_UNPOOLED: databaseUrl.toString() },
+      stdio: "inherit",
+    });
+  } catch (error) {
+    // Playwright runs no teardown when global setup throws, and every run
+    // names a new database, so drop it here or it is left behind. A failed
+    // drop is reported but does not replace the migration error.
+    await dropDatabase().catch((dropError: unknown) => {
+      console.error(`could not drop ${name}:`, dropError);
+    });
+    throw error;
+  }
 
   return async () => {
-    // `with (force)` ends the app server's connections, if it still has any.
-    await withClient(admin, (client) =>
-      client.query(`drop database if exists "${name}" with (force)`),
-    );
+    await dropDatabase();
   };
 }
 
