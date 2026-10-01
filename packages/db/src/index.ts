@@ -26,6 +26,7 @@ export {
   type TryCoordinationLockResult,
   tryWithCoordinationLock,
   withCoordinationLock,
+  withCoordinationRead,
 } from "./coordination.ts";
 export {
   type CreationKind,
@@ -53,6 +54,18 @@ export {
   MAX_FINGERPRINT_INPUT_BYTES,
   sha256Hex,
 } from "./fingerprint.ts";
+export {
+  CLAIM_LEASE_MS,
+  effectiveSessionStatus,
+  HEARTBEAT_INTERVAL_MS,
+  isClaimUsable,
+  isSessionLive,
+  LIVE_SESSION_STATUSES,
+  liveSessionCondition,
+  SESSION_ABANDONED_AFTER_MS,
+  SESSION_STALE_AFTER_MS,
+  type SessionLiveness,
+} from "./liveness.ts";
 export {
   type Actor,
   creatorColumns,

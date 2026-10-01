@@ -82,6 +82,20 @@ export async function withCoordinationLock<T>(
   });
 }
 
+/**
+ * Runs `fn` in a short transaction without the coordination lock, with one
+ * database `now` for the whole read. Status, list and show reads use it so
+ * effective liveness and usable claims are computed from a single timestamp
+ * and never depend on the sweep having materialized them. Reads must not
+ * write: expired state is reconciled only by mutations and the sweep.
+ */
+export async function withCoordinationRead<T>(
+  db: Db,
+  fn: (context: CoordinationContext) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => fn({ tx, now: await readNow(tx) }));
+}
+
 export type TryCoordinationLockResult<T> =
   | { acquired: true; result: T }
   /** Another transaction holds the Project's lock; nothing ran. */
