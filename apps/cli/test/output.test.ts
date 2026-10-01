@@ -52,7 +52,7 @@ describe("--json output", () => {
       .map((code) => String.fromCharCode(code))
       .join("");
     const safe = "\u00a0Bücher\u2027\u202f\u2065\u206a 日本 🐝";
-    const data = { name: `${HOSTILE}\u009b31m`, unsafe, safe, [`key\u202e`]: ["\u2066x\u2069"] };
+    const data = { name: `${HOSTILE}\u009b31m`, unsafe, safe, "key\u202e": ["\u2066x\u2069"] };
     let line = "";
     writeSuccess(
       {
@@ -63,10 +63,8 @@ describe("--json output", () => {
       { json: true, command: "whoami", data, human: [] },
     );
     expect(line.endsWith("\n")).toBe(true);
-    const raw = line
-      .slice(0, -1)
-      .match(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g);
-    expect(raw).toBeNull();
+    const raw = [...line.slice(0, -1)].filter((char) => escapeTerminal(char) !== char);
+    expect(raw).toEqual([]);
     expect(line).toContain(safe);
     expect(line).toContain("\\u009b31m");
     expect(JSON.parse(line)).toEqual({ schemaVersion: 1, command: "whoami", ok: true, data });
