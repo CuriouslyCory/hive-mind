@@ -56,7 +56,7 @@ pnpm build
 ### CLI and API
 
 - CLI commands, flags, `--json` output and exit codes: `docs/cli.md`. Building and running the CLI locally: `README.md`.
-- Released CLIs depend on what `packages/contract/test/fixtures/v1/` pins. Removing or changing a route, status, field or error code there breaks them; adding a response field does not. See ADR-0009.
+- Released CLIs, and scripts that read the CLI's `--json` output, depend on what `packages/contract/test/fixtures/v1/` pins: the `/api/v1` routes and the CLI's JSON envelopes. Removing or changing a route, status, field or error code there breaks them; adding a response field does not. See ADR-0009.
 - After changing device login, `/api/v1` auth or a CLI command, also run `TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres pnpm test:e2e` (Playwright; setup in `README.md`).
 - A user-visible CLI change needs a changeset: `pnpm changeset`.
 
