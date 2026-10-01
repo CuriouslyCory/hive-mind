@@ -73,6 +73,15 @@ describe("parseEnv", () => {
     expect(parseEnv(source)).toEqual(REQUIRED);
   });
 
+  it("accepts a CRON_SECRET of 16 or more printable characters and treats empty as unset", () => {
+    expect(parseEnv({ ...REQUIRED, CRON_SECRET: "a".repeat(16) }).CRON_SECRET).toBe("a".repeat(16));
+    expect(parseEnv({ ...REQUIRED, CRON_SECRET: "" })).toEqual(REQUIRED);
+  });
+
+  it.each(["short", `${"a".repeat(16)} b`])("rejects CRON_SECRET %j", (value) => {
+    expect(() => parseEnv({ ...REQUIRED, CRON_SECRET: value })).toThrow(/CRON_SECRET/);
+  });
+
   it("rejects an unknown VERCEL_ENV", () => {
     expect(() => parseEnv({ ...REQUIRED, VERCEL_ENV: "staging" })).toThrow(/VERCEL_ENV/);
   });
