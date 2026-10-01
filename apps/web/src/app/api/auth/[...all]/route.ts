@@ -1,15 +1,17 @@
 import { toNextJsHandler } from "better-auth/next-js";
-import { auth, isRawApiKeyPath } from "../../../../server/auth";
+import { auth, isClosedAuthPath } from "../../../../server/auth";
 
 // `auth` is created on the first request, so this module can be imported by
 // `next build` without auth environment variables.
 //
-// The api-key plugin's routes are disabled in createAuth, and also answered
-// here, before better-auth parses the path. That keeps every `/api-key/*`
-// variant (trailing or doubled slashes, encoded slashes, other case) and any
-// route a plugin upgrade adds closed until it is reviewed.
+// The api-key plugin's routes, the device approve and deny routes and the
+// organization routes deferred to M3 are disabled in createAuth, and also
+// answered here, before better-auth parses the path. That keeps every
+// spelling of them (trailing or doubled slashes, encoded slashes, dot
+// segments, other case) closed whatever the router matches, and any
+// `/api-key/*` route a plugin upgrade adds closed until it is reviewed.
 export const { GET, POST, PATCH, PUT, DELETE } = toNextJsHandler(async (request) =>
-  isRawApiKeyPath(new URL(request.url).pathname)
+  isClosedAuthPath(new URL(request.url).pathname)
     ? new Response("Not Found", { status: 404 })
     : auth.handler(request),
 );

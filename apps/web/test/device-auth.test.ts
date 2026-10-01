@@ -12,6 +12,7 @@ import {
   normalizeUserCode,
   viewDeviceRequest,
 } from "../src/server/device-approval";
+import { authPathVariants } from "./support/auth-paths";
 
 // The device login (RFC 8628) end to end against a real database: the
 // protocol the CLI speaks (/device/code, /device/token), and the browser
@@ -443,6 +444,31 @@ describeDb("device authorization", () => {
       }
     });
 
+    it("shows the request in both of one User's views opening a code at once", async () => {
+      // Two tabs (or the CLI's link and a click on the printed one) on two
+      // app instances with their own pools, so the binding writes race.
+      const pools = [0, 1].map(() => new pg.Pool({ connectionString: testDb.url, max: 2 }));
+      const instances = pools.map((pool) => instance(createDb(pool)));
+      try {
+        for (let round = 0; round < 10; round++) {
+          const user = await newUser();
+          const { deviceCode: code, userCode } = await deviceCode();
+          const headers = await Promise.all(instances.map(() => browserHeaders(user.id)));
+
+          const views = await Promise.all(
+            instances.map((via, index) =>
+              viewDeviceRequest(via, headers[index] ?? new Headers(), userCode),
+            ),
+          );
+
+          expect(views.map((result) => result.kind)).toEqual(["review", "review"]);
+          expect(await row(code)).toEqual({ status: "pending", user_id: user.id });
+        }
+      } finally {
+        await Promise.all(pools.map((pool) => pool.end()));
+      }
+    });
+
     it.each([
       ["approve", "deny"],
       ["deny", "approve"],
@@ -530,24 +556,33 @@ describeDb("device authorization", () => {
       expect((await row(code))?.status).toBe("pending");
     });
 
-    it.each(DEVICE_DECISION_PATHS_DISABLED.flatMap((path) => [path, `${path}/`]))(
-      "answers 404 for %s over HTTP, even with a cookie login session",
+    // better-auth on its own, without the route handler's isClosedAuthPath:
+    // `disabledPaths` and the router must not match any spelling either.
+    it.each(DEVICE_DECISION_PATHS_DISABLED.flatMap(authPathVariants))(
+      "answers 404 for %s over HTTP, with a bearer token or a cookie login session",
       async (path) => {
         const user = await newUser();
+        const { token } = await test.login({ userId: user.id });
         const { deviceCode: code, userCode } = await deviceCode();
         await view(user.id, userCode);
-        const headers = await browserHeaders(user.id);
-        headers.set("content-type", "application/json");
+        const withCookie = await browserHeaders(user.id);
+        const withBearer = new Headers({
+          host: HOST,
+          origin: ORIGIN,
+          authorization: `Bearer ${token}`,
+        });
 
-        const response = await auth.handler(
-          new Request(`${ORIGIN}/api/auth${path}`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ userCode }),
-          }),
-        );
-
-        expect(response.status).toBe(404);
+        for (const headers of [withBearer, withCookie]) {
+          headers.set("content-type", "application/json");
+          const response = await auth.handler(
+            new Request(`${ORIGIN}/api/auth${path}`, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ userCode }),
+            }),
+          );
+          expect(response.status).toBe(404);
+        }
         expect((await row(code))?.status).toBe("pending");
       },
     );

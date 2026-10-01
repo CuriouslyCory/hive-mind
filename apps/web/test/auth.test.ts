@@ -7,7 +7,9 @@ import {
   allowedHosts,
   CLI_CLIENT_ID,
   createAuth,
+  DEVICE_DECISION_PATHS_DISABLED,
   getActiveOrganization,
+  isClosedAuthPath,
   isRawApiKeyPath,
   MAX_SLUG_LENGTH,
   ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
@@ -15,6 +17,7 @@ import {
   slugify,
   suffixedSlug,
 } from "../src/server/auth";
+import { authPathVariants } from "./support/auth-paths";
 
 const PRODUCTION_URL = "https://hive-mind-web.vercel.app";
 /** A preview deployment's VERCEL_URL and VERCEL_BRANCH_URL. */
@@ -160,6 +163,23 @@ describe("the app's auth instance", () => {
       }
     },
   );
+
+  it.each(CLOSED_PATH_VARIANTS)(
+    "answers 404 for %s with a bearer token before better-auth sees it",
+    async (path) => {
+      unsetEnv();
+      vi.resetModules();
+      const route = await import("../src/app/api/auth/[...all]/route");
+      const url = `http://localhost:3000/api/auth${path}`;
+
+      for (const handler of [route.GET, route.POST, route.PATCH, route.PUT, route.DELETE]) {
+        const response = await handler(
+          new Request(url, { method: "POST", headers: { authorization: "Bearer cli-token" } }),
+        );
+        expect(response.status).toBe(404);
+      }
+    },
+  );
 });
 
 /**
@@ -167,18 +187,7 @@ describe("the app's auth instance", () => {
  * Relative to the auth base path.
  */
 const RAW_API_KEY_PATH_VARIANTS = [
-  ...API_KEY_PATHS_DISABLED,
-  ...API_KEY_PATHS_DISABLED.map((path) => `${path}/`),
-  "/api-key/create//",
-  "//api-key/create",
-  "/api-key//create",
-  "/api-key%2Fcreate",
-  "/api-key%2fcreate",
-  "/api-key%252Fcreate",
-  "/api-key%5Ccreate",
-  "/%61pi-key/create",
-  "/API-KEY/CREATE",
-  "/Api-Key/list",
+  ...API_KEY_PATHS_DISABLED.flatMap(authPathVariants),
   "/api-key",
   "/api-key/",
   "/api-key/verify",
@@ -188,22 +197,47 @@ const RAW_API_KEY_PATH_VARIANTS = [
   "/api-key%/create",
 ];
 
+/**
+ * Every spelling of the device decision routes and the organization routes
+ * closed until M3. The same variants as for the api-key routes.
+ */
+const CLOSED_PATH_VARIANTS = [
+  ...DEVICE_DECISION_PATHS_DISABLED,
+  ...ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+].flatMap(authPathVariants);
+
+/** Routes the auth route handler passes to better-auth. */
+const OPEN_PATHS = [
+  "/ok",
+  "/get-session",
+  "/sign-out",
+  "/sign-in/social",
+  "/device",
+  "/device/code",
+  "/device/token",
+  "/organization/create",
+  "/organization/list",
+  "/organization/set-active",
+  "/organization/get-full-organization",
+];
+
 describe("isRawApiKeyPath", () => {
   it.each(RAW_API_KEY_PATH_VARIANTS)("matches %s", (path) => {
     expect(isRawApiKeyPath(`/api/auth${path}`)).toBe(true);
   });
 
-  it.each([
-    "/ok",
-    "/get-session",
-    "/device",
-    "/device/code",
-    "/device/token",
-    "/device/approve",
-    "/organization/get-full-organization",
-    "/sign-in/social",
-  ])("does not match %s", (path) => {
+  it.each([...OPEN_PATHS, "/device/approve"])("does not match %s", (path) => {
     expect(isRawApiKeyPath(`/api/auth${path}`)).toBe(false);
+  });
+});
+
+describe("isClosedAuthPath", () => {
+  it.each([...RAW_API_KEY_PATH_VARIANTS, ...CLOSED_PATH_VARIANTS])("matches %s", (path) => {
+    expect(isClosedAuthPath(`/api/auth${path}`)).toBe(true);
+  });
+
+  it.each(OPEN_PATHS)("does not match %s", (path) => {
+    expect(isClosedAuthPath(`/api/auth${path}`)).toBe(false);
   });
 });
 
@@ -572,6 +606,46 @@ describeDb("createAuth", () => {
 
       expect(response.status).toBe(404);
     });
+
+    // better-auth on its own, without the route handler's isClosedAuthPath:
+    // `disabledPaths` and the router must not match any spelling either.
+    it.each(ORGANIZATION_PATHS_DISABLED_UNTIL_M3)(
+      "answers 404 for every spelling of %s with a bearer token",
+      async (path) => {
+        const user = await test.saveUser(test.createUser());
+        const [membership] = await organizationsOf(user.id);
+        const { token } = await test.login({ userId: user.id });
+        const organizationId = membership?.organizationId ?? "";
+
+        for (const variant of authPathVariants(path)) {
+          const get = GET_ROUTES.has(path);
+          const response = await auth.handler(
+            new Request(
+              `${PREVIEW_ORIGIN}/api/auth${variant}${get ? `?organizationId=${organizationId}` : ""}`,
+              {
+                method: get ? "GET" : "POST",
+                headers: {
+                  origin: PREVIEW_ORIGIN,
+                  authorization: `Bearer ${token}`,
+                  "content-type": "application/json",
+                },
+                body: get
+                  ? undefined
+                  : JSON.stringify({
+                      organizationId,
+                      email: "invitee@example.com",
+                      memberIdOrEmail: user.email,
+                      role: "member",
+                    }),
+              },
+            ),
+          );
+          expect(response.status, variant).toBe(404);
+        }
+        expect(await organizationsOf(user.id)).toHaveLength(1);
+        expect(await testDb.db.query.invitation.findMany()).toEqual([]);
+      },
+    );
 
     it("stores no invitation when one is attempted", async () => {
       const user = await test.saveUser(test.createUser());

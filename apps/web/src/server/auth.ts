@@ -44,7 +44,8 @@ export const MAX_SLUG_LENGTH = 39;
  * member management (ADR-0007). Every user has exactly their personal
  * organization until then. Teams are off, so their routes do not exist.
  * `disabledPaths` applies to HTTP requests only; server code can still call
- * the matching `auth.api` methods.
+ * the matching `auth.api` methods. The auth route handler also answers 404 for
+ * every spelling of these paths (see `isClosedAuthPath`).
  */
 export const ORGANIZATION_PATHS_DISABLED_UNTIL_M3 = [
   "/organization/invite-member",
@@ -85,7 +86,8 @@ export const DEVICE_VERIFICATION_PATH = "/device";
  * `/device` page's server action calls them through `auth.api`, with the
  * browser's cookie login session only, after showing the user code. Over HTTP
  * they would also accept a bearer login session token, so a CLI token could
- * approve further device codes for its User.
+ * approve further device codes for its User. The auth route handler also
+ * answers 404 for every spelling of these paths (see `isClosedAuthPath`).
  */
 export const DEVICE_DECISION_PATHS_DISABLED = ["/device/approve", "/device/deny"];
 
@@ -301,30 +303,81 @@ export type Auth = ReturnType<typeof createAuth>;
 
 /**
  * Whether a path under the auth base path is, or could normalize to, an
- * api-key plugin route: any segment that starts with `api-key`, compared
- * without case after repeated percent-decoding, with a backslash read as `/` and
- * empty segments dropped. The auth route handler answers 404 for these before
- * better-auth sees the request, so this does not depend on how better-auth or
- * its router normalize paths. A path that does not decode cleanly counts as
- * one, so it fails closed.
+ * api-key plugin route: any segment that starts with `api-key` (see
+ * `authPathSegments`). Covers routes a plugin upgrade adds, so they are not
+ * exposed before they are reviewed.
  */
 export function isRawApiKeyPath(pathname: string): boolean {
+  const segments = authPathSegments(pathname);
+  return segments === null || segments.some((segment) => segment.startsWith("api-key"));
+}
+
+/**
+ * Routes `disabledPaths` closes that the auth route handler also closes in
+ * every spelling, as segments. `disabledPaths` compares a path with only its
+ * trailing slashes removed, so it relies on the router not matching any other
+ * spelling either.
+ */
+const CLOSED_ROUTES = [
+  ...ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+  ...DEVICE_DECISION_PATHS_DISABLED,
+].map((path) => path.split("/").filter(Boolean));
+
+/**
+ * Whether the auth route handler answers 404 for a path before better-auth
+ * sees it: an api-key plugin path (`isRawApiKeyPath`), or a path that a
+ * router could read as one of the routes in `CLOSED_ROUTES`, with dot
+ * segments resolved or ignored. This does not depend on how better-auth or
+ * its router normalize paths, so an upgrade cannot reopen these routes.
+ */
+export function isClosedAuthPath(pathname: string): boolean {
+  const segments = authPathSegments(pathname);
+  if (segments === null || segments.some((segment) => segment.startsWith("api-key"))) return true;
+  const readings = [
+    resolveDotSegments(segments),
+    segments.filter((segment) => segment !== "." && segment !== ".."),
+  ];
+  return readings.some((reading) =>
+    CLOSED_ROUTES.some((route) =>
+      reading.some((_, start) => route.every((part, offset) => reading[start + offset] === part)),
+    ),
+  );
+}
+
+/**
+ * A path's segments as the most lenient router could read them: repeatedly
+ * percent-decoded, lowercased, with a backslash read as `/`, empty segments
+ * dropped and whitespace trimmed. `null` when the path does not decode
+ * cleanly, which callers treat as closed (fail closed).
+ */
+function authPathSegments(pathname: string): string[] | null {
   let decoded = pathname;
   for (let round = 0; ; round++) {
     let next: string;
     try {
       next = decodeURIComponent(decoded);
     } catch {
-      return true;
+      return null;
     }
     if (next === decoded) break;
-    if (round === 4) return true;
+    if (round === 4) return null;
     decoded = next;
   }
   return decoded
     .toLowerCase()
     .split(/[/\\]+/)
-    .some((segment) => segment.trim().startsWith("api-key"));
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+/** `segments` with `.` removed and each `..` removing the segment before it. */
+function resolveDotSegments(segments: string[]): string[] {
+  const resolved: string[] = [];
+  for (const segment of segments) {
+    if (segment === "..") resolved.pop();
+    else if (segment !== ".") resolved.push(segment);
+  }
+  return resolved;
 }
 
 /**

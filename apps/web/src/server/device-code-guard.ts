@@ -21,10 +21,13 @@ import type { DBAdapter, Where } from "better-auth/types";
  * This wrapper runs both as one `UPDATE ... WHERE <id and guard>` through
  * `updateMany`. Postgres re-checks a plain WHERE clause against the row it
  * updates once a concurrent writer commits, so exactly one of two racing
- * writes changes the row. The loser of a binding race gets `null`, as the
- * plugin expects from an unmatched guard, and is not shown the request; the
- * loser of a decision race gets the plugin's own "already processed" error,
- * the same answer as a decision made after the first.
+ * writes changes the row. The loser of a binding race between two Users gets
+ * `null`, as the plugin expects from an unmatched guard, and is not shown the
+ * request. If the winner was the same User (two tabs opening one code), the
+ * code is bound to them, so the loser gets the row and is shown the request,
+ * as without the wrapper. The loser of a decision race gets the plugin's own
+ * "already processed" error, the same answer as a decision made after the
+ * first.
  *
  * Redemption needs no wrapper: the plugin claims an approved code with
  * `consumeOne`, a `DELETE ... RETURNING`, and a row can be deleted once, so
@@ -37,6 +40,19 @@ export function guardDeviceCodeDecisions(
     const adapter = createAdapter(options);
 
     /**
+     * The `id` clause of a device code write. Every plugin write this wrapper
+     * handles selects the row by id; without it a write could change more
+     * than one row, so anything else fails closed.
+     */
+    function idClause(where: Where[]): Where[] {
+      const byId = where.filter((clause) => clause.field === "id");
+      if (byId.length !== 1 || where.some((clause) => clause.connector === "OR")) {
+        throw new Error("Unexpected device code update.");
+      }
+      return byId;
+    }
+
+    /**
      * Updates the device code that `where` selects by id, only if the rest of
      * `where` and `guard` still hold, in one statement. Returns the updated
      * row, or `null` if nothing changed.
@@ -46,12 +62,7 @@ export function guardDeviceCodeDecisions(
       guard: Where[],
       update: Record<string, unknown>,
     ) {
-      const byId = where.filter((clause) => clause.field === "id");
-      // Both plugin writes select the row by id. Without it this could change
-      // more than one row, so anything else fails closed.
-      if (byId.length !== 1 || where.some((clause) => clause.connector === "OR")) {
-        throw new Error("Unexpected device code update.");
-      }
+      const byId = idClause(where);
       const changed = await adapter.updateMany({
         model: "deviceCode",
         where: [...where, ...guard],
@@ -74,7 +85,16 @@ export function guardDeviceCodeDecisions(
         if (!isBinding) return adapter.incrementOne<T>(data);
         // The plugin's guard (id, still pending, no User yet) is already in
         // `where`; it only needs to be evaluated in the UPDATE itself.
-        return guardedUpdate<T>(data.where, [], data.set ?? {});
+        const userId: unknown = data.set?.userId;
+        const bound = await guardedUpdate<T>(data.where, [], { userId });
+        if (bound) return bound;
+        // Nothing changed: another view bound the code first. Only a binding
+        // to this same User counts as theirs; any other User stays rejected.
+        const current = await adapter.findOne<T & { userId?: unknown }>({
+          model: "deviceCode",
+          where: idClause(data.where),
+        });
+        return typeof userId === "string" && current?.userId === userId ? current : null;
       },
 
       update: async <T>(data: Parameters<DBAdapter["update"]>[0]): Promise<T | null> => {
