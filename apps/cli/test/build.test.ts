@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bunExecutable,
   hostTarget,
+  missingTargetPackages,
   pinnedBunVersion,
   planBuild,
   TARGETS,
@@ -46,12 +47,28 @@ describe("planBuild", () => {
     expect(pinnedBunVersion()).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  it.each(TARGETS)("cross-compiles %s from its lockfile-pinned runtime", (target) => {
+  it("builds the host target from its lockfile-pinned runtime", () => {
+    const target = hostTarget();
+    expect(missingTargetPackages(target)).toEqual([]);
     const plan = planBuild({ target, commit: "abc123" });
     expect(plan.args).toContain(`--target=${target}`);
     expect(plan.args).toContain(`--compile-executable-path=${bunExecutable(target)}`);
     expect(plan.outfile.endsWith(`dist/${target}/hivemind`)).toBe(true);
     expect(plan.defines.HIVEMIND_BUILD_TARGET).toBe(JSON.stringify(target));
+  });
+
+  // pnpm installs only the host's platform packages (STATE.md D11), so another
+  // target either has them (a deliberately wider install) or must fail up
+  // front, naming them, rather than deep inside bun build.
+  it.each(TARGETS)("plans %s only when its platform packages are installed", (target) => {
+    const missing = missingTargetPackages(target);
+    if (missing.length === 0) {
+      expect(planBuild({ target }).args).toContain(`--target=${target}`);
+    } else {
+      expect(() => planBuild({ target })).toThrow(
+        new RegExp(`cannot build ${target} here: ${missing.join(", ")} not installed.*native`),
+      );
+    }
   });
 
   it("disables every runtime autoload and build-time env inlining", () => {
