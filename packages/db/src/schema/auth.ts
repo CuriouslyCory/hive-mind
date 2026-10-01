@@ -134,7 +134,9 @@ export const invitation = pgTable(
 );
 
 // Relations let better-auth's Drizzle adapter join tables, and enable
-// `db.query` relational queries.
+// `db.query` relational queries. Keep the adapter's names: it looks up a
+// one-to-many join from `user` as `${model}s`, so `sessions` (login sessions)
+// and `accounts` cannot be renamed.
 
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),

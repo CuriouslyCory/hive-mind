@@ -1,7 +1,15 @@
 import { createTestDatabase, describeDb, type TestDatabase } from "@hivemind/db/testing";
 import { type TestHelpers, testUtils } from "better-auth/plugins";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { allowedHosts, createAuth, slugify } from "../src/server/auth";
+import {
+  allowedHosts,
+  createAuth,
+  getActiveOrganization,
+  MAX_SLUG_LENGTH,
+  ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
+  slugify,
+  suffixedSlug,
+} from "../src/server/auth";
 
 const PRODUCTION_URL = "https://hive-mind-web.vercel.app";
 /** A preview deployment's VERCEL_URL and VERCEL_BRANCH_URL. */
@@ -88,6 +96,23 @@ describe("slugify", () => {
   });
 });
 
+describe("suffixedSlug", () => {
+  it("shortens a maximum-length base so the result fits", () => {
+    const slug = suffixedSlug("a".repeat(MAX_SLUG_LENGTH), "abc123");
+    expect(slug).toBe(`${"a".repeat(32)}-abc123`);
+    expect(slug).toHaveLength(MAX_SLUG_LENGTH);
+  });
+
+  it("does not leave a hyphen before the separator", () => {
+    // Cut at 32 characters, the base ends in a hyphen.
+    expect(suffixedSlug(`${"a".repeat(31)}-bbbbbbb`, "abc123")).toBe(`${"a".repeat(31)}-abc123`);
+  });
+
+  it("keeps a short base whole", () => {
+    expect(suffixedSlug("hubot", "abc123")).toBe("hubot-abc123");
+  });
+});
+
 describe("the app's auth instance", () => {
   it("can be imported, with the route handler, without any environment", async () => {
     unsetEnv();
@@ -114,6 +139,13 @@ describe("the app's auth instance", () => {
     expect(await response.json()).toEqual({ ok: true });
   });
 });
+
+/** The routes in ORGANIZATION_PATHS_DISABLED_UNTIL_M3 that are GET, not POST. */
+const GET_ROUTES = new Set([
+  "/organization/get-invitation",
+  "/organization/list-invitations",
+  "/organization/list-user-invitations",
+]);
 
 const GITHUB_EMAIL = "round-trip@example.com";
 
@@ -209,6 +241,20 @@ describeDb("createAuth", () => {
       where: (member, { eq }) => eq(member.userId, userId),
       with: { organization: true },
     });
+  }
+
+  /** A request to the preview's auth API, signed in as `userId`. */
+  async function apiRequest(userId: string, path: string, body?: unknown) {
+    const headers = await test.getAuthHeaders({ userId });
+    headers.set("origin", PREVIEW_ORIGIN);
+    if (body !== undefined) headers.set("content-type", "application/json");
+    return auth.handler(
+      new Request(`${PREVIEW_ORIGIN}/api/auth${path}`, {
+        method: body === undefined ? "GET" : "POST",
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }),
+    );
   }
 
   /** The stored login session's active organization. */
@@ -369,6 +415,19 @@ describeDb("createAuth", () => {
       expect(membership?.organization.slug).toBe("mona-lisa-octocat");
     });
 
+    it("keeps a maximum-length login whole, and a suffixed slug within the limit", async () => {
+      const login = "m".repeat(MAX_SLUG_LENGTH);
+      const first = await test.saveUser(test.createUser({ githubLogin: login }));
+      const second = await test.saveUser(test.createUser({ githubLogin: login }));
+
+      const [firstSlug, secondSlug] = await Promise.all(
+        [first, second].map(async (user) => (await organizationsOf(user.id))[0]?.organization.slug),
+      );
+      expect(firstSlug).toBe(login);
+      expect(secondSlug).toMatch(/^m{32}-[0-9a-f]{6}$/);
+      expect(secondSlug).toHaveLength(MAX_SLUG_LENGTH);
+    });
+
     it("is created at sign-in if the user has no organization", async () => {
       const user = await test.saveUser(test.createUser({ githubLogin: "orphan" }));
       await testDb.pool.query("delete from member where user_id = $1", [user.id]);
@@ -378,6 +437,121 @@ describeDb("createAuth", () => {
       const [membership] = await organizationsOf(user.id);
       expect(membership?.role).toBe("owner");
       expect(await activeOrganizationIdOf(token)).toBe(membership?.organizationId);
+    });
+
+    it("is created once when first login sessions race", async () => {
+      const user = await test.saveUser(test.createUser({ githubLogin: "racer" }));
+      await testDb.pool.query("delete from organization where slug = 'racer'");
+      expect(await organizationsOf(user.id)).toEqual([]);
+      // Open the pool's connections first. Otherwise the first login takes
+      // the one idle connection and finishes before the others connect.
+      await Promise.all(
+        Array.from({ length: 10 }, () => testDb.pool.query("select pg_sleep(0.05)")),
+      );
+
+      const logins = await Promise.all(
+        Array.from({ length: 5 }, () => test.login({ userId: user.id })),
+      );
+
+      const memberships = await organizationsOf(user.id);
+      expect(memberships).toMatchObject([{ role: "owner", organization: { slug: "racer" } }]);
+      for (const { token } of logins) {
+        expect(await activeOrganizationIdOf(token)).toBe(memberships[0]?.organizationId);
+      }
+    });
+  });
+
+  describe("organization API in M0", () => {
+    it("does not let an owner delete their personal organization", async () => {
+      const user = await test.saveUser(test.createUser({ githubLogin: "keeper" }));
+      const [membership] = await organizationsOf(user.id);
+
+      const response = await apiRequest(user.id, "/organization/delete", {
+        organizationId: membership?.organizationId,
+      });
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ code: "ORGANIZATION_DELETION_DISABLED" });
+      expect(await organizationsOf(user.id)).toHaveLength(1);
+    });
+
+    it("does not let a user create an organization", async () => {
+      const user = await test.saveUser(test.createUser({ githubLogin: "founder" }));
+
+      const response = await apiRequest(user.id, "/organization/create", {
+        name: "Second",
+        slug: "founder-second",
+      });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        code: "YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION",
+      });
+      expect(await organizationsOf(user.id)).toHaveLength(1);
+    });
+
+    it.each(ORGANIZATION_PATHS_DISABLED_UNTIL_M3)("answers 404 for %s", async (path) => {
+      const user = await test.saveUser(test.createUser());
+      const [membership] = await organizationsOf(user.id);
+
+      // Use each route's own method: the router answers 404 for a wrong one.
+      const response = GET_ROUTES.has(path)
+        ? await apiRequest(user.id, `${path}?organizationId=${membership?.organizationId}`)
+        : await apiRequest(user.id, path, {
+            organizationId: membership?.organizationId,
+            email: "invitee@example.com",
+            role: "member",
+          });
+
+      expect(response.status).toBe(404);
+    });
+
+    it("stores no invitation when one is attempted", async () => {
+      const user = await test.saveUser(test.createUser());
+      const [membership] = await organizationsOf(user.id);
+
+      await apiRequest(user.id, "/organization/invite-member", {
+        organizationId: membership?.organizationId,
+        email: "invitee@example.com",
+        role: "member",
+      });
+
+      expect(await testDb.db.query.invitation.findMany()).toEqual([]);
+    });
+
+    it("has no team routes", async () => {
+      const user = await test.saveUser(test.createUser());
+      const response = await apiRequest(user.id, "/organization/create-team", { name: "Team" });
+      expect(response.status).toBe(404);
+    });
+
+    it("still serves the active organization", async () => {
+      const user = await test.saveUser(test.createUser({ name: "Reader", githubLogin: "reader" }));
+
+      const response = await apiRequest(user.id, "/organization/get-full-organization");
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ name: "Reader", slug: "reader" });
+    });
+  });
+
+  describe("getActiveOrganization", () => {
+    it("is the login session's active organization", async () => {
+      const user = await test.saveUser(test.createUser({ name: "Active", githubLogin: "active" }));
+      const headers = await test.getAuthHeaders({ userId: user.id });
+      headers.set("host", PREVIEW_HOSTS[0] ?? "");
+
+      expect(await getActiveOrganization(auth, headers)).toMatchObject({ slug: "active" });
+    });
+
+    it("is null once the user is no longer a member of it", async () => {
+      const user = await test.saveUser(test.createUser({ githubLogin: "departed" }));
+      const { token, headers } = await test.login({ userId: user.id });
+      headers.set("host", PREVIEW_HOSTS[0] ?? "");
+      await testDb.pool.query("delete from member where user_id = $1", [user.id]);
+
+      expect(await getActiveOrganization(auth, headers)).toBeNull();
+      expect(await activeOrganizationIdOf(token)).toBeNull();
     });
   });
 

@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { migrationsFolder, runMigrations } from "../src/migrate.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
-import { describeTable, schemaTables } from "./support/schema.ts";
+import { databaseKeys, describeTable, schemaKeys, schemaTables } from "./support/schema.ts";
 
 const journal = JSON.parse(
   readFileSync(path.join(migrationsFolder, "meta", "_journal.json"), "utf8"),
@@ -48,6 +48,12 @@ describeDb("migrations", () => {
 
   it("creates every table and column declared in the schema", async () => {
     expect(await missingColumns(testDb)).toEqual([]);
+  });
+
+  // The drift check compares the schema with the migration snapshots, not the
+  // SQL, so a statement deleted from a migration's SQL would pass it.
+  it("creates every primary key, unique constraint, foreign key and index declared in the schema", async () => {
+    expect(await databaseKeys(testDb.pool)).toEqual(schemaKeys(schemaTables()));
   });
 
   it("applies each migration once when runs race on an unmigrated database", async () => {

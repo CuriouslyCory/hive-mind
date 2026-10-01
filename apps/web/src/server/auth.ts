@@ -3,9 +3,11 @@ import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import type { Db } from "@hivemind/db";
 import * as schema from "@hivemind/db/schema";
 import type { BetterAuthPlugin } from "better-auth";
+import { isAPIError } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
 import { nextCookies } from "better-auth/next-js";
 import { oAuthProxy, organization } from "better-auth/plugins";
+import { sql } from "drizzle-orm";
 import { env } from "../env";
 import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from "../lib/auth-config";
 import { getDb } from "./db";
@@ -24,6 +26,29 @@ import { getDb } from "./db";
 
 /** `next dev`. Trusted only outside Vercel deployments. */
 export const LOCAL_DEV_HOST = "localhost:3000";
+
+/** GitHub's maximum login length, and so the maximum organization slug length. */
+export const MAX_SLUG_LENGTH = 39;
+
+/**
+ * Organization plugin routes that answer 404 until M3 builds invitations and
+ * member management (ADR-0007). Every user has exactly their personal
+ * organization until then. Teams are off, so their routes do not exist.
+ * `disabledPaths` applies to HTTP requests only; server code can still call
+ * the matching `auth.api` methods.
+ */
+export const ORGANIZATION_PATHS_DISABLED_UNTIL_M3 = [
+  "/organization/invite-member",
+  "/organization/cancel-invitation",
+  "/organization/accept-invitation",
+  "/organization/reject-invitation",
+  "/organization/get-invitation",
+  "/organization/list-invitations",
+  "/organization/list-user-invitations",
+  "/organization/remove-member",
+  "/organization/update-member-role",
+  "/organization/leave",
+];
 
 export interface CreateAuthOptions {
   db: Db;
@@ -92,6 +117,7 @@ export function createAuth(opts: CreateAuthOptions) {
   const { db } = opts;
   return betterAuth({
     basePath: AUTH_BASE_PATH,
+    disabledPaths: ORGANIZATION_PATHS_DISABLED_UNTIL_M3,
     baseURL: {
       allowedHosts: opts.allowedHosts,
       // No fallback: a request from any other host fails instead of being
@@ -129,7 +155,7 @@ export function createAuth(opts: CreateAuthOptions) {
       user: {
         create: {
           after: async (user) => {
-            await createPersonalOrganization(db, user);
+            await ensurePersonalOrganization(db, user);
           },
         },
         update: {
@@ -150,7 +176,13 @@ export function createAuth(opts: CreateAuthOptions) {
       },
     },
     plugins: [
-      organization(),
+      organization({
+        // Users get their personal organization from the hooks above and no
+        // other until M3. ensurePersonalOrganization writes to the database
+        // directly, so this does not block it.
+        allowUserToCreateOrganization: false,
+        disableOrganizationDeletion: true,
+      }),
       oAuthProxy({ productionURL: opts.productionURL, secret: opts.oauthProxySecret }),
       ...(opts.plugins ?? []),
       nextCookies(),
@@ -161,11 +193,16 @@ export function createAuth(opts: CreateAuthOptions) {
 export type Auth = ReturnType<typeof createAuth>;
 
 /**
- * Creates the organization every user gets on first sign-in, with the user as
- * `owner`. The slug is the GitHub login, lowercased; if that is taken, a
- * random suffix is added. Returns the organization's id.
+ * Returns the user's first organization, creating their personal organization
+ * with the user as `owner` if they have none. The slug is the GitHub login,
+ * lowercased; if that is taken, a random suffix is added.
+ *
+ * Idempotent per user: a transaction-scoped advisory lock on the user id
+ * serializes concurrent calls (such as two first login sessions at once), and
+ * membership is re-checked after taking it, so only one call creates an
+ * organization.
  */
-async function createPersonalOrganization(
+async function ensurePersonalOrganization(
   db: Db,
   user: { id: string; name: string; email: string; githubLogin?: unknown },
 ): Promise<string> {
@@ -174,23 +211,38 @@ async function createPersonalOrganization(
       ? user.githubLogin
       : user.name || (user.email.split("@")[0] ?? ""),
   );
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const slug = attempt === 0 ? base : `${base}-${randomBytes(3).toString("hex")}`;
-    const organizationId = await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${user.id}::text, 0))`);
+    const existing = await firstOrganizationId(tx, user.id);
+    if (existing) return existing;
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const slug = attempt === 0 ? base : suffixedSlug(base, randomBytes(3).toString("hex"));
       const [created] = await tx
         .insert(schema.organization)
         .values({ name: user.name || slug, slug })
         .onConflictDoNothing({ target: schema.organization.slug })
         .returning({ id: schema.organization.id });
-      if (!created) return undefined;
+      if (!created) continue;
       await tx
         .insert(schema.member)
         .values({ organizationId: created.id, userId: user.id, role: "owner" });
       return created.id;
-    });
-    if (organizationId) return organizationId;
-  }
-  throw new Error(`Could not find a free organization slug for user ${user.id}.`);
+    }
+    throw new Error(`Could not find a free organization slug for user ${user.id}.`);
+  });
+}
+
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/** The organization of the user's oldest membership, if any. */
+async function firstOrganizationId(db: Db | Tx, userId: string): Promise<string | undefined> {
+  const first = await db.query.member.findFirst({
+    columns: { organizationId: true },
+    where: (member, { eq }) => eq(member.userId, userId),
+    orderBy: (member, { asc }) => [asc(member.createdAt)],
+  });
+  return first?.organizationId;
 }
 
 /**
@@ -199,27 +251,51 @@ async function createPersonalOrganization(
  * (because creating it failed during sign-up), it is created now.
  */
 async function defaultOrganizationId(db: Db, userId: string): Promise<string> {
-  const first = await db.query.member.findFirst({
-    columns: { organizationId: true },
-    where: (member, { eq }) => eq(member.userId, userId),
-    orderBy: (member, { asc }) => [asc(member.createdAt)],
-  });
-  if (first) return first.organizationId;
+  const first = await firstOrganizationId(db, userId);
+  if (first) return first;
 
   const user = await db.query.user.findFirst({ where: (user, { eq }) => eq(user.id, userId) });
   if (!user) throw new Error(`User ${userId} does not exist.`);
-  return createPersonalOrganization(db, user);
+  return ensurePersonalOrganization(db, user);
 }
 
-/** Lowercase letters, digits and single hyphens; never empty. */
+/**
+ * Lowercase letters, digits and single hyphens, at most `MAX_SLUG_LENGTH`
+ * characters; never empty.
+ */
 export function slugify(value: string): string {
   const slug = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 39)
+    .slice(0, MAX_SLUG_LENGTH)
     .replace(/-+$/, "");
   return slug || "user";
+}
+
+/**
+ * `base-suffix`, with `base` shortened so the result stays within
+ * `MAX_SLUG_LENGTH`.
+ */
+export function suffixedSlug(base: string, suffix: string): string {
+  const room = MAX_SLUG_LENGTH - suffix.length - 1;
+  return `${base.slice(0, room).replace(/-+$/, "")}-${suffix}`;
+}
+
+/**
+ * The login session's active organization, or `null` if it has none or the
+ * user is no longer a member of it. In that case better-auth also clears
+ * the login session's `activeOrganizationId`.
+ */
+export async function getActiveOrganization(instance: Auth, headers: Headers) {
+  try {
+    return await instance.api.getFullOrganization({ headers, query: { membersLimit: 1 } });
+  } catch (error) {
+    if (isAPIError(error) && error.body?.code === "USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**

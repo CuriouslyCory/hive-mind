@@ -28,7 +28,7 @@ describe("proxy", () => {
     },
   );
 
-  it("ignores another prefix's session cookie", () => {
+  it("ignores another prefix's login session cookie", () => {
     const request = new NextRequest("https://hive-mind.example/", {
       headers: { cookie: "better-auth.session_token=token-value" },
     });
