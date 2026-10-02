@@ -7,6 +7,7 @@ import { planCreate, planEdit, planList, planLog, planShow, planStatus } from ".
 import { scopeAdd, scopeCheck, scopeList, scopeRemove } from "./scope.ts";
 import {
   sessionAttach,
+  sessionClaims,
   sessionEnd,
   sessionHeartbeat,
   sessionList,
@@ -51,6 +52,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
   sessionEnd,
   sessionList,
   sessionShow,
+  sessionClaims,
   sessionLog,
   scopeAdd,
   scopeRemove,
