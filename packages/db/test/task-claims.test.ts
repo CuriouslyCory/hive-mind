@@ -56,25 +56,28 @@ async function setup() {
 }
 
 describeDb("claimTask", () => {
-  it("claims an unclaimed Task with a 5-minute lease, and a repeat is a no-op", async () => {
-    const { project, task, a, as } = await setup();
-    const claimed = await claimTask(testDb.db, { ...as(a.id), steal: true });
-    expect(claimed).toMatchObject({ status: "ok", changed: true, stolenFromSessionId: null });
-    if (claimed.status !== "ok") return;
-    const row = claimed.task;
-    expect(row.claimedBySessionId).toBe(a.id);
-    expect(row.leaseExpiresAt?.getTime()).toBe((row.claimedAt?.getTime() ?? 0) + 5 * MINUTE);
+  it.each([false, true])(
+    "claims an unclaimed Task with a 5-minute lease, and a repeat is a no-op (steal=%s)",
+    async (steal) => {
+      const { project, task, a, as } = await setup();
+      const claimed = await claimTask(testDb.db, { ...as(a.id), steal });
+      expect(claimed).toMatchObject({ status: "ok", changed: true, stolenFromSessionId: null });
+      if (claimed.status !== "ok") return;
+      const row = claimed.task;
+      expect(row.claimedBySessionId).toBe(a.id);
+      expect(row.leaseExpiresAt?.getTime()).toBe((row.claimedAt?.getTime() ?? 0) + 5 * MINUTE);
 
-    expect(await claimTask(testDb.db, { ...as(a.id), steal: true })).toMatchObject({
-      status: "ok",
-      changed: false,
-    });
-    expect((await taskRow(testDb.db, task.id)).leaseExpiresAt).toEqual(row.leaseExpiresAt);
-    const events = await eventsOf(testDb.db, project.id);
-    expect(events.map((e) => [e.type, e.sessionId, e.actorSessionId, e.taskId])).toEqual([
-      ["task.claimed", a.id, a.id, task.id],
-    ]);
-  });
+      expect(await claimTask(testDb.db, { ...as(a.id), steal })).toMatchObject({
+        status: "ok",
+        changed: false,
+      });
+      expect((await taskRow(testDb.db, task.id)).leaseExpiresAt).toEqual(row.leaseExpiresAt);
+      const events = await eventsOf(testDb.db, project.id);
+      expect(events.map((e) => [e.type, e.sessionId, e.actorSessionId, e.taskId])).toEqual([
+        ["task.claimed", a.id, a.id, task.id],
+      ]);
+    },
+  );
 
   it("rejects a live competing claim with the holder's UUID and intent", async () => {
     const { project, a, b, as } = await setup();
@@ -88,45 +91,51 @@ describeDb("claimTask", () => {
     expect(await eventsOf(testDb.db, project.id)).toHaveLength(1);
   });
 
-  it("takes over an expired lease, recording when it lapsed", async () => {
-    const { project, task, a, b, as } = await setup();
-    await setClaim(testDb.db, task.id, a.id, -SECOND);
-    const lapsed = (await taskRow(testDb.db, task.id)).leaseExpiresAt;
-    expect(await claimTask(testDb.db, { ...as(b.id), steal: true })).toMatchObject({
-      status: "ok",
-      changed: true,
-      stolenFromSessionId: null,
-      task: { claimedBySessionId: b.id },
-    });
-    const events = await eventsOf(testDb.db, project.id);
-    expect(events.map((e) => [e.type, e.actorKind, e.sessionId, e.payload])).toEqual([
-      ["task.released", "system", a.id, { reason: "lease_expired" }],
-      [
-        "task.claimed",
-        "user",
-        b.id,
-        { stolenFromSessionId: null, leaseExpiresAt: expect.any(String) },
-      ],
-    ]);
-    expect(events[0]?.effectiveAt).toEqual(lapsed);
-  });
+  it.each([false, true])(
+    "takes over an expired lease, recording when it lapsed (steal=%s)",
+    async (steal) => {
+      const { project, task, a, b, as } = await setup();
+      await setClaim(testDb.db, task.id, a.id, -SECOND);
+      const lapsed = (await taskRow(testDb.db, task.id)).leaseExpiresAt;
+      expect(await claimTask(testDb.db, { ...as(b.id), steal })).toMatchObject({
+        status: "ok",
+        changed: true,
+        stolenFromSessionId: null,
+        task: { claimedBySessionId: b.id },
+      });
+      const events = await eventsOf(testDb.db, project.id);
+      expect(events.map((e) => [e.type, e.actorKind, e.sessionId, e.payload])).toEqual([
+        ["task.released", "system", a.id, { reason: "lease_expired" }],
+        [
+          "task.claimed",
+          "user",
+          b.id,
+          { stolenFromSessionId: null, leaseExpiresAt: expect.any(String) },
+        ],
+      ]);
+      expect(events[0]?.effectiveAt).toEqual(lapsed);
+    },
+  );
 
-  it("takes over the unexpired claim of a stale holder", async () => {
-    const { project, principal, task, b, as } = await setup();
-    const stale = await sessionAged(testDb.db, project.id, principal, 6 * MINUTE);
-    await setClaim(testDb.db, task.id, stale.id, MINUTE);
-    expect(await claimTask(testDb.db, { ...as(b.id), steal: true })).toMatchObject({
-      status: "ok",
-      changed: true,
-    });
-    const events = await eventsOf(testDb.db, project.id);
-    expect(events[0]).toMatchObject({
-      type: "task.released",
-      payload: { reason: "session_stale" },
-      effectiveAt: new Date(stale.lastHeartbeatAt.getTime() + 5 * MINUTE),
-    });
-    expect(events[1]?.payload).toMatchObject({ stolenFromSessionId: null });
-  });
+  it.each([false, true])(
+    "takes over the unexpired claim of a stale holder (steal=%s)",
+    async (steal) => {
+      const { project, principal, task, b, as } = await setup();
+      const stale = await sessionAged(testDb.db, project.id, principal, 6 * MINUTE);
+      await setClaim(testDb.db, task.id, stale.id, MINUTE);
+      expect(await claimTask(testDb.db, { ...as(b.id), steal })).toMatchObject({
+        status: "ok",
+        changed: true,
+      });
+      const events = await eventsOf(testDb.db, project.id);
+      expect(events[0]).toMatchObject({
+        type: "task.released",
+        payload: { reason: "session_stale" },
+        effectiveAt: new Date(stale.lastHeartbeatAt.getTime() + 5 * MINUTE),
+      });
+      expect(events[1]?.payload).toMatchObject({ stolenFromSessionId: null });
+    },
+  );
 
   it("steals a live claim with Events for both holders; the former holder cannot act", async () => {
     const { project, task, a, b, as, principal } = await setup();
