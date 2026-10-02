@@ -5,22 +5,28 @@ import { Readable } from "node:stream";
 import {
   createPlanOutputSchema,
   decodeFeedCursor,
+  EVENT_STREAM_MAX_BUFFERED_BYTES,
   type EventStreamFrame,
   encodeFeedCursor,
   eventStreamFrameSchema,
   FEED_ORIGIN,
   feedOriginCursor,
+  MAX_EVENT_STREAM_FRAME_BYTES,
 } from "@hivemind/contract";
 import type { Db } from "@hivemind/db";
 import { describeDb } from "@hivemind/db/testing";
+import { type SQL, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApiHandler } from "../src/server/api/router";
 import { createDashboardEventStreamHandler } from "../src/server/realtime/dashboard-stream";
 import {
+  DEFAULT_EVENT_STREAM_SETTINGS,
   type EventStreamSettings,
   openEventStream,
+  queueHighWaterMark,
   type StreamAccess,
   StreamLifecycle,
+  uncountedFrameBytes,
 } from "../src/server/realtime/event-stream";
 import { type ApiHarness, createApiHarness, ORIGIN, type SignedInUser } from "./support/api";
 
@@ -36,6 +42,16 @@ const FAST: Partial<EventStreamSettings> = {
   pollIntervalMs: 20,
   heartbeatIntervalMs: 60_000,
   rotateAfterMs: 20_000,
+};
+
+/**
+ * A response queue of 1 KiB (`queueHighWaterMark`), so the generator stops at
+ * a yield almost at once.
+ */
+const SMALL_QUEUE: Partial<EventStreamSettings> = {
+  maxBufferedBytes: 1024 + 1024 + 3 * 1024,
+  batchMaxBytes: 1024,
+  frameMaxBytes: 1024,
 };
 
 /** One SSE message as sent on the wire. */
@@ -176,6 +192,31 @@ function instrumentedDb(db: Db, failAfter = Number.POSITIVE_INFINITY) {
     },
   });
   return { db: proxy, counter };
+}
+
+/**
+ * `db` whose `transaction`-th transaction first runs `sabotage`. A temporary
+ * view that shadows a table makes the real queries that read it fail in
+ * Postgres; the failed transaction rolls the view back.
+ */
+function sabotagedDb(db: Db, transaction: number, sabotage: SQL) {
+  let started = 0;
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "transaction") {
+        return (...[fn, config]: Parameters<Db["transaction"]>) => {
+          started += 1;
+          const current = started;
+          return target.transaction(async (tx) => {
+            if (current === transaction) await tx.execute(sabotage);
+            return fn(tx);
+          }, config);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -487,6 +528,32 @@ describeDb("Event stream", () => {
       await expectPoolReleased();
     });
 
+    it("reads again at once after a batch the byte budget cut", async () => {
+      const projectId = await api.createProject(owner);
+      await writeEvents(projectId, 3);
+      const all = await feed(projectId);
+      await feedHorizonPassed(projectId);
+      const { db, counter } = instrumentedDb(api.testDb.db);
+      const reader = new SseReader(
+        (
+          await v1Stream(projectId, {
+            token: owner.token,
+            cursor: feedOriginCursor(projectId),
+            db,
+            // One Event per batch, and a day between polls that were not cut.
+            settings: { pollIntervalMs: 86_400_000, batchMaxBytes: 1 },
+          })
+        ).body,
+      );
+      await reader.next();
+      const frames = await reader.until((frame) => frame.id === all.at(-1)?.cursor, 5000);
+      expect(eventIds(frames)).toEqual(all.map((row) => row.id));
+      // The open, then one batch per Event.
+      expect(counter.transactions).toBe(1 + all.length);
+      await reader.cancel();
+      await expectPoolReleased();
+    });
+
     it("withholds Events behind an older open transaction, reports it, then delivers them", async () => {
       const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
       const projectId = await api.createProject(owner);
@@ -692,9 +759,60 @@ describeDb("Event stream", () => {
       expect(errors).toHaveBeenCalled();
       await expectPoolReleased();
     });
+
+    const recheckFailures: { name: string; table: string; credential: () => Promise<string> }[] = [
+      { name: "login session", table: "session", credential: async () => owner.token },
+      { name: "membership", table: "member", credential: async () => owner.token },
+      {
+        name: "Project key",
+        table: "project_api_key",
+        credential: async () => (await api.createKey(owner, projectA)).secret,
+      },
+    ];
+
+    for (const { name, table, credential } of recheckFailures) {
+      it(`ends a stream whose ${name} recheck query fails as a server error, not access_lost`, async () => {
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+        // The open's transaction succeeds; in the first batch's, the access
+        // recheck's own query fails in Postgres (undefined column).
+        const db = sabotagedDb(
+          api.testDb.db,
+          2,
+          sql`create temporary view ${sql.identifier(table)} as select 1 as sabotaged`,
+        );
+        const token = await credential();
+        const reader = new SseReader((await v1Stream(projectA, { token, db })).body);
+        expect((await reader.next())?.frame).toEqual({ type: "ready" });
+        const frames = await reader.rest();
+        expect(frames).toHaveLength(1);
+        expect(frames[0]?.event).toBe("error");
+        expect(JSON.parse(frames[0]?.data ?? "{}")).toMatchObject({
+          code: "INTERNAL_SERVER_ERROR",
+          status: 500,
+        });
+        expect(reader.raw).not.toContain("access_lost");
+        expect(errors).toHaveBeenCalledWith(expect.stringContaining("failed after it opened"));
+        await expectPoolReleased();
+        // The view was rolled back with the failed transaction.
+        const after = new SseReader((await v1Stream(projectA, { token })).body);
+        expect((await after.next())?.frame).toEqual({ type: "ready" });
+        await after.cancel();
+      });
+    }
   });
 
   describe("lifecycle", () => {
+    it("keeps the queue, a batch in flight and the frames outside the queue within the cap", () => {
+      const settings = DEFAULT_EVENT_STREAM_SETTINGS;
+      expect(uncountedFrameBytes(settings)).toBe(3 * MAX_EVENT_STREAM_FRAME_BYTES);
+      const highWaterMark = queueHighWaterMark(settings);
+      // The queue holds at least one maximal frame.
+      expect(highWaterMark).toBeGreaterThanOrEqual(settings.frameMaxBytes);
+      expect(
+        highWaterMark + uncountedFrameBytes(settings) + settings.batchMaxBytes,
+      ).toBeLessThanOrEqual(EVENT_STREAM_MAX_BUFFERED_BYTES);
+    });
+
     it("rotates at the deadline with a clean end", async () => {
       const started = Date.now();
       const reader = new SseReader(
@@ -716,13 +834,7 @@ describeDb("Event stream", () => {
             token: owner.token,
             cursor: feedOriginCursor(projectId),
             db,
-            // A queue of about 1 KiB: the generator stops at a yield almost at once.
-            settings: {
-              rotateAfterMs: 400,
-              maxBufferedBytes: 2048,
-              batchMaxBytes: 1024,
-              slowConsumerTimeoutMs: 60_000,
-            },
+            settings: { ...SMALL_QUEUE, rotateAfterMs: 400, slowConsumerTimeoutMs: 60_000 },
           })
         ).body,
       );
@@ -768,11 +880,7 @@ describeDb("Event stream", () => {
             cursor: feedOriginCursor(projectId),
             db,
             signal: abort.signal,
-            settings: {
-              maxBufferedBytes: 2048,
-              batchMaxBytes: 1024,
-              slowConsumerTimeoutMs: 60_000,
-            },
+            settings: { ...SMALL_QUEUE, slowConsumerTimeoutMs: 60_000 },
           })
         ).body,
       );
@@ -795,7 +903,7 @@ describeDb("Event stream", () => {
           await v1Stream(projectId, {
             token: owner.token,
             cursor: feedOriginCursor(projectId),
-            settings: { maxBufferedBytes: 2048, batchMaxBytes: 1024, slowConsumerTimeoutMs: 150 },
+            settings: { ...SMALL_QUEUE, slowConsumerTimeoutMs: 150 },
           })
         ).body,
       );

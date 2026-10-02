@@ -9,7 +9,7 @@ date: 2026-09-29
 
 [#1](https://github.com/CuriouslyCory/hive-mind/issues/1) lists Biome, Vitest and Playwright (dashboard smoke tests) for lint, format and test. M0 ([#2](https://github.com/CuriouslyCory/hive-mind/issues/2)) needs lint and tests for three workspaces, and M2's claim-race tests will need a database that accepts concurrent connections. Next 16 removed `next lint`. M0 has no dashboard beyond a placeholder page, so browser tests have nothing to cover yet. The tooling landed in [PR #4](https://github.com/CuriouslyCory/hive-mind/pull/4), and the database harness in [PR #6](https://github.com/CuriouslyCory/hive-mind/pull/6).
 
-Corrected 2026-10-01 for M3's plan, [#11](https://github.com/CuriouslyCory/hive-mind/issues/11): this ADR expected M3 to install Playwright and design its login and database setup. M1 did both in [PR #9](https://github.com/CuriouslyCory/hive-mind/pull/9), for the device approval page and the CLI flow, and M3 extends that setup with dashboard specs.
+Corrected 2026-10-01 for M3's plan, [#11](https://github.com/CuriouslyCory/hive-mind/issues/11): this ADR expected M3 to install Playwright and design its login and database setup. M1 did both in [PR #9](https://github.com/CuriouslyCory/hive-mind/pull/9), for the device approval page and the CLI flow, and M3 extends that setup with dashboard specs. The title keeps its original wording.
 
 ## Decision
 

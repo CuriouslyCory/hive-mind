@@ -10,7 +10,8 @@ import { getDb } from "../../../../../../../server/db";
 
 /**
  * Seconds. Next.js reads segment config statically, so this is a literal:
- * it must equal EVENT_STREAM_MAX_DURATION_SECONDS in `@hivemind/contract`.
+ * it must equal EVENT_STREAM_MAX_DURATION_SECONDS in `@hivemind/contract`
+ * (apps/web/test/stream-routes.test.ts checks it).
  */
 export const maxDuration = 60;
 // Node.js, the default runtime: Cache Components rejects a `runtime` export.

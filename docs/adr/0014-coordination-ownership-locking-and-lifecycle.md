@@ -89,6 +89,8 @@ Every new endpoint resolves Project access first, then nested resources, then ca
 
 ADR-0010 stays proposed. #11 owns the stream, cursors, snapshots and the safe-horizon queries, and accepts, amends or supersedes ADR-0010. M2 supplies only the `writer_xid` and `seq` columns, their indexes and paginated reads.
 
+Amended 2026-10-01 by M3, [#11](https://github.com/CuriouslyCory/hive-mind/issues/11): M3 accepted ADR-0010, which now records the stream, cursors and snapshot handoff built on these columns.
+
 ## Consequences
 
 - **Existing Project keys gain coordination access.** The server grants the full permission list to every Project key, including keys issued under M1. A key that could read only its Project's metadata can now create Plans, start Sessions and claim Tasks in that Project. Owners who do not want that must revoke the key. Per-key permission choices would need a new ADR.

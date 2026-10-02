@@ -100,11 +100,11 @@ The constants are in `packages/contract/src/event-stream.ts` and `DEFAULT_EVENT_
 
 | What | Value |
 |---|---|
-| Poll interval | 1 s; at once after a full batch |
+| Poll interval | 1 s; at once after a batch of 100 Events or one the byte budget cut |
 | Per poll | one short transaction on the shared pool: a fresh credential and Project access check, then the feed read |
 | Batch | at most 100 Events and a 512 KiB byte budget, but always at least one Event |
 | Largest Event frame | 65 KiB (the 64 KiB maximum encoded Event plus 1 KiB of framing) |
-| Memory | at most 1 MiB of Event bytes read and not yet sent; a consumer that keeps the queue full for 5 s is disconnected and resumes from its cursor |
+| Memory | at most 1 MiB of Event bytes read and not yet sent: the send queue, one batch in flight and up to three frames in the encoder; a consumer that keeps the queue full for 5 s is disconnected and resumes from its cursor |
 | Database step | 5 s `statement_timeout`; 8 s for acquiring a connection and running a step |
 | Heartbeat | every 15 s; oRPC's own keepalive comments are disabled |
 | Rotation | the stream ends itself 50 s after it opened; both routes export `maxDuration = 60` |
@@ -130,6 +130,8 @@ Labels, intents and Event text are not markdown. They render as plain React text
 
 - **An old open transaction delays delivery for every Project.** The horizon is the oldest running transaction that has an ID, in any database on the same Postgres server. While such a transaction stays open, newer Events wait; they are never skipped. Heartbeats report `withheld`, the dashboard shows "delayed", and the server logs once per stream after 30 seconds. Mutations and snapshots must stay short. If this is common in deployed use, ADR-0010 is reopened; the feed does not fall back to a lossy cursor.
 - **Polling cost grows with open tabs.** Each open Project tab holds one function invocation and runs one transaction per second, plus a page refresh per batch of relevant Events and every 60 seconds while visible. Tabs do not share a stream.
+- **No per-caller cap on concurrent streams.** One User or Project key can open any number of streams, each holding a function instance and polling once a second until it rotates. This is an accepted risk; general rate limiting is M7's ([#1](https://github.com/CuriouslyCory/hive-mind/issues/1), [#11](https://github.com/CuriouslyCory/hive-mind/issues/11)).
+- **A fence can be wrong after a Postgres crash.** A page's fence `(H, 0)` can name a transaction ID that was assigned but never made durable, and crash recovery can issue such IDs again. Resuming from that fence can then fail with 400 while the server's next ID is below H (the dashboard takes a fresh snapshot once), or, once new IDs pass H, skip Events written under reissued IDs below H. A committed Event's ID is never reused, so a cursor from a delivered Event is unaffected (ADR-0010). Fixing this is follow-up work.
 - **Delivery is at least once, and cursor order is not commit order.** The dashboard is unaffected because it re-reads server state; other clients must apply Events idempotently and must not treat feed order as time order.
 - **No Event retention until M7.** Events are never deleted yet, so `feedOriginCursor` replays everything. Before M7 prunes Events that a cursor could still replay, it needs an expired-cursor protocol (ADR-0010).
 

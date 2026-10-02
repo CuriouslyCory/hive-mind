@@ -17,7 +17,12 @@ export function createDb(pool: pg.Pool) {
 
 export type Db = ReturnType<typeof createDb>;
 
-export { createClient, createPool, describeConnectionError } from "./connection.ts";
+export {
+  createClient,
+  createPool,
+  describeConnectionError,
+  describeFailure,
+} from "./connection.ts";
 export {
   allocatePlanNumber,
   COORDINATION_LOCK_NAMESPACE,

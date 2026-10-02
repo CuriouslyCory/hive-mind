@@ -1,6 +1,11 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, type MockInstance, vi } from "vitest";
-import { createClient, createPool, describeConnectionError } from "../src/connection.ts";
+import {
+  createClient,
+  createPool,
+  describeConnectionError,
+  describeFailure,
+} from "../src/connection.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
 
 // Without the `error` listeners these tests do not fail an assertion: the
@@ -24,6 +29,20 @@ describe("describeConnectionError", () => {
     const text = describeConnectionError(error);
     expect(text).toBe("(no code) Connection terminated unexpectedly");
     expect(text).not.toContain("hunter2-secret");
+  });
+});
+
+describe("describeFailure", () => {
+  it("describes an Error by code and message, and anything else generically", () => {
+    const error = Object.assign(new Error("Connection terminated unexpectedly"), {
+      client: { connectionParameters: { password: "hunter2-secret" } },
+    });
+    expect(describeFailure(error)).toBe("(no code) Connection terminated unexpectedly");
+    expect(describeFailure({ password: "hunter2-secret" })).toBe("unknown failure");
+    const wrapped = new Error("Failed query: select 1", { cause: error });
+    expect(describeFailure(wrapped)).toBe(
+      "(no code) Failed query: select 1; cause: (no code) Connection terminated unexpectedly",
+    );
   });
 });
 
