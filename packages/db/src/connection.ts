@@ -52,3 +52,17 @@ export function describeConnectionError(error: Error): string {
   const code = "code" in error && typeof error.code === "string" ? error.code : "no code";
   return `(${code}) ${error.message}`;
 }
+
+/**
+ * A loggable description of any thrown value: `describeConnectionError` for
+ * an Error and for the Error it wraps (Drizzle wraps pg's in `cause`), never
+ * the object itself, which for pg can carry connection parameters.
+ */
+export function describeFailure(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown failure";
+  const { cause } = error;
+  const described = describeConnectionError(error);
+  return cause instanceof Error
+    ? `${described}; cause: ${describeConnectionError(cause)}`
+    : described;
+}

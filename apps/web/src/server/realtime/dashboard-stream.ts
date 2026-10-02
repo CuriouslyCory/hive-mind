@@ -1,3 +1,4 @@
+import { describeFailure } from "@hivemind/db";
 import { type ApiDeps, withoutCredentials } from "../api/principal";
 import { type EventStreamHandlerOptions, errorResponse, serveEventStream } from "../api/router";
 import { resolveCookiePrincipal } from "./stream-access";
@@ -39,7 +40,7 @@ export function createDashboardEventStreamHandler(
       response.headers.set("cache-control", "no-store");
       return response;
     } catch (error) {
-      console.error("Dashboard Event stream request failed:", error);
+      console.error(`Dashboard Event stream request failed: ${describeFailure(error)}`);
       return errorResponse("INTERNAL_SERVER_ERROR");
     }
   };

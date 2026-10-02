@@ -4,7 +4,7 @@ import {
   apiContract,
   MAX_MANAGEMENT_BODY_BYTES,
 } from "@hivemind/contract";
-import { ProjectAccessLostError } from "@hivemind/db";
+import { describeFailure, ProjectAccessLostError } from "@hivemind/db";
 import { OpenAPIGenerator } from "@orpc/openapi";
 import { OpenAPIHandler, type OpenAPIHandlerOptions } from "@orpc/openapi/fetch";
 import { ORPCError, onError } from "@orpc/server";
@@ -148,7 +148,7 @@ function handlerOptions(): OpenAPIHandlerOptions<ApiContext> {
       // ORPCError; log those, since the response says nothing about the cause.
       onError((error) => {
         if (!(error instanceof ORPCError) || error.status >= 500) {
-          console.error("/api/v1 request failed:", error);
+          console.error(`/api/v1 request failed: ${describeFailure(error)}`);
         }
       }),
     ],
@@ -271,7 +271,7 @@ export function createApiHandler(
       if (response.status === 401) response.headers.set("www-authenticate", "Bearer");
       return response;
     } catch (error) {
-      console.error("/api/v1 request failed:", error);
+      console.error(`/api/v1 request failed: ${describeFailure(error)}`);
       return errorResponse("INTERNAL_SERVER_ERROR");
     }
   };
