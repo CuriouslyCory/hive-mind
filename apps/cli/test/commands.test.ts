@@ -108,9 +108,17 @@ const garbledBody = () =>
 
 const gatewayTimeout = () => new Response("FUNCTION_INVOCATION_TIMEOUT", { status: 504 });
 
-/** Aborts `controller` once the fake fetch has handed out a stalled body. */
-function abortSoon(controller: AbortController): void {
-  setTimeout(() => controller.abort(new Error("received SIGINT")), 50);
+/**
+ * A stalled body that aborts `controller` once the fake fetch has handed it
+ * out. Aborting on a timer instead races the request on a slow runner: an
+ * abort before the request is sent is a plain cancellation, not a lost answer.
+ */
+function stalledThenAborted(controller: AbortController) {
+  return (init?: RequestInit): Response => {
+    const response = stalledBody(init);
+    setTimeout(() => controller.abort(new Error("received SIGINT")), 0);
+    return response;
+  };
 }
 
 describe("registry", () => {
@@ -449,14 +457,13 @@ describe("init", () => {
     await loginAs();
     const controller = new AbortController();
     const cases = [
-      { respond: stalledBody, code: "CANCELLED", signal: controller.signal },
+      { respond: stalledThenAborted(controller), code: "CANCELLED", signal: controller.signal },
       { respond: garbledBody, code: "INVALID_RESPONSE", signal: undefined },
       // A 5xx may come after the commit, e.g. a platform gateway timeout.
       { respond: gatewayTimeout, code: "GATEWAY_TIMEOUT", signal: undefined },
     ];
     for (const { respond, code, signal } of cases) {
       const { root } = gitRepo();
-      if (signal) abortSoon(controller);
       const result = await run(["init", "--name", "Lost", "--slug", "lost", "--json"], {
         cwd: root,
         fetch: failingCreate("/api/v1/projects", respond),
@@ -626,7 +633,7 @@ describe("key", () => {
     const { project, nested } = await boundRepo();
     const controller = new AbortController();
     const cases = [
-      { respond: stalledBody, code: "CANCELLED", signal: controller.signal },
+      { respond: stalledThenAborted(controller), code: "CANCELLED", signal: controller.signal },
       { respond: garbledBody, code: "INVALID_RESPONSE", signal: undefined },
       {
         // Valid JSON without the secret: the key exists, but we cannot show it.
@@ -637,7 +644,6 @@ describe("key", () => {
       { respond: gatewayTimeout, code: "GATEWAY_TIMEOUT", signal: undefined },
     ];
     for (const { respond, code, signal } of cases) {
-      if (signal) abortSoon(controller);
       const result = await run(["key", "create", "--name", "ci", "--json"], {
         cwd: nested,
         fetch: failingCreate("/keys", respond),
