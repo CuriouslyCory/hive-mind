@@ -63,6 +63,8 @@ pnpm build
 - A user-visible CLI change needs a changeset: `pnpm changeset`.
 - Event types and payloads are defined twice: in `packages/db/src/event.ts` (what is written) and in the contract's `eventSchema` (what reads return). Change both together; `apps/web/test/event-catalog.test.ts` fails when they differ.
 - Validate a secret that only one route uses inside that route, as `readCronSecret` in `apps/web/src/env.ts` does. A bad value in the shared server env schema makes every request fail, not only that route.
+- After changing the dashboard, its Event stream or its live updates, run `pnpm test:e2e` too, once under `next dev` and once with `E2E_SERVER=start` after `pnpm build`. How the feed and the browser converge is in `docs/dashboard.md`.
+- `apps/web` uses Cache Components, so navigating away hides a layout in a React Activity rather than unmounting it, and Back shows it again without a server render. Client state in a layout, such as the dashboard's live-update registry, must survive that detach and reattach: a lost-access state must stay lost, and restored data must be refreshed.
 
 ### Naming
 
