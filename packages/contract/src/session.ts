@@ -142,7 +142,12 @@ export const listSessionsInputSchema = z.strictObject({
 
 export type ListSessionsInput = z.input<typeof listSessionsInputSchema>;
 
-/** `GET /projects/{id}/sessions/{sessionId}`, and the path of every Session route. */
+/**
+ * `GET /projects/{id}/sessions/{sessionId}`, and the path of every Session
+ * route. Every Session of the Project is readable; the routes that change a
+ * Session need the caller's own, and another principal's is FORBIDDEN. A
+ * Session of another Project, or none, is NOT_FOUND.
+ */
 export const getSessionInputSchema = z.strictObject({
   id: idSchema,
   sessionId: idSchema,

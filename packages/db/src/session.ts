@@ -442,6 +442,22 @@ export async function heartbeatSession(
       .where(eq(agentSession.id, session.id))
       .returning();
     if (!row) throw new Error("agent_session update returned no row");
+    if (row.scopeHistoryIncomplete && !session.scopeHistoryIncomplete) {
+      // The new generation replaced an unfinished collection: the same sticky
+      // loss, recorded once, that src/scope-store.ts records for its causes.
+      await insertEvent(tx, {
+        projectId: input.projectId,
+        type: "scope.coverage_lost",
+        payload: {
+          collectionId: session.collectionId,
+          reason: "collection_superseded",
+          pathCount: session.collectionPathCount,
+        },
+        actor,
+        sessionId: session.id,
+        now,
+      });
+    }
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "session.heartbeat",

@@ -261,7 +261,7 @@ export async function addDeclaredScope(
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "scope.added",
-      payload: { source: "declared", value },
+      payload: { scopeId: row.id, pattern: row.value },
       actor: actorOf(input),
       sessionId: input.sessionId,
       now,
@@ -305,7 +305,7 @@ export async function removeScope(
     await insertEvent(tx, {
       projectId: input.projectId,
       type: "scope.removed",
-      payload: { source: row.source, value: row.value },
+      payload: { scopeId: row.id, pattern: row.value },
       actor: actorOf(input),
       sessionId: input.sessionId,
       now,
@@ -746,7 +746,7 @@ export async function uploadCollectionBatch(
       await insertEvent(tx, {
         projectId: input.projectId,
         type: "scope.touched",
-        payload: { collectionId: input.collectionId, batchIndex, values: accepted },
+        payload: { collectionId: input.collectionId, paths: accepted },
         actor: actorOf(input),
         sessionId: session.id,
         now,

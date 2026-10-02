@@ -586,6 +586,12 @@ const MAXIMAL_PAYLOADS: Record<EventType, unknown> = {
     collectionId: UUID,
     paths: Array.from({ length: MAX_COLLECTION_BATCH_PATHS }, (_, i) => widePath(i)),
   },
+  "scope.collection_finalized": { collectionId: UUID, pathCount: Number.MAX_SAFE_INTEGER },
+  "scope.coverage_lost": {
+    collectionId: UUID,
+    reason: "unrepresentable_paths",
+    pathCount: Number.MAX_SAFE_INTEGER,
+  },
 };
 
 function maximalEvent(type: EventType): unknown {

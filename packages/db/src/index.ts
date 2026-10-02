@@ -36,6 +36,7 @@ export {
   createOnce,
 } from "./creation.ts";
 export {
+  type CoverageLostReason,
   EVENT_PAYLOAD_VERSIONS,
   type EventInput,
   type EventPayloads,
@@ -99,8 +100,10 @@ export {
   type PlanView,
   type PlanWriter,
   planKey,
+  planNumbers,
   resolvePlan,
   type SessionEnded,
+  type SessionForbidden,
   type SessionNotFound,
   type SetPlanStatusOutcome,
   setPlanStatus,
@@ -238,6 +241,15 @@ export {
   type UpdateSessionInput,
   updateSession,
 } from "./session.ts";
+export {
+  type LiveSessionView,
+  type ProjectStatus,
+  type ProjectStatusInput,
+  projectStatus,
+  type SessionView,
+  type StatusSection,
+  sessionViews,
+} from "./status.ts";
 export { type SweepOptions, type SweepResult, sweepCoordination } from "./sweep.ts";
 export {
   blockTask,
@@ -248,5 +260,6 @@ export {
   startTask,
   type TaskActionInput,
   type TaskActionOutcome,
+  type TaskActionResult,
 } from "./task-claims.ts";
 export { schema };

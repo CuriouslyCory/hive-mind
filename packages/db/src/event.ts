@@ -2,10 +2,16 @@ import type { Transaction } from "./coordination.ts";
 import type { Actor } from "./principal.ts";
 import type { PlanStatus, SessionStatus, TaskStatus } from "./schema/coordination.ts";
 import { type Event, event } from "./schema/event.ts";
-import type { ScopeSource } from "./schema/scope.ts";
 
 // Writing Events. Every M2 domain mutation inserts its Event in the same
 // transaction as the change (issue #12), so a rollback removes both.
+
+/** Why a Session's touched-path coverage became incomplete for good. */
+export type CoverageLostReason =
+  | "omitted_paths"
+  | "unrepresentable_paths"
+  | "touched_capacity"
+  | "collection_superseded";
 
 /** Session fields a `session.updated` Event lists (the contract's `SESSION_UPDATE_FIELDS`). */
 export type SessionUpdateField =
@@ -82,21 +88,26 @@ export interface EventPayloads {
    * abandoned.
    */
   "session.ended": { from: SessionStatus; summary: string };
-  "scope.added": { source: ScopeSource; value: string };
-  "scope.removed": { source: ScopeSource; value: string };
+  /** A declared Scope: its row id and glob. Touched Scopes are recorded by `scope.touched`. */
+  "scope.added": { scopeId: string; pattern: string };
+  /** A removed declared Scope (touched Scopes cannot be removed). */
+  "scope.removed": { scopeId: string; pattern: string };
   /** Touched paths a collection batch added as new Scopes (at most 16). */
-  "scope.touched": { collectionId: string; batchIndex: number; values: string[] };
+  "scope.touched": { collectionId: string; paths: string[] };
   /** A collection was verified against its manifest; its coverage is complete. */
   "scope.collection_finalized": { collectionId: string; pathCount: number };
   /**
    * The Session's sticky scope_history_incomplete was set: `pathCount` paths
    * were omitted by the client, could not be stored as written, or exceeded
-   * the Session's touched-Scope limit. Written only when the flag changes.
+   * the Session's touched-Scope limit; or a heartbeat opened a new collection
+   * while `collectionId` was unfinished (`collection_superseded`, `pathCount`
+   * from its manifest, null if none was registered). Written only when the
+   * flag changes.
    */
   "scope.coverage_lost": {
     collectionId: string | null;
-    reason: "omitted_paths" | "unrepresentable_paths" | "touched_capacity";
-    pathCount: number;
+    reason: CoverageLostReason;
+    pathCount: number | null;
   };
 }
 

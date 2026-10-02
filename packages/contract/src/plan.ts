@@ -96,8 +96,9 @@ export type Plan = z.infer<typeof planSchema>;
 /**
  * Optional on Project-level coordination writes: attributes the change's Event
  * to one of the caller's own Sessions in this Project. Another principal's
- * Session or another Project's is NOT_FOUND; an ended or abandoned Session is
- * CONFLICT.
+ * Session of this Project is FORBIDDEN (it is visible, but not the caller's);
+ * another Project's or an absent one is NOT_FOUND; an ended or abandoned
+ * Session is CONFLICT.
  */
 export const actorSessionInputShape = {
   sessionId: idSchema.optional(),

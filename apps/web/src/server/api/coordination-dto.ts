@@ -1,18 +1,29 @@
 import {
   type Actor,
+  type ClaimedTaskIds,
+  type CollectionState,
   type Event,
   eventSchema,
   MAX_EVENT_BYTES,
+  MAX_PAGE_LIMIT,
+  type Overlap,
   type Plan,
   type PlanSummary,
+  type Scope,
+  type Session,
   type Task,
 } from "@hivemind/contract";
 import {
+  type CollectionState as CollectionRow,
   type Event as EventRow,
   encodedJsonBytes,
+  isScopeComplete,
   type Plan as PlanRow,
   type PlanView,
   planKey,
+  type ScopeOverlapItem,
+  type Scope as ScopeRow,
+  type SessionView,
   type TaskView,
 } from "@hivemind/db";
 
@@ -126,4 +137,91 @@ export function toEventDto(row: EventRow): Event {
     throw new Error(`Event ${row.id} encodes to ${bytes} bytes; the limit is ${MAX_EVENT_BYTES}.`);
   }
   return parsed.data;
+}
+
+/**
+ * A Session as the contract's Session: `status` is the effective status at
+ * the read's database time, `hostname` is the `machine` column and
+ * `startedAt` its creation. The worktree path is stored but not exposed.
+ */
+export function toSessionDto({ session, attachedPlanNumber }: SessionView): Session {
+  return {
+    id: session.id,
+    projectId: session.projectId,
+    owner: sessionOwnerOf(session),
+    agent: session.agent,
+    intent: session.intent,
+    status: session.effectiveStatus,
+    hostname: session.machine,
+    gitBranch: session.gitBranch,
+    gitCommit: session.gitCommit,
+    attachedPlanId: session.attachedPlanId,
+    attachedPlanKey: attachedPlanNumber === null ? null : planKey(attachedPlanNumber),
+    attachedTaskId: session.attachedTaskId,
+    summary: session.summary,
+    scopeComplete: isScopeComplete(session),
+    startedAt: session.createdAt.toISOString(),
+    lastHeartbeatAt: session.lastHeartbeatAt.toISOString(),
+    endedAt: session.endedAt?.toISOString() ?? null,
+    updatedAt: session.updatedAt.toISOString(),
+  };
+}
+
+function sessionOwnerOf(session: SessionView["session"]): Session["owner"] {
+  if (session.ownerKind === "user" && session.userId) {
+    return { kind: "user", userId: session.userId };
+  }
+  if (session.ownerKind === "key" && session.keyId) return { kind: "key", keyId: session.keyId };
+  // agent_session's owner check constraint rules this out.
+  throw new Error(`Session ${session.id} has no owner.`);
+}
+
+export function toScopeDto(row: ScopeRow): Scope {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    sessionId: row.sessionId,
+    source: row.source,
+    value: row.value,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function toOverlapDto(item: ScopeOverlapItem): Overlap {
+  return {
+    sessionId: item.sessionId,
+    otherSessionId: item.otherSessionId,
+    scope: { ...item.scope },
+    otherScope: { ...item.otherScope },
+    kind: item.kind,
+    witness: item.witness,
+  };
+}
+
+/**
+ * Where a collection stands. `collectionComplete` additionally requires that
+ * the manifest omitted no path; an omission also made the history incomplete,
+ * so `scopeComplete` is the database's `isScopeComplete` either way.
+ */
+export function toCollectionDto(state: CollectionRow): CollectionState {
+  const finalized = state.collectionComplete;
+  const collectionComplete = finalized && state.omittedPathCount === 0;
+  const historicalScopeComplete = !state.scopeHistoryIncomplete;
+  return {
+    collectionId: state.collectionId,
+    sessionId: state.sessionId,
+    pathCount: state.pathCount,
+    batchCount: state.expectedBatches,
+    omittedPathCount: state.omittedPathCount,
+    receivedBatchCount: state.receivedBatchCount,
+    finalized,
+    collectionComplete,
+    historicalScopeComplete,
+    scopeComplete: collectionComplete && historicalScopeComplete,
+  };
+}
+
+/** Task UUIDs, at most a page of them, and whether that was all. */
+export function toClaimedTaskIds(taskIds: readonly string[]): ClaimedTaskIds {
+  return { items: taskIds.slice(0, MAX_PAGE_LIMIT), complete: taskIds.length <= MAX_PAGE_LIMIT };
 }

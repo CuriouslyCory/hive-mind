@@ -42,6 +42,21 @@ export const CLAIM_RELEASE_REASONS = [
 
 export const claimReleaseReasonSchema = z.enum(CLAIM_RELEASE_REASONS);
 
+/**
+ * Why a Session's touched-path coverage became incomplete for good: paths the
+ * client omitted, paths the server could not store as written, paths beyond
+ * the Session's touched-Scope limit, or a collection replaced by a newer one
+ * before it was finalized.
+ */
+export const COVERAGE_LOST_REASONS = [
+  "omitted_paths",
+  "unrepresentable_paths",
+  "touched_capacity",
+  "collection_superseded",
+] as const;
+
+export const coverageLostReasonSchema = z.enum(COVERAGE_LOST_REASONS);
+
 /** Session fields an update can change, as `session.updated` lists them. */
 export const SESSION_UPDATE_FIELDS = [
   "agent",
@@ -137,6 +152,22 @@ const eventPayloads = {
     collectionId: idSchema,
     paths: z.array(scopeValueSchema).min(1).max(MAX_COLLECTION_BATCH_PATHS),
   }),
+  /** A collection matched its manifest; `pathCount` distinct paths. */
+  "scope.collection_finalized": z.strictObject({
+    collectionId: idSchema,
+    pathCount: countSchema,
+  }),
+  /**
+   * The Session's touched-path coverage became incomplete for the rest of its
+   * life; written once, when that first happens. `pathCount` is how many
+   * paths were affected, null when unknown (a superseded collection that
+   * never registered a manifest).
+   */
+  "scope.coverage_lost": z.strictObject({
+    collectionId: idSchema.nullable(),
+    reason: coverageLostReasonSchema,
+    pathCount: countSchema.nullable(),
+  }),
 } as const;
 
 export type EventType = keyof typeof eventPayloads;
@@ -199,6 +230,8 @@ export const eventSchema = z.discriminatedUnion("type", [
   eventVariant("scope.added"),
   eventVariant("scope.removed"),
   eventVariant("scope.touched"),
+  eventVariant("scope.collection_finalized"),
+  eventVariant("scope.coverage_lost"),
 ]);
 
 export type Event = z.infer<typeof eventSchema>;

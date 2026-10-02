@@ -120,6 +120,8 @@ export interface PlanWriter {
 
 /** The optional actor Session is not the principal's own Session in this Project. */
 export type SessionNotFound = { status: "session_not_found" };
+/** The optional actor Session is in this Project but owned by another principal. */
+export type SessionForbidden = { status: "session_forbidden" };
 /** The optional actor Session is ended or effectively abandoned. */
 export type SessionEnded = { status: "session_ended" };
 /** The Plan reference matches no Plan in the Project. */
@@ -180,7 +182,7 @@ const PROGRESS_FIELD: { readonly [S in TaskStatus]: keyof PlanProgress } = {
   done: "done",
 };
 
-async function progressOf(
+export async function progressOf(
   tx: Db | Transaction,
   planIds: string[],
 ): Promise<Map<string, PlanProgress>> {
@@ -207,25 +209,26 @@ async function viewOf(tx: Db | Transaction, row: Plan): Promise<PlanView> {
 }
 
 /**
- * Checks the actor Session: it must exist in the Project and be owned by the
- * principal (else `session_not_found`, like any foreign nested id), and, when
- * `open` is set, not be ended or effectively abandoned at `now`.
+ * Checks the actor Session: it must exist in the Project (else
+ * `session_not_found`, like any foreign nested id) and be owned by the
+ * principal (else `session_forbidden`: a visible Session the caller may not
+ * act through, ADR-0014), and, when `open` is set, not be ended or
+ * effectively abandoned at `now`.
  */
 async function checkActorSession(
   tx: Transaction,
   writer: PlanWriter,
   now: Date,
   { open }: { open: boolean },
-): Promise<SessionNotFound | SessionEnded | null> {
+): Promise<SessionNotFound | SessionForbidden | SessionEnded | null> {
   if (!writer.sessionId) return null;
   const [row] = await tx
     .select()
     .from(agentSession)
     .where(and(eq(agentSession.id, writer.sessionId), eq(agentSession.projectId, writer.projectId)))
     .limit(1);
-  if (!row || !samePrincipal(sessionOwner(row), writer.principal)) {
-    return { status: "session_not_found" };
-  }
+  if (!row) return { status: "session_not_found" };
+  if (!samePrincipal(sessionOwner(row), writer.principal)) return { status: "session_forbidden" };
   if (open) {
     const status = effectiveSessionStatus(row, now);
     if (status === "ended" || status === "abandoned") return { status: "session_ended" };
@@ -242,6 +245,7 @@ export type CreatePlanOutcome =
   | { status: "replay"; plan: PlanView }
   | CreationFailure
   | SessionNotFound
+  | SessionForbidden
   | SessionEnded;
 
 /**
@@ -369,6 +373,7 @@ export type UpdatePlanOutcome =
   | PlanNotFound
   | PlanClosed
   | SessionNotFound
+  | SessionForbidden
   | SessionEnded;
 
 /**
@@ -422,6 +427,7 @@ export type SetPlanStatusOutcome =
   | { status: "unfinished_tasks"; count: number }
   | PlanNotFound
   | SessionNotFound
+  | SessionForbidden
   | SessionEnded;
 
 /**
@@ -519,6 +525,7 @@ export type AppendPlanLogOutcome =
   | CreationFailure
   | PlanNotFound
   | SessionNotFound
+  | SessionForbidden
   | SessionEnded;
 
 /**
@@ -590,7 +597,7 @@ export function usableClaim(
 }
 
 /** Tasks with their claim holder's liveness columns, for `usableClaim`. */
-function selectTaskViews(tx: Db | Transaction) {
+export function selectTaskViews(tx: Db | Transaction) {
   return tx
     .select({
       task,
@@ -605,12 +612,41 @@ function selectTaskViews(tx: Db | Transaction) {
 
 type TaskViewRow = Awaited<ReturnType<ReturnType<typeof selectTaskViews>["where"]>>[number];
 
-function toTaskView(row: TaskViewRow, now: Date): TaskView {
+export function toTaskView(row: TaskViewRow, now: Date): TaskView {
   const holder =
     row.holderStatus && row.holderLastHeartbeatAt
       ? { status: row.holderStatus, lastHeartbeatAt: row.holderLastHeartbeatAt }
       : null;
   return { task: row.task, planNumber: row.planNumber, claim: usableClaim(row.task, holder, now) };
+}
+
+/** One Task as a `TaskView` at `now`, read in the caller's transaction. */
+export async function loadTaskView(
+  tx: Db | Transaction,
+  taskId: string,
+  now: Date,
+): Promise<TaskView> {
+  const [row] = await selectTaskViews(tx).where(eq(task.id, taskId));
+  if (!row) throw new Error(`task ${taskId} not found`);
+  return toTaskView(row, now);
+}
+
+/**
+ * The PLAN-N numbers of the given Plans of a Project, by Plan UUID (for the
+ * `attachedPlanKey` of Session DTOs). A Plan's number never changes.
+ */
+export async function planNumbers(
+  tx: Db | Transaction,
+  projectId: string,
+  planIds: readonly (string | null)[],
+): Promise<Map<string, number>> {
+  const ids = [...new Set(planIds.filter((id): id is string => id !== null))];
+  if (ids.length === 0) return new Map();
+  const rows = await tx
+    .select({ id: plan.id, number: plan.number })
+    .from(plan)
+    .where(and(eq(plan.projectId, projectId), inArray(plan.id, ids)));
+  return new Map(rows.map((row) => [row.id, row.number]));
 }
 
 export type AddTaskOutcome =
@@ -620,6 +656,7 @@ export type AddTaskOutcome =
   | PlanNotFound
   | PlanClosed
   | SessionNotFound
+  | SessionForbidden
   | SessionEnded;
 
 /**
