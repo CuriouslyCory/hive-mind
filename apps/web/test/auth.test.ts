@@ -8,7 +8,6 @@ import {
   CLI_CLIENT_ID,
   createAuth,
   DEVICE_DECISION_PATHS_DISABLED,
-  getActiveOrganization,
   isClosedAuthPath,
   isRawApiKeyPath,
   MAX_SLUG_LENGTH,
@@ -673,26 +672,6 @@ describeDb("createAuth", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ name: "Reader", slug: "reader" });
-    });
-  });
-
-  describe("getActiveOrganization", () => {
-    it("is the login session's active organization", async () => {
-      const user = await test.saveUser(test.createUser({ name: "Active", githubLogin: "active" }));
-      const headers = await test.getAuthHeaders({ userId: user.id });
-      headers.set("host", PREVIEW_HOSTS[0] ?? "");
-
-      expect(await getActiveOrganization(auth, headers)).toMatchObject({ slug: "active" });
-    });
-
-    it("is null once the user is no longer a member of it", async () => {
-      const user = await test.saveUser(test.createUser({ githubLogin: "departed" }));
-      const { token, headers } = await test.login({ userId: user.id });
-      headers.set("host", PREVIEW_HOSTS[0] ?? "");
-      await testDb.pool.query("delete from member where user_id = $1", [user.id]);
-
-      expect(await getActiveOrganization(auth, headers)).toBeNull();
-      expect(await activeOrganizationIdOf(token)).toBeNull();
     });
   });
 

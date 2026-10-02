@@ -37,7 +37,11 @@ async function Projects({ searchParams }: { searchParams: PageProps<"/">["search
         <p>
           You have no Projects yet. In your repository, run{" "}
           <code>hivemind init --name &apos;My project&apos; --slug my-project</code> to create one
-          and link the repository to it (see <code>docs/cli.md</code>).
+          and link the repository to it (see{" "}
+          <a href="https://github.com/CuriouslyCory/hive-mind/blob/main/docs/cli.md#hivemind-init">
+            the CLI guide
+          </a>
+          ).
         </p>
       ) : (
         <ul>
