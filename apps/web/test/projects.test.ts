@@ -289,6 +289,10 @@ describeDb("/api/v1 Projects", () => {
       ["a limit over the maximum", "?limit=101"],
       ["a zero limit", "?limit=0"],
       ["a malformed cursor", "?cursor=not!base64"],
+      [
+        "a cursor with an impossible date",
+        `?cursor=${Buffer.from("2024-13-01T00:00:00.000000Z|00000000-0000-0000-0000-000000000001").toString("base64url")}`,
+      ],
       ["a cursor this server did not issue", `?cursor=${Buffer.from("x|y").toString("base64url")}`],
     ])("answers 400 for %s", async (_case, query) => {
       const response = await api.request(`/projects${query}`, { token: owner.token });
