@@ -582,6 +582,32 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
       expect(await eventsOf(projectA)).toHaveLength(before);
     });
 
+    it("replays a creation sent with uppercase ids, the same record as lowercase", async () => {
+      const planId = uuid();
+      const upper = projectA.toUpperCase();
+      const body = { planId: planId.toUpperCase(), title: "Upper" };
+      const first = createPlanOutputSchema.parse(
+        await (await call(owner.token, `/projects/${upper}/plans`, { body })).json(),
+      );
+      expect(first).toMatchObject({ created: true, plan: { id: planId, projectId: projectA } });
+      const before = (await eventsOf(projectA)).length;
+      for (const [projectId, token] of [
+        [upper, owner.token],
+        [projectA, owner.token],
+      ] as const) {
+        const again = await call(token, `/projects/${projectId}/plans`, { body });
+        expect(again.status).toBe(200);
+        expect(createPlanOutputSchema.parse(await again.json())).toMatchObject({
+          created: false,
+          plan: { id: planId, key: first.plan.key },
+        });
+      }
+      // A Project key bound to the Project accepts its id in either case.
+      const byKey = await call(keyA.secret, `/projects/${upper}/plans/${planId.toUpperCase()}`);
+      expect(byKey.status).toBe(200);
+      expect(await eventsOf(projectA)).toHaveLength(before);
+    });
+
     it("answers 409 for different input or another principal, 404 from another Project", async () => {
       const planId = uuid();
       await call(owner.token, `/projects/${projectA}/plans`, { body: { planId, title: "One" } });
