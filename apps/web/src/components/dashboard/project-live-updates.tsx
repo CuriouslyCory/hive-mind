@@ -147,19 +147,23 @@ export function ProjectLivePage({
   projectId,
   cursor,
   scope,
+  asOf,
 }: {
   projectId: string;
   /** The fence cursor the server issued with this render's snapshot (ADR-0010). */
   cursor: string;
   /** What the page shows, which decides the Events that refresh it. */
   scope: LiveUpdateScope;
+  /** The database time of this render's snapshot. */
+  asOf: Date;
 }) {
   const registry = useContext(LiveRegistryContext);
   const id = useId();
+  const asOfMs = asOf.getTime();
 
   useEffect(() => {
-    registry?.register(id, { projectId, cursor, scope });
-  }, [registry, id, projectId, cursor, scope]);
+    registry?.register(id, { projectId, cursor, scope, asOf: asOfMs });
+  }, [registry, id, projectId, cursor, scope, asOfMs]);
 
   useEffect(() => {
     if (!registry) return;
@@ -172,7 +176,8 @@ export function ProjectLivePage({
 /**
  * The Project's protected content. When the stream reports lost access
  * (an `access_lost` frame, or HTTP 401 or 404 when connecting), it is
- * replaced by a message until the User navigates elsewhere.
+ * replaced by a message until the User navigates elsewhere. The message
+ * stays while the layout is hidden and when Back shows it again.
  */
 export function ProjectLiveContent({ children }: { children: ReactNode }) {
   const snapshot = useProjectLiveSnapshot();

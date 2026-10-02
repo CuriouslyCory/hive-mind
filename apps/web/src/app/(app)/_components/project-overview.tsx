@@ -24,6 +24,7 @@ export function ProjectOverviewView({
       <ProjectLivePage
         projectId={project.id}
         cursor={overview.feedCursor}
+        asOf={asOf}
         scope={{ kind: "project" }}
       />
       <ProjectHeading project={project} asOf={asOf} />

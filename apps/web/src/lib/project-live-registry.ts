@@ -31,6 +31,14 @@ import type {
 // and the router runs that refresh after any navigation in progress, so it
 // re-reads the page on screen. A stream behind F only repeats Events the
 // page already has: duplicates, which are harmless.
+//
+// Hidden layouts. With `cacheComponents`, Next keeps a layout the User leaves
+// hidden in a React Activity instead of unmounting it, and shows it again,
+// with the pages it rendered, on Back. Hiding detaches the registry, which
+// closes the stream. Lost access is kept across that, so the hidden layout
+// keeps showing the message rather than the pre-loss content. A stream
+// started after a detach refreshes the restored page at once, since it may
+// be any age.
 
 /** What a rendered Project page registers: its snapshot's fence and what it shows. */
 export interface LivePage {
@@ -38,11 +46,15 @@ export interface LivePage {
   /** The feed cursor of the render's snapshot fence (`ProjectPageBase.feedCursor`). */
   cursor: string;
   scope: LiveUpdateScope;
+  /** When the render's snapshot was read (epoch ms), if the page knows. */
+  asOf?: number;
 }
 
 export interface LiveStreamRequest {
   projectId: string;
   initialCursor: string;
+  /** When the page on screen was read (epoch ms); null if unknown. */
+  lastSyncAt: number | null;
   shouldRefresh: (event: StreamEvent) => boolean;
 }
 
@@ -52,15 +64,16 @@ export interface ProjectLiveRegistry {
   unregister(id: string): void;
   /** The provider is mounted and visible: a registered page may start the stream. */
   attach(): void;
-  /** The provider is unmounted or hidden: closes the stream. */
+  /** The provider is unmounted or hidden: closes the stream. Lost access is kept. */
   detach(): void;
   /**
-   * The current pathname. After lost access, the stream stays stopped until
-   * the pathname changes (a fresh navigation); then the next page starts a
-   * new stream from its own fence.
+   * The current pathname. After lost access, no stream runs until the
+   * pathname changes (a fresh navigation) or a page registers a newer fence
+   * (a fresh server render); then that page starts a new stream from its own
+   * fence.
    */
   navigated(pathname: string): void;
-  /** The stream's state, or null when no stream runs. */
+  /** The stream's state, the lost-access state, or null when no stream runs. */
   getSnapshot(): ProjectEventStreamSnapshot | null;
   subscribe(listener: () => void): () => void;
 }
@@ -75,6 +88,24 @@ export function streamIsPastFence(
   const page = decodeFeedCursor(pageCursor, projectId);
   if (!stream.ok || !page.ok) return true;
   return compareFeedPositions(stream.position, page.position) > 0;
+}
+
+/** Whether `cursor` is a later fence than `than` (or, if either is unreadable, a different one). */
+function isNewerFence(cursor: string, than: string, projectId: string): boolean {
+  const next = decodeFeedCursor(cursor, projectId);
+  const previous = decodeFeedCursor(than, projectId);
+  if (!next.ok || !previous.ok) return cursor !== than;
+  return compareFeedPositions(next.position, previous.position) > 0;
+}
+
+/** Where access was lost; kept until a fresh navigation or render. */
+interface LostAccess {
+  pathname: string;
+  projectId: string;
+  /** The fence of the page on screen when access was lost. */
+  cursor: string;
+  /** The stream's access-lost snapshot. */
+  snapshot: ProjectEventStreamSnapshot;
 }
 
 export function createProjectLiveRegistry(options: {
@@ -93,8 +124,9 @@ export function createProjectLiveRegistry(options: {
   let filterKey: string | null = null;
 
   let pathname: string | null = null;
-  // The pathname when access was lost; null while access is not lost.
-  let lostAt: string | null = null;
+  let lost: LostAccess | null = null;
+  // Set by detach(): the next stream's page may have been hidden for a while.
+  let restored = false;
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -116,13 +148,24 @@ export function createProjectLiveRegistry(options: {
     streamStartCursor = null;
     filterScope = null;
     filterKey = null;
-    lostAt = null;
+    notify();
+  };
+
+  const clearLost = () => {
+    lost = null;
+    closeStream();
     notify();
   };
 
   const onStreamChange = () => {
-    if (stream?.getSnapshot().status.kind === "access-lost" && lostAt === null) {
-      lostAt = pathname ?? "";
+    const snapshot = stream?.getSnapshot();
+    if (snapshot?.status.kind === "access-lost" && lost === null && streamProjectId !== null) {
+      lost = {
+        pathname: pathname ?? "",
+        projectId: streamProjectId,
+        cursor: activePage()?.cursor ?? streamStartCursor ?? "",
+        snapshot,
+      };
     }
     notify();
   };
@@ -132,14 +175,20 @@ export function createProjectLiveRegistry(options: {
     filterKey = liveUpdateScopeKey(page.scope);
     streamProjectId = page.projectId;
     streamStartCursor = page.cursor;
+    const reconcile = restored;
+    restored = false;
     const created = options.createStream({
       projectId: page.projectId,
       initialCursor: page.cursor,
+      lastSyncAt: page.asOf ?? null,
       shouldRefresh: (event) => (filterScope ? shouldRefreshFor(filterScope, event) : true),
     });
     stream = created;
     stopListening = created.subscribe(onStreamChange);
     created.start();
+    // A page shown again from a hidden layout may be any age, and lease and
+    // liveness displays change with time alone.
+    if (reconcile) created.invalidate();
     notify();
   };
 
@@ -148,6 +197,16 @@ export function createProjectLiveRegistry(options: {
     const page = activePage();
     // Between pages (a loading page) the stream keeps its last filter.
     if (!page) return;
+    if (lost) {
+      // Only a fresh server render, which authorized the read again, ends it.
+      if (
+        page.projectId === lost.projectId &&
+        !isNewerFence(page.cursor, lost.cursor, page.projectId)
+      ) {
+        return;
+      }
+      clearLost();
+    }
     if (stream && streamProjectId !== page.projectId) closeStream();
     if (stream) {
       const status = stream.getSnapshot().status.kind;
@@ -163,6 +222,8 @@ export function createProjectLiveRegistry(options: {
       startStream(page);
       return;
     }
+    // A stream whose resume cursor was rejected waits for a fresh fence.
+    if (stream.adoptFence(page.cursor)) streamStartCursor = page.cursor;
     const key = liveUpdateScopeKey(page.scope);
     filterScope = page.scope;
     if (key === filterKey) return;
@@ -186,17 +247,18 @@ export function createProjectLiveRegistry(options: {
       sync();
     },
     detach() {
+      if (attached) restored = true;
       attached = false;
       closeStream();
     },
     navigated(next) {
       pathname = next;
-      if (lostAt !== null && next !== lostAt) {
-        closeStream();
+      if (lost !== null && next !== lost.pathname) {
+        clearLost();
         sync();
       }
     },
-    getSnapshot: () => stream?.getSnapshot() ?? null,
+    getSnapshot: () => lost?.snapshot ?? stream?.getSnapshot() ?? null,
     subscribe(listener) {
       listeners.add(listener);
       return () => {

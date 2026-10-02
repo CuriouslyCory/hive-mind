@@ -24,6 +24,7 @@ export function SessionDetailView({
       <ProjectLivePage
         projectId={project.id}
         cursor={detail.feedCursor}
+        asOf={asOf}
         scope={{ kind: "session", sessionId: session.id, taskId: session.attachedTask?.id ?? null }}
       />
       <ProjectHeading project={project} asOf={asOf} linked />

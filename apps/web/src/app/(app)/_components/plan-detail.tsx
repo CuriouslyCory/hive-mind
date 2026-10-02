@@ -52,6 +52,7 @@ export function PlanDetailView({
       <ProjectLivePage
         projectId={project.id}
         cursor={detail.feedCursor}
+        asOf={asOf}
         scope={planScope(detail)}
       />
       <ProjectHeading project={project} asOf={asOf} linked />
