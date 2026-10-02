@@ -9,6 +9,7 @@ import { createOnce } from "./creation.ts";
 import { insertEvent } from "./event.ts";
 import { creationFingerprint } from "./fingerprint.ts";
 import type { Db } from "./index.ts";
+import { releaseClaims } from "./lifecycle.ts";
 import { effectiveSessionStatus, isClaimUsable, type SessionLiveness } from "./liveness.ts";
 import {
   type Actor,
@@ -485,34 +486,15 @@ export async function setPlanStatus(
 
     let releasedClaimCount = 0;
     if (input.status === "abandoned") {
-      // Under the lock no claim can change between this read and the update.
-      const released = await tx
-        .select({ id: task.id, formerHolder: task.claimedBySessionId })
-        .from(task)
-        .where(and(eq(task.planId, row.id), isNotNull(task.claimedBySessionId)));
-      if (released.length > 0) {
-        await tx
-          .update(task)
-          .set({ claimedBySessionId: null, claimedAt: null, leaseExpiresAt: null, updatedAt: now })
-          .where(
-            inArray(
-              task.id,
-              released.map((claim) => claim.id),
-            ),
-          );
-      }
-      for (const claim of released) {
-        await insertEvent(tx, {
-          projectId: input.projectId,
-          type: "task.released",
-          payload: { reason: "plan_abandoned" },
-          actor: actorOf(input),
-          planId: row.id,
-          taskId: claim.id,
-          sessionId: claim.formerHolder,
-          now,
-        });
-      }
+      // Already-expired claims are recorded as lease expiries by the system,
+      // like every other release path; live ones as released by the abandon.
+      const released = await releaseClaims(tx, {
+        projectId: input.projectId,
+        now,
+        where: and(eq(task.planId, row.id), isNotNull(task.claimedBySessionId)) as SQL,
+        reason: "plan_abandoned",
+        actor: actorOf(input),
+      });
       releasedClaimCount = released.length;
     }
     return { status: "ok", plan: await viewOf(tx, updated), changed: true, releasedClaimCount };

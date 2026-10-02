@@ -883,7 +883,7 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
       expect(released).toEqual(
         expect.arrayContaining([
           ["task.released", usable.id, holder.id, { reason: "plan_abandoned" }],
-          ["task.released", expired.id, lapsed.id, { reason: "plan_abandoned" }],
+          ["task.released", expired.id, lapsed.id, { reason: "lease_expired" }],
         ]),
       );
       // The holder's history shows the release that affected it.
