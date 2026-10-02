@@ -22,8 +22,11 @@ export type LiveUpdateScope =
       taskIds?: readonly string[];
       sessionIds?: readonly string[];
     }
-  /** A Session page, with the Plan and Task it is attached to, if any. */
-  | { kind: "session"; sessionId: string; planId?: string | null; taskId?: string | null };
+  /**
+   * A Session page, with the Task it is attached to, if any. It shows only
+   * its Plan's key, which never changes, so `plan.*` Events do not refresh it.
+   */
+  | { kind: "session"; sessionId: string; taskId?: string | null };
 
 const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set(EVENT_TYPES);
 
@@ -66,16 +69,15 @@ export function affectsPlan(
 
 /**
  * A Session page: Events that affected the Session or that it acted
- * through, and changes to the Plan or Task it is attached to.
+ * through, and changes to the Task it is attached to.
  */
 export function affectsSession(
   event: StreamEvent,
-  scope: { sessionId: string; planId?: string | null; taskId?: string | null },
+  scope: { sessionId: string; taskId?: string | null },
 ): boolean {
   if (!isKnownEventType(event.type)) return true;
   if (event.sessionId === scope.sessionId || event.actorSessionId === scope.sessionId) return true;
-  if (scope.taskId && event.taskId === scope.taskId) return true;
-  return Boolean(scope.planId) && event.planId === scope.planId && event.type.startsWith("plan.");
+  return Boolean(scope.taskId) && event.taskId === scope.taskId;
 }
 
 /** The filter for `scope`. */
@@ -111,11 +113,6 @@ export function liveUpdateScopeKey(scope: LiveUpdateScope): string {
         sortedIds(scope.sessionIds),
       ]);
     case "session":
-      return JSON.stringify([
-        "session",
-        scope.sessionId,
-        scope.planId ?? null,
-        scope.taskId ?? null,
-      ]);
+      return JSON.stringify(["session", scope.sessionId, scope.taskId ?? null]);
   }
 }

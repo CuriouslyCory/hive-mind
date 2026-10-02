@@ -260,7 +260,22 @@ describe("createProjectLiveRegistry", () => {
     expect(current().request.initialCursor).toBe(cursorAt(100, 0));
   });
 
-  it("keeps lost access while hidden and shown again, until a fresh render or navigation", () => {
+  it("keeps lost access when a refresh started before the loss commits a newer fence", () => {
+    const { registry, streams, current } = setup();
+    registry.navigated("/projects/p");
+    registry.attach();
+    registry.register("overview", overview(100));
+    // A router.refresh() starts here, before membership is revoked, so its
+    // render is authorized against the pre-revocation snapshot.
+    current().setStatus({ kind: "access-lost", code: "NOT_FOUND" });
+
+    // The refresh commits after the loss, with a fence later than the lost one.
+    registry.register("overview", overview(120));
+    expect(streams).toHaveLength(1);
+    expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
+  });
+
+  it("keeps lost access while hidden and shown again, until a fresh navigation", () => {
     const { registry, streams, current } = setup();
     registry.navigated("/projects/p");
     registry.attach();
@@ -282,14 +297,18 @@ describe("createProjectLiveRegistry", () => {
     registry.attach();
     expect(streams).toHaveLength(1);
     expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
-    // An older render does not end it either.
+    // Neither an older nor a newer render ends it.
     registry.register("overview", overview(99));
-    expect(streams).toHaveLength(1);
-
-    // A fresh server render authorized the read again.
     registry.register("overview", overview(120));
+    expect(streams).toHaveLength(1);
+    expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
+
+    // A fresh navigation does.
+    registry.unregister("overview");
+    registry.navigated("/projects/p/plans/P-1");
+    registry.register("plan", planPage(130));
     expect(streams).toHaveLength(2);
-    expect(current().request.initialCursor).toBe(cursorAt(120, 0));
+    expect(current().request.initialCursor).toBe(cursorAt(130, 0));
     expect(registry.getSnapshot()?.status.kind).toBe("connecting");
   });
 

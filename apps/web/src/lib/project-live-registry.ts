@@ -39,6 +39,11 @@ import type {
 // keeps showing the message rather than the pre-loss content. A stream
 // started after a detach refreshes the restored page at once, since it may
 // be any age.
+//
+// Lost access ends only on a fresh navigation (a new pathname). A newer
+// fence does not end it: a `router.refresh()` that started before the loss
+// can commit after it, with a fence later than the lost page's, yet its
+// render was authorized against the pre-loss state.
 
 /** What a rendered Project page registers: its snapshot's fence and what it shows. */
 export interface LivePage {
@@ -68,9 +73,8 @@ export interface ProjectLiveRegistry {
   detach(): void;
   /**
    * The current pathname. After lost access, no stream runs until the
-   * pathname changes (a fresh navigation) or a page registers a newer fence
-   * (a fresh server render); then that page starts a new stream from its own
-   * fence.
+   * pathname changes (a fresh navigation); then the page on screen starts a
+   * new stream from its own fence.
    */
   navigated(pathname: string): void;
   /** The stream's state, the lost-access state, or null when no stream runs. */
@@ -90,20 +94,9 @@ export function streamIsPastFence(
   return compareFeedPositions(stream.position, page.position) > 0;
 }
 
-/** Whether `cursor` is a later fence than `than` (or, if either is unreadable, a different one). */
-function isNewerFence(cursor: string, than: string, projectId: string): boolean {
-  const next = decodeFeedCursor(cursor, projectId);
-  const previous = decodeFeedCursor(than, projectId);
-  if (!next.ok || !previous.ok) return cursor !== than;
-  return compareFeedPositions(next.position, previous.position) > 0;
-}
-
-/** Where access was lost; kept until a fresh navigation or render. */
+/** Where access was lost; kept until a fresh navigation. */
 interface LostAccess {
   pathname: string;
-  projectId: string;
-  /** The fence of the page on screen when access was lost. */
-  cursor: string;
   /** The stream's access-lost snapshot. */
   snapshot: ProjectEventStreamSnapshot;
 }
@@ -159,13 +152,8 @@ export function createProjectLiveRegistry(options: {
 
   const onStreamChange = () => {
     const snapshot = stream?.getSnapshot();
-    if (snapshot?.status.kind === "access-lost" && lost === null && streamProjectId !== null) {
-      lost = {
-        pathname: pathname ?? "",
-        projectId: streamProjectId,
-        cursor: activePage()?.cursor ?? streamStartCursor ?? "",
-        snapshot,
-      };
+    if (snapshot?.status.kind === "access-lost" && lost === null) {
+      lost = { pathname: pathname ?? "", snapshot };
     }
     notify();
   };
@@ -197,16 +185,8 @@ export function createProjectLiveRegistry(options: {
     const page = activePage();
     // Between pages (a loading page) the stream keeps its last filter.
     if (!page) return;
-    if (lost) {
-      // Only a fresh server render, which authorized the read again, ends it.
-      if (
-        page.projectId === lost.projectId &&
-        !isNewerFence(page.cursor, lost.cursor, page.projectId)
-      ) {
-        return;
-      }
-      clearLost();
-    }
+    // Only a fresh navigation ends lost access (see `navigated`).
+    if (lost) return;
     if (stream && streamProjectId !== page.projectId) closeStream();
     if (stream) {
       const status = stream.getSnapshot().status.kind;

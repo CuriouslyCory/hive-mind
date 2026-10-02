@@ -54,7 +54,7 @@ The subscription reconciles (refreshes once and reconnects if it is not connecte
 
 Reconnects send the last processed cursor as `Last-Event-ID`. After a planned end (the server's 50-second rotation) of a connection that delivered a frame and stayed open at least 5 seconds, the browser reconnects at once. After a failure, a quick or truncated end, or an `error` frame, it waits with jittered exponential backoff from 1 second up to 30 seconds.
 
-An `access_lost` frame, or a 401, 403 or 404 when (re)connecting, is terminal: the provider replaces the Project's content with a message and stops retrying until the User navigates to another pathname or a page renders a newer fence from a fresh server read. The message stays while the layout is hidden and when Back shows it again.
+An `access_lost` frame, or a 401, 403 or 404 when (re)connecting, is terminal: the provider replaces the Project's content with a message and stops retrying until the User navigates to another pathname. A page that registers a newer fence on the same pathname does not end it: a `router.refresh()` that started before the loss can commit after it, and its render was authorized before the loss. The message stays while the layout is hidden and when Back shows it again.
 
 A 400 means the server rejected the resume cursor. That can happen to a cursor it issued, for example after a Postgres crash when the cursor names a transaction ID the server has not reached again. The subscription then resnapshots once: it refreshes the page, resumes from the fence of that fresh render, and stops with an error if that fence is rejected too or the refresh brings none. It never resumes from the server's current position without a fresh snapshot, which could skip Events.
 

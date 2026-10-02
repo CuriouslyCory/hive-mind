@@ -863,13 +863,14 @@ describe("live update filters", () => {
   });
 
   it("refreshes a Session page for Events it acted through or that affected it", () => {
-    const scope = { sessionId, planId, taskId };
+    const scope = { sessionId, taskId };
     expect(affectsSession(asStream({ type: "session.updated", sessionId }), scope)).toBe(true);
     expect(affectsSession(asStream({ type: "task.added", actorSessionId: sessionId }), scope)).toBe(
       true,
     );
     expect(affectsSession(asStream({ type: "task.blocked", taskId }), scope)).toBe(true);
-    expect(affectsSession(asStream({ type: "plan.status_changed", planId }), scope)).toBe(true);
+    // It shows only its Plan's key, which never changes.
+    expect(affectsSession(asStream({ type: "plan.status_changed", planId }), scope)).toBe(false);
     expect(affectsSession(asStream({ type: "task.added", planId }), scope)).toBe(false);
     expect(
       affectsSession(asStream({ type: "session.started", sessionId: randomUUID() }), scope),
