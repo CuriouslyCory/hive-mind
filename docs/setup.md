@@ -174,10 +174,10 @@ The route accepts a request only with `Authorization: Bearer <CRON_SECRET>`, whi
 
 Every answer is `cache-control: no-store`. Until the secret is set the route refuses every call, and expiry still works at request time (see "Cleanup timing").
 
-- [ ] Generate a secret and add it to Production only. It must be at least 16 printable ASCII characters without spaces:
+- [ ] Generate a secret and add it to Production only. It must be at least 16 printable ASCII characters with no spaces or newlines; `openssl rand -hex 32` gives 64 hex characters, and `tr` removes the newline it ends with:
 
   ```bash
-  openssl rand -hex 32 | vercel env add CRON_SECRET production --sensitive
+  openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production --sensitive
   ```
 
 - [ ] Redeploy Production, since variable changes apply only to new deployments.
