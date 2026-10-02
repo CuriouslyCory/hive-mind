@@ -247,6 +247,18 @@ export const eventFrameSchema = z.strictObject({
 });
 
 /**
+ * The first frame of every stream, sent exactly once when it opens. Its SSE
+ * `id` is the cursor the stream starts from: the one the client presented,
+ * or, for a stream that tails without one, the fence `(H, 0)` read when it
+ * opened. A client that disconnects before its first Event therefore still
+ * has a resume point that misses nothing written after the stream opened.
+ * It moves no cursor past any Event.
+ */
+export const readyFrameSchema = z.strictObject({
+  type: z.literal("ready"),
+});
+
+/**
  * Sent every `EVENT_STREAM_HEARTBEAT_INTERVAL_MS`. It has no SSE `id` and
  * moves no cursor. `withheld` is true while newer Events exist that an older
  * open transaction holds back: the feed waits for it rather than risk
@@ -271,17 +283,20 @@ export const accessLostFrameSchema = z.strictObject({
 });
 
 /**
- * One frame of the Event stream. Only `event` frames carry an SSE `id`.
+ * One frame of the Event stream. Only `ready` and `event` frames carry an
+ * SSE `id`.
  * Later versions may add frame types; a client ignores a type it does not
  * know, and treats an `event` frame whose Event type it does not know as a
  * change to the whole Project.
  */
 export const eventStreamFrameSchema = z.discriminatedUnion("type", [
+  readyFrameSchema,
   eventFrameSchema,
   heartbeatFrameSchema,
   accessLostFrameSchema,
 ]);
 
+export type ReadyFrame = z.infer<typeof readyFrameSchema>;
 export type EventFrame = z.infer<typeof eventFrameSchema>;
 export type HeartbeatFrame = z.infer<typeof heartbeatFrameSchema>;
 export type AccessLostFrame = z.infer<typeof accessLostFrameSchema>;

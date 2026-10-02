@@ -1,5 +1,7 @@
-import { decodeFeedCursor, type EventStreamFrame, type FeedPosition } from "@hivemind/contract";
+import { decodeFeedCursor, type FeedPosition } from "@hivemind/contract";
 import { type Db, type EventFilter, listEvents, projectHasSession } from "@hivemind/db";
+import { openEventStream } from "../realtime/event-stream";
+import { recheckStreamAccess } from "../realtime/stream-access";
 import { apiError } from "./authorize";
 import { authorizeProject, sessionNotFound } from "./coordination-auth";
 import { toEventDto } from "./coordination-dto";
@@ -61,23 +63,40 @@ export function streamStart(
   const presented = lastEventId ?? cursor;
   if (presented === undefined) return null;
   const decoded = decodeFeedCursor(presented, projectId);
-  if (!decoded.ok)
-    throw apiError("BAD_REQUEST", "The cursor is not one this Project's Event stream issued.");
+  if (!decoded.ok) throw invalidStreamCursor();
   return decoded.position;
 }
 
 /**
- * `GET /projects/{id}/events/stream`. PLACEHOLDER until the stream engine of
- * issue #11 replaces it: it checks access and the cursor before the stream
- * opens, as the engine will, then ends the stream without sending a frame.
+ * `GET /projects/{id}/events/stream`, and the dashboard's cookie route, which
+ * mounts this same procedure (ADR-0010). Access, the cursor's shape and
+ * whether the feed could have issued it are all checked here, before the
+ * generator is returned, so they fail as 401, 404 and 400 rather than inside
+ * an open 200 stream. The engine (`server/realtime/event-stream.ts`) then
+ * checks access again before every batch.
  */
 export const streamProjectEvents = api.projects.events.stream.handler(
-  async ({ input, lastEventId, context: { principal, db } }) => {
+  async ({ input, lastEventId, context: { principal, db, eventStream } }) => {
     await authorizeProject(db, principal, input.id, ["event:read"]);
-    streamStart(input.id, lastEventId, input.cursor);
-    return (async function* (): AsyncGenerator<EventStreamFrame> {})();
+    const start = streamStart(input.id, lastEventId, input.cursor);
+    if (!eventStream) {
+      throw new Error("The Event stream is served only through serveEventStream (router.ts).");
+    }
+    const frames = await openEventStream({
+      db,
+      projectId: input.id,
+      start,
+      lifecycle: eventStream,
+      authorize: (executor) => recheckStreamAccess(executor, principal, input.id),
+    });
+    if (!frames) throw invalidStreamCursor();
+    return frames;
   },
 );
+
+function invalidStreamCursor() {
+  return apiError("BAD_REQUEST", "The cursor is not one this Project's Event stream issued.");
+}
 
 /**
  * `GET /projects/{id}/sessions/{sessionId}/events`: Events the Session acted
