@@ -146,6 +146,34 @@ describeDb("sweepCoordination", () => {
     ).toMatchObject({ status: "ok", changed: true });
   });
 
+  it("releases at most sessionBatch claims per Project transaction in total", async () => {
+    const { project, principal, plan, task } = await setupProject(testDb.db);
+    const taskIds = [task.id];
+    for (let index = 1; index < 9; index++) {
+      taskIds.push((await insertTask(testDb.db, project.id, plan.id, principal)).id);
+    }
+    // Three abandoned Sessions holding three expired claims each.
+    for (let index = 0; index < 3; index++) {
+      const session = await sessionAged(testDb.db, project.id, principal, 31 * MINUTE);
+      for (const taskId of taskIds.slice(index * 3, index * 3 + 3)) {
+        await setClaim(testDb.db, taskId, session.id, -MINUTE);
+      }
+    }
+    const runs = [];
+    for (let run = 0; run < 5; run++) {
+      const result = await sweepCoordination(testDb.db, options({ sessionBatch: 4 }));
+      runs.push(result.claimsReleased);
+      expect(result.claimsReleased).toBeLessThanOrEqual(4);
+      if (!result.moreWork) break;
+    }
+    expect(runs.reduce((sum, count) => sum + count, 0)).toBe(9);
+    for (const id of taskIds) expect((await taskRow(testDb.db, id)).claimedBySessionId).toBeNull();
+    const released = (await eventsOf(testDb.db, project.id)).filter(
+      (e) => e.type === "task.released",
+    );
+    expect(released).toHaveLength(9);
+  });
+
   it("leaves live Sessions and unexpired claims alone", async () => {
     const { project, principal, task } = await setupProject(testDb.db);
     const live = await sessionAged(testDb.db, project.id, principal, 4 * MINUTE);
