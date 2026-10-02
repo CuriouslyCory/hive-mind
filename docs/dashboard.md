@@ -38,7 +38,7 @@ One subscription runs per open Project (`createProjectEventStream` in `apps/web/
 
 The browser never renders Event content from the stream. An Event is only an invalidation:
 
-1. **Filter.** `apps/web/src/lib/project-event-filters.ts` decides whether the Event affects the current page. The overview counts every Event. A Plan page counts Events of the Plan, its Tasks and the Sessions it shows. A Session page counts Events that affected the Session or that it acted through, Events of its Task, and `plan.*` Events of its Plan. An Event type this build does not know refreshes every page.
+1. **Filter.** `apps/web/src/lib/project-event-filters.ts` decides whether the Event affects the current page. The overview counts every Event. A Plan page counts Events of the Plan, its Tasks and the Sessions it shows. A Session page counts Events that affected the Session or that it acted through, and Events of its Task. It shows only its Plan's key, which never changes, so `plan.*` Events do not refresh it. An Event type this build does not know refreshes every page.
 2. **Deduplicate.** The ids of the last 2048 Events are remembered, and a redelivered Event is dropped.
 3. **Record, then advance.** An accepted Event marks the page dirty, and only then does the cursor move to the Event's position. The cursor never moves backwards.
 4. **Refresh.** Dirty marks are coalesced into `router.refresh()`, which re-reads the page from the server through the same authorization and snapshot as the initial render. At most one refresh runs at a time. A dirty-generation counter records marks that arrive while a refresh is running, and they cause exactly one more refresh after it. A refresh that has not finished after 20 seconds is treated as done.
@@ -49,11 +49,16 @@ The subscription reconciles (refreshes once and reconnects if it is not connecte
 
 - the tab becomes visible again (refreshes are deferred while it is hidden, and the 60-second refresh stops);
 - the browser comes back online (going offline closes the connection);
-- the first frame arrives on a new connection after a failure or after being offline.
+- the first frame arrives on a new connection after a failure or after being offline;
+- the Project layout is shown again after being hidden (Next keeps a layout the User leaves in a hidden React Activity, and Back shows it with the page it rendered). Hiding the layout closes the subscription; showing it starts one from the page's fence and refreshes the page at once.
 
 Reconnects send the last processed cursor as `Last-Event-ID`. After a planned end (the server's 50-second rotation) of a connection that delivered a frame and stayed open at least 5 seconds, the browser reconnects at once. After a failure, a quick or truncated end, or an `error` frame, it waits with jittered exponential backoff from 1 second up to 30 seconds.
 
-An `access_lost` frame, or a 401, 403 or 404 when (re)connecting, is terminal: the provider replaces the Project's content with a message and stops retrying until the User navigates again. A 400 also stops the subscription. The freshness line (`apps/web/src/components/dashboard/live-status.tsx`) shows the state in words: connecting, live, updating, delayed, reconnecting, offline, stopped, or access ended, with the time of the last successful read where it applies.
+An `access_lost` frame, or a 401, 403 or 404 when (re)connecting, is terminal: the provider replaces the Project's content with a message and stops retrying until the User navigates to another pathname or a page renders a newer fence from a fresh server read. The message stays while the layout is hidden and when Back shows it again.
+
+A 400 means the server rejected the resume cursor. That can happen to a cursor it issued, for example after a Postgres crash when the cursor names a transaction ID the server has not reached again. The subscription then resnapshots once: it refreshes the page, resumes from the fence of that fresh render, and stops with an error if that fence is rejected too or the refresh brings none. It never resumes from the server's current position without a fresh snapshot, which could skip Events.
+
+The freshness line (`apps/web/src/components/dashboard/live-status.tsx`) shows the state in words: connecting, live, updating, delayed, reconnecting, offline, stopped, or access ended, with the time the data on screen was read where it applies: the page's snapshot time, then the end of each successful refresh. Only the state's words are in the `aria-live` region, so a refresh that changes only the time is not announced.
 
 ### The stream
 

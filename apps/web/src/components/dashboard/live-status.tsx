@@ -41,51 +41,67 @@ function SyncedAt({ at }: { at: number }) {
 
 /**
  * The freshness of the enclosing `ProjectLiveUpdates`, in words (never only
- * colour). `data-state` is for styling and tests. Screen readers hear
- * changes politely; the region renders (empty) before the first state so
- * that the first change is announced.
+ * colour). `data-state` is for styling and tests.
  */
 export function LiveStatus() {
-  const snapshot = useProjectLiveSnapshot();
-  const state = liveStatusState(snapshot);
-  const syncedAt = snapshot ? <SyncedAt at={snapshot.lastSyncAt} /> : null;
+  return <LiveStatusView snapshot={useProjectLiveSnapshot()} />;
+}
 
-  let text: ReactNode = null;
+/**
+ * `LiveStatus` for a given snapshot. Screen readers hear changes of state
+ * politely: only the state's words are in the live region, so the time of
+ * the last read, which changes with every refresh, is not announced. The
+ * region renders (empty) before the first state so that the first change is
+ * announced.
+ */
+export function LiveStatusView({ snapshot }: { snapshot: ProjectEventStreamSnapshot | null }) {
+  const state = liveStatusState(snapshot);
+  const lastSyncAt = snapshot?.lastSyncAt ?? null;
+
+  let words: ReactNode = null;
+  // Whether the state is qualified by when the data on screen was read.
+  let showsSyncedAt = false;
   switch (state) {
     case "idle":
       break;
     case "connecting":
-      text = "Connecting to live updates…";
+      words = "Connecting to live updates…";
       break;
     case "live":
-      // "Updating" flickers with every refresh, so it is not announced.
-      text = (
-        <>
-          Live
-          {snapshot?.refreshing && <span aria-hidden="true">. Updating…</span>}
-        </>
-      );
+      words = "Live";
       break;
     case "delayed":
-      text = <>Live, but updates are delayed by a long-running change. Updated at {syncedAt}.</>;
+      words = "Live, but updates are delayed by a long-running change.";
+      showsSyncedAt = true;
       break;
     case "reconnecting":
-      text = <>Reconnecting. Showing data from {syncedAt}.</>;
+      words = "Reconnecting.";
+      showsSyncedAt = true;
       break;
     case "offline":
-      text = <>Offline. Showing data from {syncedAt}.</>;
+      words = "Offline.";
+      showsSyncedAt = true;
       break;
     case "stopped":
-      text = <>Live updates stopped. Reload the page to resume. Showing data from {syncedAt}.</>;
+      words = "Live updates stopped. Reload the page to resume.";
+      showsSyncedAt = true;
       break;
     case "access-lost":
-      text = "Access to this Project ended.";
+      words = "Access to this Project ended.";
       break;
   }
 
   return (
-    <output aria-live="polite" className="live-status" data-state={state} data-testid="live-status">
-      {text}
-    </output>
+    <div className="live-status" data-state={state} data-testid="live-status">
+      <output aria-live="polite">{words}</output>
+      {/* "Updating" flickers with every refresh, so it is not announced. */}
+      {state === "live" && snapshot?.refreshing && <span aria-hidden="true">. Updating…</span>}
+      {showsSyncedAt && lastSyncAt !== null && (
+        <span data-testid="live-status-synced-at">
+          {state === "delayed" ? " Updated at " : " Showing data from "}
+          <SyncedAt at={lastSyncAt} />.
+        </span>
+      )}
+    </div>
   );
 }

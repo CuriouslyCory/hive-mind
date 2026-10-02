@@ -61,6 +61,9 @@ class FakeStream implements ProjectEventStream {
   started = false;
   closed = false;
   invalidations = 0;
+  /** Fences offered with `adoptFence`, and whether the next is adopted. */
+  offeredFences: string[] = [];
+  adoptsFence = false;
   private snapshot: ProjectEventStreamSnapshot;
   private readonly listeners = new Set<() => void>();
 
@@ -97,6 +100,10 @@ class FakeStream implements ProjectEventStream {
   reconcile() {}
   invalidate() {
     this.invalidations++;
+  }
+  adoptFence(cursor: string) {
+    this.offeredFences.push(cursor);
+    return this.adoptsFence;
   }
   close() {
     this.closed = true;
@@ -241,8 +248,8 @@ describe("createProjectLiveRegistry", () => {
     lost.setStatus({ kind: "access-lost", code: "NOT_FOUND" });
     expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
 
-    // A page registering again (or a re-render) does not retry.
-    registry.register("overview", overview(101));
+    // The same render registering again, or the same pathname, does not retry.
+    registry.register("overview", overview(100));
     registry.navigated("/projects/p");
     expect(streams).toHaveLength(1);
     expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
@@ -250,7 +257,57 @@ describe("createProjectLiveRegistry", () => {
     registry.navigated("/projects/p/plans/P-1");
     expect(lost.closed).toBe(true);
     expect(streams).toHaveLength(2);
-    expect(current().request.initialCursor).toBe(cursorAt(101, 0));
+    expect(current().request.initialCursor).toBe(cursorAt(100, 0));
+  });
+
+  it("keeps lost access while hidden and shown again, until a fresh render or navigation", () => {
+    const { registry, streams, current } = setup();
+    registry.navigated("/projects/p");
+    registry.attach();
+    registry.register("overview", overview(100));
+    current().setStatus({ kind: "access-lost", code: "NOT_FOUND" });
+    const lostSnapshot = registry.getSnapshot();
+    // The provider hides the protected content, unmounting the page.
+    registry.unregister("overview");
+
+    // The User leaves: the layout is hidden, not unmounted.
+    registry.detach();
+    expect(streams[0]?.closed).toBe(true);
+    expect(registry.getSnapshot()).toBe(lostSnapshot);
+    expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
+
+    // Back shows the hidden layout again, with the render it kept.
+    registry.register("overview", overview(100));
+    registry.navigated("/projects/p");
+    registry.attach();
+    expect(streams).toHaveLength(1);
+    expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
+    // An older render does not end it either.
+    registry.register("overview", overview(99));
+    expect(streams).toHaveLength(1);
+
+    // A fresh server render authorized the read again.
+    registry.register("overview", overview(120));
+    expect(streams).toHaveLength(2);
+    expect(current().request.initialCursor).toBe(cursorAt(120, 0));
+    expect(registry.getSnapshot()?.status.kind).toBe("connecting");
+  });
+
+  it("ends lost access kept while hidden when the layout is shown at another pathname", () => {
+    const { registry, streams, current } = setup();
+    registry.navigated("/projects/p");
+    registry.attach();
+    registry.register("overview", overview(100));
+    current().setStatus({ kind: "access-lost", code: "UNAUTHORIZED" });
+    registry.unregister("overview");
+    registry.detach();
+
+    registry.navigated("/projects/p/plans/PLAN-1");
+    expect(registry.getSnapshot()).toBeNull();
+    registry.attach();
+    registry.register("plan", planPage(130));
+    expect(streams).toHaveLength(2);
+    expect(current().request.initialCursor).toBe(cursorAt(130, 0));
   });
 
   it("clears the stream when access was lost and no page is registered, then waits for one", () => {
@@ -301,6 +358,47 @@ describe("createProjectLiveRegistry", () => {
     registry.attach();
     expect(streams).toHaveLength(2);
     expect(streams[1]?.request.initialCursor).toBe(cursorAt(106, 0));
+  });
+
+  it("refreshes a page shown again after the layout was hidden, and dates it from its snapshot", () => {
+    const { registry, streams } = setup();
+    registry.attach();
+    registry.register("overview", { ...overview(100), asOf: 1_000 });
+    expect(streams[0]?.request.lastSyncAt).toBe(1_000);
+    // A freshly rendered page is not refreshed again.
+    expect(streams[0]?.invalidations).toBe(0);
+
+    registry.detach();
+    registry.attach();
+    expect(streams).toHaveLength(2);
+    expect(streams[1]?.started).toBe(true);
+    expect(streams[1]?.invalidations).toBe(1);
+    expect(streams[1]?.request.lastSyncAt).toBe(1_000);
+
+    // A page that does not know its snapshot time claims none.
+    registry.register("plan", planPage(101));
+    registry.unregister("overview");
+    registry.register("other", overview(1, OTHER_PROJECT));
+    expect(streams[2]?.request.lastSyncAt).toBeNull();
+    expect(streams[2]?.invalidations).toBe(0);
+  });
+
+  it("offers a refreshed render's fence to the stream, which restarts from an adopted one only", () => {
+    const { registry, streams, current } = setup();
+    registry.attach();
+    registry.register("overview", overview(100));
+    const stream = current();
+    // The server rejected the resume cursor; the stream awaits a fresh fence.
+    stream.setStatus({ kind: "reconnecting", attempt: 0, nextAttemptAt: null });
+    stream.adoptsFence = true;
+    registry.register("overview", overview(90));
+    expect(stream.offeredFences).toEqual([cursorAt(90, 0)]);
+
+    // The adopted fence is rejected too: the stream stops, and the same
+    // render does not start another.
+    stream.setStatus({ kind: "error", reason: "bad-request" });
+    registry.register("overview", overview(90));
+    expect(streams).toHaveLength(1);
   });
 
   it("closes the old Project's stream when a page of another Project registers", () => {

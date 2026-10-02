@@ -526,14 +526,86 @@ describe("createProjectEventStream", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("stops with an error on HTTP 400 rather than jumping to the latest Event", async () => {
-    const { server, stream } = setup();
-    server.responders.push(() => new Response('{"code":"BAD_REQUEST"}', { status: 400 }));
+  const badRequest = () => new Response('{"code":"BAD_REQUEST"}', { status: 400 });
+
+  it("on HTTP 400 refreshes the page once and resumes from its fresh fence, never from the latest Event", async () => {
+    const { server, refresh, finishRefresh, stream } = setup();
+    server.responders.push(badRequest);
     stream.start();
+    await flush();
+    expect(stream.getSnapshot().status).toMatchObject({ kind: "reconnecting" });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // It waits for the fresh render rather than reconnecting without a cursor.
+    await advance(30_000);
+    expect(server.connections).toHaveLength(1);
+    // The rejected cursor itself is not a fresh fence.
+    expect(stream.adoptFence(FENCE)).toBe(false);
+
+    // The refreshed page registers the fence of its new snapshot.
+    const fresh = cursorAt(90, 0);
+    expect(stream.adoptFence(fresh)).toBe(true);
+    await flush();
+    expect(server.connections).toHaveLength(2);
+    expect(server.last.lastEventId).toBe(fresh);
+    expect(stream.getSnapshot().cursor).toBe(fresh);
+    server.last.send(eventMessage(makeEvent(91, 1)));
+    await flush();
+    expect(stream.getSnapshot()).toMatchObject({
+      status: { kind: "live" },
+      cursor: cursorAt(91, 1),
+    });
+    await finishRefresh();
+    expect(stream.getSnapshot().status).toEqual({ kind: "live" });
+    // Outside a resnapshot, a page's fence is not adopted.
+    expect(stream.adoptFence(cursorAt(95, 0))).toBe(false);
+    stream.close();
+  });
+
+  it("stops with an error when the fresh fence is rejected too", async () => {
+    const { server, stream } = setup();
+    server.responders.push(badRequest, badRequest);
+    stream.start();
+    await flush();
+    expect(stream.adoptFence(cursorAt(90, 0))).toBe(true);
     await flush();
     expect(stream.getSnapshot().status).toEqual({ kind: "error", reason: "bad-request" });
     await advance(120_000);
+    expect(server.connections).toHaveLength(2);
+  });
+
+  it("stops with an error when the resnapshot refresh brings no fresh fence", async () => {
+    const { server, finishRefresh, stream } = setup();
+    server.responders.push(badRequest);
+    stream.start();
+    await flush();
+    await finishRefresh();
+    expect(stream.getSnapshot().status).toEqual({ kind: "error", reason: "bad-request" });
+    expect(stream.adoptFence(cursorAt(90, 0))).toBe(false);
+    await advance(120_000);
     expect(server.connections).toHaveLength(1);
+  });
+
+  it("adopts only the fence of a refresh started after the rejection", async () => {
+    const { server, refresh, finishRefresh, stream } = setup();
+    stream.start();
+    await flush();
+    server.last.send(eventMessage(makeEvent(101, 1)));
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // The connection is rejected on resume while that refresh is in flight.
+    server.responders.push(badRequest);
+    server.last.end();
+    await advance(1_000);
+    expect(stream.getSnapshot().status).toMatchObject({ kind: "reconnecting" });
+    // A render read before the rejection is not fresh.
+    expect(stream.adoptFence(cursorAt(90, 0))).toBe(false);
+    await finishRefresh();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(stream.getSnapshot().status).toMatchObject({ kind: "reconnecting" });
+    expect(stream.adoptFence(cursorAt(92, 0))).toBe(true);
+    await flush();
+    expect(server.last.lastEventId).toBe(cursorAt(92, 0));
+    stream.close();
   });
 
   it("does not connect with a cursor that is not this Project's", async () => {
@@ -695,6 +767,20 @@ describe("createProjectEventStream", () => {
     expect(server.connections).toHaveLength(2);
     expect(server.last.lastEventId).toBe(cursorAt(101, 1));
     expect(refresh).toHaveBeenCalledTimes(2);
+    stream.close();
+  });
+
+  it("dates the data on screen from the page's snapshot, or claims no time until a refresh", async () => {
+    const dated = setup({ lastSyncAt: 1_234 });
+    expect(dated.stream.getSnapshot().lastSyncAt).toBe(1_234);
+
+    const { finishRefresh, stream } = setup();
+    stream.start();
+    await flush();
+    expect(stream.getSnapshot().lastSyncAt).toBeNull();
+    stream.invalidate();
+    await finishRefresh();
+    expect(stream.getSnapshot().lastSyncAt).toBe(Date.now());
     stream.close();
   });
 

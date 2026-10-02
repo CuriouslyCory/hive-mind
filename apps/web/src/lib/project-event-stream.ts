@@ -408,7 +408,10 @@ export type ProjectEventStreamStatus =
   | { kind: "offline" }
   /** Terminal: the login session or Project access ended. */
   | { kind: "access-lost"; code: AccessLostCode }
-  /** Terminal: the server rejected the request (400), e.g. its cursor. */
+  /**
+   * Terminal: the server rejected the request (400) twice, for the resume
+   * cursor and then for a fresh page's fence, or the fence did not decode.
+   */
   | { kind: "error"; reason: "bad-request" | "invalid-cursor" }
   | { kind: "closed" };
 
@@ -418,8 +421,11 @@ export interface ProjectEventStreamSnapshot {
   cursor: string;
   /** When the last new Event was accepted (epoch ms). */
   lastEventAt: number | null;
-  /** When the page last finished a refresh, or opened (epoch ms). */
-  lastSyncAt: number;
+  /**
+   * When the data on screen was read (epoch ms): the page's snapshot time,
+   * then the end of each successful refresh. Null until known.
+   */
+  lastSyncAt: number | null;
   /** The latest heartbeat's `withheld`: delivery waits for an older open transaction. */
   withheld: boolean;
   refreshing: boolean;
@@ -443,6 +449,8 @@ export interface ProjectEventStreamOptions {
   projectId: string;
   /** The page's server-issued fence cursor `(H, 0)` (ADR-0010 snapshot handoff). */
   initialCursor: string;
+  /** When the page's snapshot was read (epoch ms). Absent or null: unknown until the first refresh. */
+  lastSyncAt?: number | null;
   /** Applies invalidations: re-reads the page from the server. */
   refresh: () => void | Promise<void>;
   /** Whether an Event affects what the page shows. Defaults to every Event. */
@@ -473,6 +481,12 @@ export interface ProjectEventStream {
    * the stream has stopped.
    */
   invalidate(): void;
+  /**
+   * Offers the fence of a fresh render of the page. The stream adopts it only
+   * while it waits for one after the server rejected its resume cursor, and
+   * then reconnects from it; returns whether it did.
+   */
+  adoptFence(cursor: string): boolean;
   close(): void;
   getSnapshot(): ProjectEventStreamSnapshot;
   subscribe(listener: () => void): () => void;
@@ -530,7 +544,7 @@ export function createProjectEventStream(options: ProjectEventStreamOptions): Pr
     status: { kind: "connecting" },
     cursor: options.initialCursor,
     lastEventAt: null,
-    lastSyncAt: now(),
+    lastSyncAt: options.lastSyncAt ?? null,
     withheld: false,
     refreshing: false,
   };
@@ -549,6 +563,17 @@ export function createProjectEventStream(options: ProjectEventStreamOptions): Pr
   // Set after a failure or going offline: the next live connection refreshes
   // the page once, since time-based state may have changed meanwhile.
   let reconcileWhenLive = false;
+  // Resnapshot after a 400. A Postgres crash can leave an issued cursor
+  // naming a transaction ID the server has not issued again yet, so the
+  // server rejects it. The stream then resumes from the fence of a page read
+  // after the rejection, once: a rejected fresh fence is terminal. It never
+  // tails from the server's current position, which would skip Events the
+  // page has not read.
+  let resnapshotUsed = false;
+  // The rejected cursor, while a fresh fence is awaited.
+  let rejectedCursor: string | null = null;
+  // Whether a refresh started after the rejection: only its fence is fresh.
+  let resnapshotRefreshStarted = false;
 
   const update = (patch: Partial<ProjectEventStreamSnapshot>) => {
     snapshot = { ...snapshot, ...patch };
@@ -561,9 +586,18 @@ export function createProjectEventStream(options: ProjectEventStreamOptions): Pr
   const scheduler = createRefreshScheduler({
     refresh: () => options.refresh(),
     canRun: isVisible,
-    onStart: () => update({ refreshing: true }),
-    onSettled: (succeeded) =>
-      update(succeeded ? { refreshing: false, lastSyncAt: now() } : { refreshing: false }),
+    onStart: () => {
+      if (rejectedCursor !== null) resnapshotRefreshStarted = true;
+      update({ refreshing: true });
+    },
+    onSettled: (succeeded) => {
+      update(succeeded ? { refreshing: false, lastSyncAt: now() } : { refreshing: false });
+      // The fresh render registers its fence before its refresh settles; a
+      // refresh that brought none (it failed, or timed out) ends the stream.
+      if (rejectedCursor !== null && resnapshotRefreshStarted) {
+        finish({ kind: "error", reason: "bad-request" });
+      }
+    },
   });
 
   const rememberEvent = (id: string): boolean => {
@@ -792,7 +826,7 @@ export function createProjectEventStream(options: ProjectEventStreamOptions): Pr
   };
 
   function connect(): void {
-    if (terminal) return;
+    if (terminal || rejectedCursor !== null) return;
     clearRetry();
     abortConnection();
     const controller = new AbortController();
@@ -809,7 +843,11 @@ export function createProjectEventStream(options: ProjectEventStreamOptions): Pr
       controller.abort();
       // Healthy: it delivered a valid frame and stayed open a while.
       const healthy = delivered && now() - openedAt >= HEALTHY_CONNECTION_MS;
-      if (healthy) attempt = 0;
+      if (healthy) {
+        attempt = 0;
+        // The server accepted the adopted fence: a later rejection is a new fault.
+        resnapshotUsed = false;
+      }
       switch (outcome.kind) {
         case "aborted":
           return;
@@ -818,7 +856,16 @@ export function createProjectEventStream(options: ProjectEventStreamOptions): Pr
           finish({ kind: "access-lost", code: outcome.code });
           return;
         case "bad-request":
-          finish({ kind: "error", reason: "bad-request" });
+          if (resnapshotUsed) {
+            finish({ kind: "error", reason: "bad-request" });
+            return;
+          }
+          resnapshotUsed = true;
+          rejectedCursor = snapshot.cursor;
+          resnapshotRefreshStarted = false;
+          cursorPosition = null;
+          update({ status: { kind: "reconnecting", attempt, nextAttemptAt: null } });
+          scheduler.request();
           return;
         case "ended":
           // The server's planned rotation: resume from the processed cursor
@@ -860,6 +907,22 @@ export function createProjectEventStream(options: ProjectEventStreamOptions): Pr
     invalidate() {
       if (!started || terminal) return;
       scheduler.request();
+    },
+    adoptFence(cursor) {
+      if (terminal || rejectedCursor === null || !resnapshotRefreshStarted) return false;
+      if (cursor === rejectedCursor) return false;
+      const decoded = decodeFeedCursor(cursor, projectId);
+      if (!decoded.ok) {
+        finish({ kind: "error", reason: "invalid-cursor" });
+        return false;
+      }
+      rejectedCursor = null;
+      cursorPosition = decoded.position;
+      attempt = 0;
+      update({ cursor });
+      if (isOnline()) connect();
+      else onOffline();
+      return true;
     },
     close() {
       if (terminal) return;
