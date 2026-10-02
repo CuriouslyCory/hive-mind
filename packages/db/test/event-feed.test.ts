@@ -348,6 +348,38 @@ describeDb("event feed: commit order", () => {
     expect(one.bytes).toBe(perEvent);
   });
 
+  it("reports a batch the byte budget cut as truncated, and no other", async () => {
+    const projectId = await newProject();
+    const message = "x".repeat(1000);
+    const written: Event[] = [];
+    for (let index = 0; index < 4; index++) written.push(await commitEvent(projectId, message));
+    const perEvent = 1000 + 15 + FEED_EVENT_OVERHEAD_BYTES;
+    await drain(projectId, FEED_ORIGIN, hasAll(written));
+    const poll = (after: FeedPosition, limit: number, maxBytes?: number) =>
+      pollEventFeed(testDb.db, { projectId, after, limit, maxBytes });
+
+    // The budget stops the batch after two of four Events.
+    const cut = await poll(FEED_ORIGIN, 100, perEvent * 2);
+    expect(cut.events).toHaveLength(2);
+    expect(cut.truncated).toBe(true);
+    // Everything fits.
+    const all = await poll(FEED_ORIGIN, 100, perEvent * 4);
+    expect(all.events).toHaveLength(4);
+    expect(all.truncated).toBe(false);
+    // The Event limit, not the budget, stops it: the caller sees a full batch.
+    const limited = await poll(FEED_ORIGIN, 2, perEvent * 4);
+    expect(limited.events).toHaveLength(2);
+    expect(limited.truncated).toBe(false);
+    // The last two fit exactly; nothing follows them.
+    const rest = await poll(cut.next, 100, perEvent * 2);
+    expect(rest.events.map((row) => row.id)).toEqual(written.slice(2).map((row) => row.id));
+    expect(rest.truncated).toBe(false);
+    // An empty poll.
+    const empty = await poll(rest.next, 100, perEvent);
+    expect(empty.events).toEqual([]);
+    expect(empty.truncated).toBe(false);
+  });
+
   it("orders and resumes exactly above Number.MAX_SAFE_INTEGER", async () => {
     const projectId = await newProject();
     // The next two seqs are 2^53 and 2^53 + 1, equal as JavaScript numbers.

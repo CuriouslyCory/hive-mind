@@ -182,6 +182,12 @@ export interface FeedBatch {
   withheld: boolean;
   /** The batch's size in the poll's byte measure (see `pollEventFeed`). */
   bytes: number;
+  /**
+   * Whether the byte budget cut the batch: the poll read safe Events after
+   * the last one it returned. Poll again at once, as after a batch of
+   * `limit` Events.
+   */
+  truncated: boolean;
 }
 
 /** The select list of every Event column, aliased to its property name. */
@@ -253,7 +259,8 @@ export function feedBatchStatement(input: FeedPollInput): SQL {
     costed as (
       select batch.*,
         sum("feedBytes") over w as "feedRunningBytes",
-        row_number() over w as "feedRow"
+        row_number() over w as "feedRow",
+        count(*) over () as "feedBatchRows"
       from batch
       window w as (order by "writerXid", "seq" rows between unbounded preceding and current row)
     )
@@ -282,7 +289,8 @@ export function feedBatchStatement(input: FeedPollInput): SQL {
  * `JSON.stringify` of the same value (it adds a space after each `:` and `,`),
  * so the charge bounds the Event's encoded DTO. With `maxBytes`, the batch
  * stops at the last Event whose running total fits, but always includes the
- * first Event, so a poll can make progress past a large one.
+ * first Event, so a poll can make progress past a large one; `truncated`
+ * then says that more safe Events were read than returned.
  *
  * The caller authorizes the Project first. Throws on a malformed `after`; use
  * `isIssuableFeedPosition` to reject impossible ones before polling.
@@ -305,5 +313,6 @@ export async function pollEventFeed(db: DbOrTransaction, input: FeedPollInput): 
     horizon: String(first.feedHorizon),
     withheld: first.feedWithheld === true,
     bytes,
+    truncated: events.length < Number(first.feedBatchRows ?? 0),
   };
 }

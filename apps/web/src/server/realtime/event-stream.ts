@@ -8,11 +8,12 @@ import {
   type EventStreamFrame,
   encodeFeedCursor,
   type FeedPosition,
+  MAX_EVENT_STREAM_FRAME_BYTES,
 } from "@hivemind/contract";
 import {
   type Db,
   type DbOrTransaction,
-  describeConnectionError,
+  describeFailure,
   type FeedBatch,
   feedPositionOf,
   isIssuableFeedPosition,
@@ -65,6 +66,8 @@ export interface EventStreamSettings {
   batchMaxBytes: number;
   /** Cap on queued plus in-flight bytes. */
   maxBufferedBytes: number;
+  /** Worst-case bytes of one encoded frame. */
+  frameMaxBytes: number;
 }
 
 export const DEFAULT_EVENT_STREAM_SETTINGS: Readonly<EventStreamSettings> = Object.freeze({
@@ -78,7 +81,29 @@ export const DEFAULT_EVENT_STREAM_SETTINGS: Readonly<EventStreamSettings> = Obje
   batchMaxEvents: EVENT_STREAM_BATCH_MAX_EVENTS,
   batchMaxBytes: EVENT_STREAM_BATCH_MAX_BYTES,
   maxBufferedBytes: EVENT_STREAM_MAX_BUFFERED_BYTES,
+  frameMaxBytes: MAX_EVENT_STREAM_FRAME_BYTES,
 });
+
+/**
+ * Frame bytes held outside the counted queue: the queue accepts one frame
+ * past its high-water mark, and oRPC's encoder (the frame the generator
+ * yielded and the TextEncoderStream) holds up to two more.
+ */
+export function uncountedFrameBytes(settings: Readonly<EventStreamSettings>): number {
+  return 3 * settings.frameMaxBytes;
+}
+
+/**
+ * The response queue's high-water mark: what is left of `maxBufferedBytes`
+ * after one batch in flight and the uncounted frames, so the stream's Event
+ * bytes stay within the cap.
+ */
+export function queueHighWaterMark(settings: Readonly<EventStreamSettings>): number {
+  return Math.max(
+    1,
+    settings.maxBufferedBytes - settings.batchMaxBytes - uncountedFrameBytes(settings),
+  );
+}
 
 /**
  * Why a stream ended. `rotate` and `done` close the body cleanly (the client
@@ -227,8 +252,9 @@ export class StreamLifecycle {
 
   /**
    * The response body: `body` (oRPC's encoded SSE stream) behind a queue of
-   * at most `maxBufferedBytes - batchMaxBytes` bytes, so that the queue and
-   * one batch in flight fit in `maxBufferedBytes`.
+   * `queueHighWaterMark` bytes, so that the queue, one batch in flight and
+   * the frames outside the queue (`uncountedFrameBytes`) fit in
+   * `maxBufferedBytes`.
    *
    * Independently of demand: at the deadline the body closes after what is
    * already queued (frames are whole chunks, so the client never sees half
@@ -241,7 +267,7 @@ export class StreamLifecycle {
    */
   wrap(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
     const reader = body.getReader();
-    const highWaterMark = Math.max(1, this.settings.maxBufferedBytes - this.settings.batchMaxBytes);
+    const highWaterMark = queueHighWaterMark(this.settings);
     return new ReadableStream<Uint8Array>(
       {
         start: (controller) => {
@@ -350,8 +376,11 @@ async function* streamFrames(
     yield withEventMeta({ type: "ready" as const }, { id: cursor(position) });
     while (!signal.aborted) {
       let full = false;
-      // Poll only while a whole batch fits beside what is queued.
-      if (settings.maxBufferedBytes - lifecycle.queuedBytes() >= settings.batchMaxBytes) {
+      // Poll only while a whole batch fits beside what is queued and the
+      // frames outside the queue.
+      const free =
+        settings.maxBufferedBytes - uncountedFrameBytes(settings) - lifecycle.queuedBytes();
+      if (free >= settings.batchMaxBytes) {
         const step = await lifecycle.transaction(db, async (tx) => {
           const access = await authorize(tx);
           if (!access.ok) return access;
@@ -368,8 +397,13 @@ async function* streamFrames(
           yield { type: "access_lost", code: step.code };
           return;
         }
-        withheld.observe(step.batch);
-        for (const row of step.batch.events) {
+        const { batch } = step;
+        withheld.observe(batch);
+        // A full batch, or one the byte budget cut, means more is waiting.
+        full = batch.events.length >= settings.batchMaxEvents || batch.truncated;
+        // Drop each row as it is yielded, so the batch holds only what is
+        // still to send.
+        for (let row = batch.events.shift(); row !== undefined; row = batch.events.shift()) {
           if (signal.aborted) return;
           const next = feedPositionOf(row);
           yield withEventMeta(
@@ -378,7 +412,6 @@ async function* streamFrames(
           );
           position = next;
         }
-        full = step.batch.events.length >= settings.batchMaxEvents;
       }
       if (signal.aborted) return;
       if (Date.now() >= nextHeartbeat) {
@@ -389,13 +422,13 @@ async function* streamFrames(
           withheld: withheld.current,
         };
       }
-      // A full batch means more is waiting: read it now rather than in a second.
+      // Read what is waiting now rather than in a second.
       if (!full && !(await lifecycle.sleep(settings.pollIntervalMs))) return;
     }
   } catch (error) {
     if (error instanceof StreamEndedError || signal.aborted) return;
     console.error(
-      `Event stream for Project ${projectId} failed after it opened: ${describeError(error)}`,
+      `Event stream for Project ${projectId} failed after it opened: ${describeFailure(error)}`,
     );
     // oRPC sends this as an `error` frame with a generic INTERNAL_SERVER_ERROR body.
     throw error;
@@ -434,9 +467,4 @@ class WithheldDiagnostics {
       );
     }
   }
-}
-
-/** A loggable description of a failure: never the error object, which for pg can carry connection parameters. */
-function describeError(error: unknown): string {
-  return error instanceof Error ? describeConnectionError(error) : "unknown failure";
 }
