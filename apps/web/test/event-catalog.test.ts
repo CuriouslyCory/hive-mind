@@ -63,6 +63,8 @@ describeDb("the Event catalog", () => {
       .values({ name: slug, email: `${slug}@example.com`, githubLogin: slug })
       .returning();
     if (!org || !user) throw new Error("setup");
+    // Mutations recheck Membership under the Project lock.
+    await db.insert(schema.member).values({ organizationId: org.id, userId: user.id });
     const [project] = await db
       .insert(schema.project)
       .values({ organizationId: org.id, slug: "app", name: "App" })
