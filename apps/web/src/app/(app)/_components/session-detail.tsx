@@ -1,4 +1,5 @@
 import type { Route } from "next";
+import { ProjectLivePage } from "../../../components/dashboard/project-live-updates";
 import { SafeMarkdown } from "../../../server/dashboard/markdown";
 import type { SessionDetail } from "../../../server/dashboard/queries";
 import { AttributionText, formatUtc, Optional, SessionStatusText, Timestamp } from "./format";
@@ -19,7 +20,12 @@ export function SessionDetailView({
 }) {
   const { project, session, asOf } = detail;
   return (
-    <div data-feed-cursor={detail.feedCursor}>
+    <div data-testid="session-detail">
+      <ProjectLivePage
+        projectId={project.id}
+        cursor={detail.feedCursor}
+        scope={{ kind: "session", sessionId: session.id, taskId: session.attachedTask?.id ?? null }}
+      />
       <ProjectHeading project={project} asOf={asOf} linked />
       <h1>Session: {session.agent}</h1>
       <p>

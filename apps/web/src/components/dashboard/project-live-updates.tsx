@@ -1,21 +1,29 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   type ReactNode,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
+  useSyncExternalStore,
   useTransition,
 } from "react";
-import { type LiveUpdateScope, shouldRefreshFor } from "../../lib/project-event-filters";
+import type { LiveUpdateScope } from "../../lib/project-event-filters";
 import {
   createProjectEventStream,
   type ProjectEventStreamSnapshot,
 } from "../../lib/project-event-stream";
+import {
+  createProjectLiveRegistry,
+  type ProjectLiveRegistry,
+} from "../../lib/project-live-registry";
 
 /**
  * Longest wait for a refresh's transition to finish before the scheduler
@@ -24,47 +32,35 @@ import {
  */
 const REFRESH_SETTLE_TIMEOUT_MS = 20_000;
 
-/** The live-update state of the enclosing `ProjectLiveUpdates`; null before it connects. */
+/** The live-update state of the enclosing `ProjectLiveUpdates`; null while no stream runs. */
 const LiveSnapshotContext = createContext<ProjectEventStreamSnapshot | null>(null);
+const LiveRegistryContext = createContext<ProjectLiveRegistry | null>(null);
 
 export function useProjectLiveSnapshot(): ProjectEventStreamSnapshot | null {
   return useContext(LiveSnapshotContext);
 }
 
-export interface ProjectLiveUpdatesProps {
-  projectId: string;
-  /** The fence cursor the server issued with this render's snapshot (ADR-0010). */
-  initialCursor: string;
-  /** What the page shows, which decides the Events that refresh it. */
-  scope: LiveUpdateScope;
-  children: ReactNode;
-}
+const serverSnapshot = () => null;
 
 /**
- * Keeps a Project page current: one subscription to the Project's Event
- * feed per mounted Project, whose invalidations re-read the page with
- * `router.refresh()`. The subscription and its cursor survive refreshes
- * (which re-render this component with a new `initialCursor` and `scope`);
- * it restarts only when `projectId` changes, from that render's cursor.
+ * Keeps a Project's pages current: one subscription to the Project's Event
+ * feed while the Project layout is mounted, whose invalidations re-read the
+ * page on screen with `router.refresh()`. It mounts in the layout so the
+ * subscription and its cursor survive moving between the Project's pages
+ * and refreshes. Pages tell it their snapshot fence and scope with
+ * `ProjectLivePage`; the rules for adopting them are in
+ * apps/web/src/lib/project-live-registry.ts. Leaving the Project unmounts
+ * (or hides) the layout, which closes the stream.
  *
  * `router.refresh()` returns nothing, so completion is observed through a
  * transition: the refresh runs inside `startTransition`, and the promise the
  * scheduler awaits resolves when `isPending` returns to false, i.e. when
  * React has committed the refreshed Server Component payload. Invalidations
  * arriving meanwhile cause exactly one more refresh.
- *
- * When the stream reports lost access, the children (this Project's
- * protected content) are replaced by a message until a fresh navigation.
  */
-export function ProjectLiveUpdates({
-  projectId,
-  initialCursor,
-  scope,
-  children,
-}: ProjectLiveUpdatesProps) {
+export function ProjectLiveUpdates({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [snapshot, setSnapshot] = useState<ProjectEventStreamSnapshot | null>(null);
   const waiters = useRef<(() => void)[]>([]);
   const sawPending = useRef(false);
 
@@ -97,45 +93,102 @@ export function ProjectLiveUpdates({
     for (const settle of waiters.current.splice(0)) settle();
   }, [isPending]);
 
-  // The latest props, read by the long-lived subscription without restarting it.
-  const latest = useRef({ initialCursor, scope, refresh });
+  // The latest `refresh`, read by the long-lived stream without restarting it.
+  const latestRefresh = useRef(refresh);
   useEffect(() => {
-    latest.current = { initialCursor, scope, refresh };
+    latestRefresh.current = refresh;
   });
 
+  const [registry] = useState(() =>
+    createProjectLiveRegistry({
+      createStream: (request) =>
+        createProjectEventStream({ ...request, refresh: () => latestRefresh.current() }),
+    }),
+  );
+
   useEffect(() => {
-    const stream = createProjectEventStream({
-      projectId,
-      initialCursor: latest.current.initialCursor,
-      refresh: () => latest.current.refresh(),
-      shouldRefresh: (event) => shouldRefreshFor(latest.current.scope, event),
-    });
-    setSnapshot(stream.getSnapshot());
-    const unsubscribe = stream.subscribe(() => setSnapshot(stream.getSnapshot()));
-    stream.start();
+    registry.attach();
     return () => {
-      unsubscribe();
-      stream.close();
+      registry.detach();
       for (const settle of waiters.current.splice(0)) settle();
     };
-  }, [projectId]);
+  }, [registry]);
 
-  if (snapshot?.status.kind === "access-lost") {
-    return (
+  const snapshot = useSyncExternalStore(registry.subscribe, registry.getSnapshot, serverSnapshot);
+
+  return (
+    <LiveRegistryContext value={registry}>
       <LiveSnapshotContext value={snapshot}>
-        <div role="alert">
-          <p>
-            {snapshot.status.code === "UNAUTHORIZED"
-              ? "Your sign-in has ended, so this Project is hidden."
-              : "You no longer have access to this Project, so it is hidden."}
-          </p>
-          <p>
-            <a href="/">Go to the dashboard</a>
-          </p>
-        </div>
+        {/* The pathname is request data for a dynamic segment, so it waits in Suspense. */}
+        <Suspense fallback={null}>
+          <PathnameReporter registry={registry} />
+        </Suspense>
+        {children}
       </LiveSnapshotContext>
-    );
-  }
+    </LiveRegistryContext>
+  );
+}
 
-  return <LiveSnapshotContext value={snapshot}>{children}</LiveSnapshotContext>;
+function PathnameReporter({ registry }: { registry: ProjectLiveRegistry }) {
+  const pathname = usePathname();
+  useEffect(() => {
+    registry.navigated(pathname);
+  }, [registry, pathname]);
+  return null;
+}
+
+/**
+ * Registers the page on screen with the enclosing `ProjectLiveUpdates`: the
+ * fence cursor its server render was read at and what it shows. Render it
+ * from the same snapshot as the page's data, so both change together on a
+ * refresh. Renders nothing.
+ */
+export function ProjectLivePage({
+  projectId,
+  cursor,
+  scope,
+}: {
+  projectId: string;
+  /** The fence cursor the server issued with this render's snapshot (ADR-0010). */
+  cursor: string;
+  /** What the page shows, which decides the Events that refresh it. */
+  scope: LiveUpdateScope;
+}) {
+  const registry = useContext(LiveRegistryContext);
+  const id = useId();
+
+  useEffect(() => {
+    registry?.register(id, { projectId, cursor, scope });
+  }, [registry, id, projectId, cursor, scope]);
+
+  useEffect(() => {
+    if (!registry) return;
+    return () => registry.unregister(id);
+  }, [registry, id]);
+
+  return null;
+}
+
+/**
+ * The Project's protected content. When the stream reports lost access
+ * (an `access_lost` frame, or HTTP 401 or 404 when connecting), it is
+ * replaced by a message until the User navigates elsewhere.
+ */
+export function ProjectLiveContent({ children }: { children: ReactNode }) {
+  const snapshot = useProjectLiveSnapshot();
+  if (snapshot?.status.kind !== "access-lost") return children;
+  return (
+    <main data-testid="project-access-lost">
+      <div role="alert">
+        <p>
+          {snapshot.status.code === "UNAUTHORIZED"
+            ? "Your sign-in has ended, so this Project is hidden."
+            : "You no longer have access to this Project, so it is hidden."}
+        </p>
+        <p>
+          <Link href="/">Go to all Projects</Link>
+        </p>
+      </div>
+    </main>
+  );
 }

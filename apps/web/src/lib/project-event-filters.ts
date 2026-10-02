@@ -7,7 +7,7 @@ import type { StreamEvent } from "./project-event-stream";
 // claim, Scope and liveness changes of the Sessions they list. An Event type
 // this build does not know refreshes every page.
 
-/** What a page shows, as `ProjectLiveUpdates` receives it from the server render. */
+/** What a page shows, as it registers with `ProjectLivePage` from its server render. */
 export type LiveUpdateScope =
   /** The Project overview: every Event of the Project. */
   | { kind: "project" }
@@ -87,5 +87,35 @@ export function shouldRefreshFor(scope: LiveUpdateScope, event: StreamEvent): bo
       return affectsPlan(event, scope);
     case "session":
       return affectsSession(event, scope);
+  }
+}
+
+function sortedIds(ids: readonly string[] | undefined): string[] {
+  return [...new Set(ids ?? [])].sort();
+}
+
+/**
+ * A string equal for two scopes exactly when they select the same Events,
+ * whatever the order of their ids. The live-update registry compares keys
+ * to tell whether the filter changed.
+ */
+export function liveUpdateScopeKey(scope: LiveUpdateScope): string {
+  switch (scope.kind) {
+    case "project":
+      return JSON.stringify(["project"]);
+    case "plan":
+      return JSON.stringify([
+        "plan",
+        scope.planId,
+        sortedIds(scope.taskIds),
+        sortedIds(scope.sessionIds),
+      ]);
+    case "session":
+      return JSON.stringify([
+        "session",
+        scope.sessionId,
+        scope.planId ?? null,
+        scope.taskId ?? null,
+      ]);
   }
 }

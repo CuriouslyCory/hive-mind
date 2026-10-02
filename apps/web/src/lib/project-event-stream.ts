@@ -467,6 +467,12 @@ export interface ProjectEventStream {
   start(): void;
   /** Refreshes the page and reconnects now if the stream is waiting to. */
   reconcile(): void;
+  /**
+   * Marks the page dirty without touching the connection: it refreshes now,
+   * or after the refresh in flight. Does nothing before `start()` or once
+   * the stream has stopped.
+   */
+  invalidate(): void;
   close(): void;
   getSnapshot(): ProjectEventStreamSnapshot;
   subscribe(listener: () => void): () => void;
@@ -851,6 +857,10 @@ export function createProjectEventStream(options: ProjectEventStreamOptions): Pr
       else onOffline();
     },
     reconcile,
+    invalidate() {
+      if (!started || terminal) return;
+      scheduler.request();
+    },
     close() {
       if (terminal) return;
       finish({ kind: "closed" });

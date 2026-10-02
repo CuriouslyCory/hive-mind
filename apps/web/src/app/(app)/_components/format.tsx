@@ -75,7 +75,7 @@ export function TaskStatusText({ status }: { status: TaskStatus }) {
 
 /** "3 of 5 Tasks done" with the other counts, and a progress bar repeating it. */
 export function ProgressText({ progress }: { progress: PlanProgress }) {
-  if (progress.total === 0) return <span>No Tasks yet</span>;
+  if (progress.total === 0) return <span data-testid="plan-progress">No Tasks yet</span>;
   const rest = [
     progress.inProgress > 0 ? `${progress.inProgress} in progress` : null,
     progress.blocked > 0 ? `${progress.blocked} blocked` : null,
@@ -83,7 +83,7 @@ export function ProgressText({ progress }: { progress: PlanProgress }) {
   ].filter((part) => part !== null);
   const label = `${progress.done} of ${progress.total} Tasks done`;
   return (
-    <span className="progress">
+    <span className="progress" data-testid="plan-progress">
       <progress value={progress.done} max={progress.total} aria-hidden="true" />{" "}
       <span>
         {label}

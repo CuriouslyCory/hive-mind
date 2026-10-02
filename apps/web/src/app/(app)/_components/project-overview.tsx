@@ -1,5 +1,6 @@
 import type { Route } from "next";
 import Link from "next/link";
+import { ProjectLivePage } from "../../../components/dashboard/project-live-updates";
 import type { OverlapView, ProjectOverview, SessionLabel } from "../../../server/dashboard/queries";
 import { AttributionText, Optional, ProgressText, SessionStatusText, Timestamp } from "./format";
 import { SessionFocus, SessionTable } from "./lists";
@@ -19,7 +20,12 @@ export function ProjectOverviewView({
 }) {
   const { project, asOf } = overview;
   return (
-    <div data-feed-cursor={overview.feedCursor}>
+    <div data-testid="project-overview">
+      <ProjectLivePage
+        projectId={project.id}
+        cursor={overview.feedCursor}
+        scope={{ kind: "project" }}
+      />
       <ProjectHeading project={project} asOf={asOf} />
 
       <section aria-labelledby="active-plans">

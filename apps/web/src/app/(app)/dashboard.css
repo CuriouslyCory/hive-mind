@@ -16,6 +16,23 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
+/* The live-update status line. Its words carry the state; the border only
+   repeats it, and the line keeps its height while empty. */
+.live-status {
+  display: block;
+  font-size: 0.9em;
+  min-height: 1.5em;
+}
+
+.live-status[data-state="delayed"],
+.live-status[data-state="reconnecting"],
+.live-status[data-state="offline"],
+.live-status[data-state="stopped"],
+.live-status[data-state="access-lost"] {
+  border-left: 3px solid #a51d2d;
+  padding-left: 0.5rem;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;

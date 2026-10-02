@@ -1,5 +1,7 @@
 import type { Route } from "next";
 import Link from "next/link";
+import { ProjectLivePage } from "../../../components/dashboard/project-live-updates";
+import type { LiveUpdateScope } from "../../../lib/project-event-filters";
 import { SafeMarkdown } from "../../../server/dashboard/markdown";
 import type { PlanDetail } from "../../../server/dashboard/queries";
 import {
@@ -16,6 +18,24 @@ import { Pager } from "./pager";
 import { type CursorParams, sessionPath } from "./paths";
 import { ProjectHeading } from "./project-heading";
 
+/**
+ * What a Plan page shows, for its live updates: the Plan, the Tasks listed,
+ * and the Sessions it names (attached ones and claim holders), whose Scope,
+ * heartbeat and liveness changes alter the page.
+ */
+export function planScope(detail: PlanDetail): LiveUpdateScope {
+  const sessionIds = new Set(detail.sessions.items.map((session) => session.id));
+  for (const task of detail.tasks.items) {
+    if (task.claim) sessionIds.add(task.claim.sessionId);
+  }
+  return {
+    kind: "plan",
+    planId: detail.plan.id,
+    taskIds: detail.tasks.items.map((task) => task.id),
+    sessionIds: [...sessionIds],
+  };
+}
+
 /** A Plan page's content, from one snapshot. */
 export function PlanDetailView({
   detail,
@@ -28,7 +48,12 @@ export function PlanDetailView({
 }) {
   const { project, plan, asOf } = detail;
   return (
-    <div data-feed-cursor={detail.feedCursor}>
+    <div data-testid="plan-detail">
+      <ProjectLivePage
+        projectId={project.id}
+        cursor={detail.feedCursor}
+        scope={planScope(detail)}
+      />
       <ProjectHeading project={project} asOf={asOf} linked />
       <h1>
         {plan.key}: {plan.title}
@@ -81,7 +106,7 @@ export function PlanDetailView({
             </thead>
             <tbody>
               {detail.tasks.items.map((task) => (
-                <tr key={task.id}>
+                <tr key={task.id} data-testid="task-row" data-task-status={task.status}>
                   <td>{task.position}</td>
                   <td>
                     {task.title}

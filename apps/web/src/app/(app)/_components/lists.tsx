@@ -99,7 +99,7 @@ export function EventList({
   return (
     <ol className="events" aria-label={label}>
       {events.map((event) => (
-        <li key={event.id}>
+        <li key={event.id} data-testid="timeline-item" data-event-type={event.type}>
           <p>
             <AttributionText value={event.actor} />
             {": "}
