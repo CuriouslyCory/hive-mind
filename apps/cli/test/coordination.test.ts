@@ -183,6 +183,57 @@ describe("plan", () => {
     expect(retried.data).toMatchObject({ created: false, plan: { id } });
   });
 
+  it("treats a 5xx after the commit as uncertain for every create, and a 4xx as definitive", async () => {
+    /** The request reaches the server and commits; the answer is replaced. */
+    const committedThen =
+      (answer: () => Response) => async (input: URL | Request | string, init?: RequestInit) => {
+        await globalThis.fetch(input, init);
+        return answer();
+      };
+    // A Vercel function timeout (text body) and a failed output check (oRPC JSON).
+    const gatewayTimeout = committedThen(
+      () => new Response("FUNCTION_INVOCATION_TIMEOUT", { status: 504 }),
+    );
+    const outputCheck = committedThen(() =>
+      Response.json(
+        { defined: false, code: "INTERNAL_SERVER_ERROR", status: 500, message: "Failed." },
+        { status: 500 },
+      ),
+    );
+    const { planKey } = await activePlanWithTask();
+    const creates = [
+      ["plan", "create", "--title", "Slow"],
+      ["task", "add", planKey, "--title", "Slow"],
+      ["session", "start", "--agent", "a", "--intent", "Slow"],
+      ["plan", "log", planKey, "--message", "Slow"],
+    ];
+    for (const argv of creates) {
+      for (const fetch of [gatewayTimeout, outputCheck]) {
+        const failed = await json(argv, { fetch });
+        expect(failed.code, argv.join(" ")).toBe(1);
+        const id = /created anyway with id ([0-9a-f-]{36})\./.exec(failed.stderr)?.[1];
+        expect(id, `${argv.join(" ")}: ${failed.stderr}`).toBeDefined();
+        expect(failed.stderr).toContain(`--id ${id}`);
+        // The record was committed: the named id replays it.
+        const retried = await json([...argv, "--id", id as string]);
+        expect(retried.data, argv.join(" ")).toMatchObject({ created: false });
+      }
+    }
+    expect((await json(creates[0] as string[], { fetch: gatewayTimeout })).error?.code).toBe(
+      "GATEWAY_TIMEOUT",
+    );
+    const human = await run(["plan", "create", "--title", "Slow"], { fetch: outputCheck });
+    expect(human.code).toBe(1);
+    expect(human.stderr).toMatch(/Check with 'hivemind plan show [0-9a-f-]{36}' before retrying/);
+
+    // A documented 4xx means nothing was created: no recovery hint.
+    const planId = [...api.coordination.plans.keys()][0] as string;
+    const conflict = await json(["plan", "create", "--title", "Other", "--id", planId]);
+    expect(conflict.code).toBe(2);
+    expect(conflict.stderr).not.toContain("may have been created");
+    expect(conflict.error?.message).not.toContain("--id");
+  });
+
   it("lists, shows with a page of Tasks, edits, logs and changes status", async () => {
     const { planKey, taskId } = await activePlanWithTask();
     const list = await json(["plan", "list", "--status", "active", "--limit", "10"]);
@@ -421,6 +472,42 @@ describe("session", () => {
     expect((await json(["session", "end", "--summary", "Other."], as)).code).toBe(2);
     expect((await json(["session", "end"], as)).code).toBe(1);
   });
+
+  it("pages older Session Events with session log, which session show points to", async () => {
+    const id = await startSession();
+    const as = withSession(id);
+    // Attributed writes are Session Events too.
+    for (const title of ["One", "Two"]) await json(["plan", "create", "--title", title], as);
+    const all = await json(["session", "log", id, "--limit", "100"]);
+    const total = at<unknown[]>(all.data, "items").length;
+    expect(total).toBeGreaterThanOrEqual(3);
+
+    const show = await json(["session", "show", id, "--limit", "1"]);
+    const cursor = at(show.data, "events.nextCursor");
+    expect(cursor).toEqual(expect.any(String));
+    expect((await run(["session", "show", id, "--limit", "1"])).stdout).toContain(
+      `More: hivemind session log --session ${id} --cursor ${cursor}`,
+    );
+
+    // The Session comes from HIVEMIND_SESSION here, and pages follow nextCursor to the end.
+    const first = await json(["session", "log", "--limit", "1"], as);
+    expect(first.data).toMatchObject({ nextCursor: cursor });
+    const seen = [at<number>(first.data, "items.0.seq")];
+    let next: string | null = cursor;
+    while (next !== null) {
+      const page = await json(["session", "log", id, "--limit", "1", "--cursor", next]);
+      expect(coordinationRequests().at(-1)?.url).toContain(`cursor=${next}`);
+      seen.push(at<number>(page.data, "items.0.seq"));
+      next = at<string | null>(page.data, "nextCursor");
+    }
+    expect(new Set(seen).size).toBe(total);
+    expect(seen).toEqual([...seen].sort((a, b) => b - a));
+
+    // Human Event lines name the actor as a Session (CONTEXT.md naming).
+    expect((await run(["session", "log", id])).stdout).toContain(`  Session ${id}`);
+    expect((await json(["session", "log", id, "--cursor", "not a cursor!"])).code).toBe(1);
+    expect((await json(["session", "log", id, "--session", id])).code).toBe(1);
+  });
 });
 
 describe("scope", () => {
@@ -459,6 +546,39 @@ describe("scope", () => {
     expect((await json(["scope", "remove", scopeId], withSession(mine))).data).toMatchObject({
       removed: false,
     });
+  });
+
+  it("continues scope check from --cursor", async () => {
+    const mine = await startSession("mine");
+    await json(["scope", "add", "src/**"], withSession(mine));
+    // Stand-in for a check that stopped after 20 pages: the server's cursor resumes it.
+    const resumed = await json(["scope", "check", "--cursor", "o0"], withSession(mine));
+    expect(resumed.data).toMatchObject({ sessionId: mine, nextCursor: null, complete: true });
+    expect(coordinationRequests().at(-1)?.url).toContain("cursor=o0");
+    expect(
+      (await json(["scope", "check", "--cursor", "bad cursor!"], withSession(mine))).code,
+    ).toBe(1);
+  });
+
+  it("names the next cursor when the check stops after 20 pages", async () => {
+    const mine = await startSession("mine");
+    let pages = 0;
+    const endless = async (input: URL | Request | string, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (!url.includes("/overlaps")) return globalThis.fetch(input, init);
+      pages++;
+      return Response.json({
+        items: [],
+        nextCursor: `o${pages * 100}`,
+        complete: true,
+        incompleteSessionIds: [],
+      });
+    };
+    const check = await json(["scope", "check"], { ...withSession(mine), fetch: endless });
+    expect(pages).toBe(20);
+    expect(check.data).toMatchObject({ complete: false, nextCursor: "o2000" });
+    const human = await run(["scope", "check"], { ...withSession(mine), fetch: endless });
+    expect(human.stdout).toContain("More: --cursor o4000");
   });
 });
 
@@ -568,6 +688,19 @@ describe("session heartbeat", () => {
     expect(flat).toEqual([...flat].sort(compareTouchedPaths));
   });
 
+  it("counts paths it cannot send and names the 1,024-path cap", async () => {
+    const { as } = await heartbeatSetup();
+    writeFileSync(join(work, "ok.txt"), "x");
+    // Over 256 bytes as a repository path, though each name fits the filesystem.
+    mkdirSync(join(work, "d".repeat(200)));
+    writeFileSync(join(work, "d".repeat(200), "f".repeat(100)), "x");
+    const result = await json(["session", "heartbeat"], as);
+    expect(result.data).toMatchObject({ pathCount: 1, omittedPathCount: 1 });
+    expect(result.stderr).toContain(
+      "1 changed paths cannot be sent (not UTF-8, longer than 256 bytes, or beyond the first 1,024 paths)",
+    );
+  });
+
   it("works outside git and says touched paths are unavailable", async () => {
     const { as } = await heartbeatSetup();
     const plain = join(scratch, `plain-${counter++}`);
@@ -615,6 +748,10 @@ describe("session heartbeat", () => {
     });
     expect(failed.stderr).toContain(`--collection-id ${collectionId}`);
     expect(failed.stderr).toContain("leases renewed");
+    // The next heartbeat would make the lost coverage permanent: resume first.
+    expect(failed.stderr).toContain("before the next heartbeat");
+    expect(failed.stderr).toContain("incomplete until it ends");
+    expect(failed.stderr).not.toContain("wait for the next heartbeat");
 
     failBatches = false;
     const before = api.requests.length;
@@ -664,6 +801,8 @@ describe("session heartbeat", () => {
     expect(result.error?.code).toBe("CANCELLED");
     expect(result.error?.message).toContain("--collection-id");
     expect(result.error?.message).toContain("leases renewed");
+    expect(result.error?.message).toContain("before the next heartbeat");
+    expect(result.error?.message).not.toContain("run a new heartbeat");
   });
 
   it("fails as a whole when the heartbeat itself fails, before any git work", async () => {
