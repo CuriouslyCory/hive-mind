@@ -1,4 +1,4 @@
-import { oc } from "@orpc/contract";
+import { eventIterator, oc } from "@orpc/contract";
 import { listOrganizationsInputSchema, meOutputSchema, organizationPageSchema } from "./auth.ts";
 import { apiErrorMap } from "./errors.ts";
 import {
@@ -9,6 +9,7 @@ import {
   listProjectEventsInputSchema,
   listSessionEventsInputSchema,
 } from "./event.ts";
+import { eventStreamFrameSchema, streamProjectEventsInputSchema } from "./event-stream.ts";
 import {
   createProjectKeyInputSchema,
   createProjectKeyOutputSchema,
@@ -598,6 +599,25 @@ export const apiContract = {
         })
         .input(listProjectEventsInputSchema)
         .output(eventPageSchema),
+      /**
+       * Server-Sent Events: the Project's Events as they become safe to
+       * deliver, plus heartbeats, until the server rotates the stream
+       * (ADR-0010). Authorization and the cursor are checked before the
+       * stream opens, so those failures are 401, 404 and 400 rather than a
+       * 200 stream; a later loss of access ends it with an `access_lost`
+       * frame. Delivery is at least once, in feed order, not commit order.
+       */
+      stream: base
+        .route({
+          method: "GET",
+          path: "/projects/{id}/events/stream",
+          successStatus: 200,
+          operationId: "streamProjectEvents",
+          tags: ["Events"],
+          summary: "Stream a Project's Events as Server-Sent Events, resuming from a cursor",
+        })
+        .input(streamProjectEventsInputSchema)
+        .output(eventIterator(eventStreamFrameSchema)),
     },
 
     status: base

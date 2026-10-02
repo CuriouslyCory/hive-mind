@@ -11,7 +11,7 @@ import { ORPCError, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { apiError } from "./authorize";
 import { accessLostError } from "./coordination-auth";
-import { listProjectEvents, listSessionEvents } from "./events";
+import { listProjectEvents, listSessionEvents, streamProjectEvents } from "./events";
 import { listOrganizations, me } from "./identity";
 import { api } from "./implementer";
 import { createProjectKey, listProjectKeys, revokeProjectKey } from "./keys";
@@ -93,7 +93,7 @@ export const router = api.router({
         finalize: finalizeCollection,
       },
     },
-    events: { list: listProjectEvents },
+    events: { list: listProjectEvents, stream: streamProjectEvents },
     status: getProjectStatus,
   },
 });
