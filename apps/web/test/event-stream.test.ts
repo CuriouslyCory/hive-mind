@@ -740,6 +740,22 @@ describeDb("Event stream", () => {
       expect(frames.every(isEvent)).toBe(true);
     });
 
+    it("does not log a client that leaves before the stream opens as a server failure", async () => {
+      // A browser that navigates away while the stream is opening aborts the
+      // request inside the opening transaction (seen in the dashboard's
+      // browser tests). That is the client leaving, not a failure.
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { cookie } = await cookieLogin(owner);
+      for (const open of [
+        (signal: AbortSignal) => v1Stream(projectA, { token: owner.token, signal }),
+        (signal: AbortSignal) => dashboardStream(projectA, { cookie, signal }),
+      ]) {
+        await open(AbortSignal.abort());
+      }
+      expect(errors).not.toHaveBeenCalled();
+      await expectPoolReleased();
+    });
+
     it("ends on request abort while the generator is paused at a yield", async () => {
       const projectId = await api.createProject(owner);
       await writeEvents(projectId, 9, "x".repeat(400));

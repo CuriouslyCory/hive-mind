@@ -9,7 +9,11 @@ import { OpenAPIGenerator } from "@orpc/openapi";
 import { OpenAPIHandler, type OpenAPIHandlerOptions } from "@orpc/openapi/fetch";
 import { ORPCError, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
-import { type EventStreamSettings, StreamLifecycle } from "../realtime/event-stream";
+import {
+  type EventStreamSettings,
+  StreamEndedError,
+  StreamLifecycle,
+} from "../realtime/event-stream";
 import { apiError } from "./authorize";
 import { accessLostError } from "./coordination-auth";
 import { listProjectEvents, listSessionEvents, streamProjectEvents } from "./events";
@@ -146,7 +150,9 @@ function handlerOptions(): OpenAPIHandlerOptions<ApiContext> {
     interceptors: [
       // oRPC answers 500 with a generic message for anything that is not an
       // ORPCError; log those, since the response says nothing about the cause.
+      // A stream whose client left while it was opening is not a failure.
       onError((error) => {
+        if (error instanceof StreamEndedError) return;
         if (!(error instanceof ORPCError) || error.status >= 500) {
           console.error("/api/v1 request failed:", error);
         }
