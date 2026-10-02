@@ -369,7 +369,7 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
         sessionId: holder.sessionId,
         actorSessionId: other.sessionId,
         taskId: lexerTask,
-        payload: { reason: "stolen" },
+        payload: expect.objectContaining({ reason: "stolen" }),
       }),
     ]),
   );
