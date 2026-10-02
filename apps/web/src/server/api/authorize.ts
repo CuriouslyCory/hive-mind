@@ -1,5 +1,5 @@
 import { API_ERRORS, type ApiErrorCode } from "@hivemind/contract";
-import type { Db } from "@hivemind/db";
+import type { Db, DbOrTransaction } from "@hivemind/db";
 import { member, project } from "@hivemind/db/schema";
 import { ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
@@ -74,7 +74,7 @@ type ProjectRow = typeof project.$inferSelect;
  * the Project key bound to it. Otherwise 404.
  */
 export async function requireReadableProject(
-  db: Db,
+  db: DbOrTransaction,
   principal: ApiPrincipal,
   projectId: string,
 ): Promise<ProjectRow> {
@@ -120,7 +120,7 @@ export async function requireKeyManager(
 }
 
 async function requireBoundProject(
-  db: Db,
+  db: DbOrTransaction,
   key: ProjectKeyPrincipal,
   projectId: string,
 ): Promise<ProjectRow> {

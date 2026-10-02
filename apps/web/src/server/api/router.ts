@@ -6,14 +6,15 @@ import {
 } from "@hivemind/contract";
 import { ProjectAccessLostError } from "@hivemind/db";
 import { OpenAPIGenerator } from "@orpc/openapi";
-import { OpenAPIHandler } from "@orpc/openapi/fetch";
+import { OpenAPIHandler, type OpenAPIHandlerOptions } from "@orpc/openapi/fetch";
 import { ORPCError, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
+import { type EventStreamSettings, StreamLifecycle } from "../realtime/event-stream";
 import { apiError } from "./authorize";
 import { accessLostError } from "./coordination-auth";
 import { listProjectEvents, listSessionEvents, streamProjectEvents } from "./events";
 import { listOrganizations, me } from "./identity";
-import { api } from "./implementer";
+import { type ApiContext, api } from "./implementer";
 import { createProjectKey, listProjectKeys, revokeProjectKey } from "./keys";
 import {
   addTask,
@@ -127,29 +128,97 @@ export function generateOpenAPIDocument() {
 
 let openAPIDocument: ReturnType<typeof generateOpenAPIDocument> | undefined;
 
-const handler = new OpenAPIHandler(router, {
-  clientInterceptors: [
-    // A mutation whose caller lost Project access while it waited for the
-    // Project lock (ADR-0014) ends with this error; answer it as the
-    // request-start check now would.
-    async ({ next }) => {
-      try {
-        return await next();
-      } catch (error) {
-        throw error instanceof ProjectAccessLostError ? accessLostError(error) : error;
-      }
-    },
-  ],
-  interceptors: [
-    // oRPC answers 500 with a generic message for anything that is not an
-    // ORPCError; log those, since the response says nothing about the cause.
-    onError((error) => {
-      if (!(error instanceof ORPCError) || error.status >= 500) {
-        console.error("/api/v1 request failed:", error);
-      }
-    }),
-  ],
-});
+/** Options of every `/api/v1` handler, as a new object each time (handlers may extend theirs). */
+function handlerOptions(): OpenAPIHandlerOptions<ApiContext> {
+  return {
+    clientInterceptors: [
+      // A mutation whose caller lost Project access while it waited for the
+      // Project lock (ADR-0014) ends with this error; answer it as the
+      // request-start check now would.
+      async ({ next }) => {
+        try {
+          return await next();
+        } catch (error) {
+          throw error instanceof ProjectAccessLostError ? accessLostError(error) : error;
+        }
+      },
+    ],
+    interceptors: [
+      // oRPC answers 500 with a generic message for anything that is not an
+      // ORPCError; log those, since the response says nothing about the cause.
+      onError((error) => {
+        if (!(error instanceof ORPCError) || error.status >= 500) {
+          console.error("/api/v1 request failed:", error);
+        }
+      }),
+    ],
+  };
+}
+
+const handler = new OpenAPIHandler(router, handlerOptions());
+
+/**
+ * The Event stream's own handler: a router with only the stream procedure,
+ * shared by `/api/v1` and the dashboard's cookie route, so both send the
+ * same frames in the same encoding. oRPC's keepalive is off here (and only
+ * here): its timer enqueues comments without regard to backpressure, while
+ * the engine sends its own heartbeat frames (ADR-0010).
+ */
+const streamHandler = new OpenAPIHandler(
+  { projects: { events: { stream: streamProjectEvents } } },
+  { ...handlerOptions(), eventIteratorKeepAliveEnabled: false },
+);
+
+/** `GET /api/v1/projects/{id}/events/stream`. */
+const EVENT_STREAM_PATH = new RegExp(`^${API_BASE_PATH}/projects/[^/]+/events/stream$`);
+
+/** Options of the handlers that can serve the Event stream. */
+export interface EventStreamHandlerOptions {
+  /** Overrides of the stream's durations and sizes, for tests. */
+  eventStream?: Partial<EventStreamSettings>;
+}
+
+/**
+ * Serves the Event stream procedure for an authenticated caller: the
+ * stream-only handler under `prefix`, with a `StreamLifecycle` in the
+ * context, whose wrapper becomes the response body. Errors before the
+ * stream opens (401, 404, 400, 500) are ordinary JSON responses, and their
+ * lifecycle ends at once.
+ */
+export async function serveEventStream(
+  request: Request,
+  prefix: `/${string}`,
+  context: Omit<ApiContext, "eventStream">,
+  options: EventStreamHandlerOptions = {},
+): Promise<Response> {
+  const lifecycle = new StreamLifecycle({
+    settings: options.eventStream,
+    requestSignal: request.signal,
+  });
+  try {
+    const result = await streamHandler.handle(request, {
+      prefix,
+      context: { ...context, eventStream: lifecycle },
+    });
+    if (!result.matched) {
+      lifecycle.end("done");
+      return errorResponse("NOT_FOUND", "No such API route.");
+    }
+    const { response } = result;
+    if (!response.body || !response.headers.get("content-type")?.startsWith("text/event-stream")) {
+      lifecycle.end("done");
+      return response;
+    }
+    const headers = new Headers(response.headers);
+    headers.set("cache-control", "no-store");
+    // Proxies that buffer responses would hold frames back.
+    headers.set("x-accel-buffering", "no");
+    return new Response(lifecycle.wrap(response.body), { status: response.status, headers });
+  } catch (error) {
+    lifecycle.end("done");
+    throw error;
+  }
+}
 
 /**
  * Builds the `/api/v1` request handler. `deps` is called per request, so the
@@ -160,9 +229,15 @@ const handler = new OpenAPIHandler(router, {
  * Order per request: body size limit (before anything parses the body),
  * principal (401 without one), then oRPC, which validates input, runs the
  * procedure's authorization and validates output. Every answer is JSON with
- * the contract's error shape; nothing redirects.
+ * the contract's error shape, except the Event stream's 200 (Server-Sent
+ * Events through `serveEventStream`); nothing redirects. The stream is served
+ * the same way whichever route file receives it; its own route file exists
+ * only to set the function duration.
  */
-export function createApiHandler(deps: () => ApiDeps): (request: Request) => Promise<Response> {
+export function createApiHandler(
+  deps: () => ApiDeps,
+  options: EventStreamHandlerOptions = {},
+): (request: Request) => Promise<Response> {
   return async (request) => {
     try {
       const url = new URL(request.url);
@@ -181,18 +256,20 @@ export function createApiHandler(deps: () => ApiDeps): (request: Request) => Pro
       const principal = await resolvePrincipal(resolved, bounded);
       if (!principal) return unauthorized();
 
-      const result = await handler.handle(bounded, {
-        prefix: API_BASE_PATH,
-        context: { ...resolved, principal, serverHeaders: withoutCredentials(bounded) },
-      });
-      if (!result.matched) return errorResponse("NOT_FOUND", "No such API route.");
-      result.response.headers.set("cache-control", "no-store");
+      const context = { ...resolved, principal, serverHeaders: withoutCredentials(bounded) };
+      let response: Response;
+      if (request.method === "GET" && EVENT_STREAM_PATH.test(url.pathname)) {
+        response = await serveEventStream(bounded, API_BASE_PATH, context, options);
+      } else {
+        const result = await handler.handle(bounded, { prefix: API_BASE_PATH, context });
+        if (!result.matched) return errorResponse("NOT_FOUND", "No such API route.");
+        response = result.response;
+      }
+      response.headers.set("cache-control", "no-store");
       // A key revoked while its request waited for the Project lock is a
       // 401 from inside a procedure; it carries the same challenge.
-      if (result.response.status === 401) {
-        result.response.headers.set("www-authenticate", "Bearer");
-      }
-      return result.response;
+      if (response.status === 401) response.headers.set("www-authenticate", "Bearer");
+      return response;
     } catch (error) {
       console.error("/api/v1 request failed:", error);
       return errorResponse("INTERNAL_SERVER_ERROR");
@@ -206,7 +283,8 @@ function unauthorized(): Response {
   return response;
 }
 
-function errorResponse(code: ApiErrorCode, message?: string): Response {
+/** A JSON error response in the contract's shape. */
+export function errorResponse(code: ApiErrorCode, message?: string): Response {
   const error = apiError(code, message);
   return json(error.toJSON(), error.status);
 }

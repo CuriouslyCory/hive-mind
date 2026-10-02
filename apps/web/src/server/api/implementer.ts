@@ -1,5 +1,6 @@
 import { apiContract } from "@hivemind/contract";
 import { implement } from "@orpc/server";
+import type { StreamLifecycle } from "../realtime/event-stream";
 import type { ApiDeps, ApiPrincipal } from "./principal";
 
 /**
@@ -11,6 +12,11 @@ export interface ApiContext extends ApiDeps {
   principal: ApiPrincipal;
   /** The request's headers without credentials, for `auth.api` calls. */
   serverHeaders: Headers;
+  /**
+   * The response lifecycle of an Event stream request, which its adapter
+   * (`serveEventStream` in router.ts) creates; absent on every other route.
+   */
+  eventStream?: StreamLifecycle;
 }
 
 /** The contract, ready to be implemented procedure by procedure. */

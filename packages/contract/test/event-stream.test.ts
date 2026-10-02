@@ -30,6 +30,7 @@ import {
   MAX_EVENT_STREAM_FRAME_BYTES,
   MAX_FEED_SEQ,
   MAX_FEED_XID,
+  readyFrameSchema,
   streamProjectEventsInputSchema,
   utf8ByteLength,
 } from "../src/index.ts";
@@ -208,6 +209,18 @@ function fixtureEvent(): Event {
 }
 
 describe("stream frames", () => {
+  it("open every stream with one bare ready frame", () => {
+    const frame = { type: "ready" };
+    expect(readyFrameSchema.parse(frame)).toEqual(frame);
+    expect(eventStreamFrameSchema.parse(frame)).toEqual(frame);
+    for (const invalid of [
+      { ...frame, cursor: feedOriginCursor(PROJECT_ID) },
+      { ...frame, id: "abc" },
+    ]) {
+      expect(eventStreamFrameSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
   it("carry a whole contract Event in event frames", () => {
     const frame = { type: "event", event: fixtureEvent() };
     expect(eventFrameSchema.parse(frame)).toEqual(frame);
