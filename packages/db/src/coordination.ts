@@ -52,15 +52,23 @@ const lockStatement = (projectId: string) =>
 const tryLockStatement = (projectId: string) =>
   sql`select pg_try_advisory_xact_lock(${COORDINATION_LOCK_NAMESPACE}::int4, hashtext(${projectId}::uuid::text)) as acquired`;
 
-async function readNow(tx: Transaction): Promise<Date> {
-  // Epoch milliseconds, since Drizzle's driver session returns timestamps
-  // from raw SQL as text in the server's format.
-  const result = await tx.execute<{ ms: string }>(
-    sql`select floor(extract(epoch from clock_timestamp()) * 1000)::bigint as ms`,
-  );
-  const ms = Number(result.rows[0]?.ms);
+/**
+ * `clock_timestamp()` as epoch milliseconds, for a select list. Epoch
+ * milliseconds because Drizzle's driver session returns timestamps from raw
+ * SQL as text in the server's format. Convert the result with `dateFromMillis`.
+ */
+export const clockMillisSql = sql`floor(extract(epoch from clock_timestamp()) * 1000)::bigint`;
+
+/** The Date for a `clockMillisSql` result (int8, read as a decimal string). */
+export function dateFromMillis(value: string | undefined): Date {
+  const ms = Number(value);
   if (!Number.isSafeInteger(ms)) throw new Error("clock_timestamp() returned no time.");
   return new Date(ms);
+}
+
+async function readNow(tx: Transaction): Promise<Date> {
+  const result = await tx.execute<{ ms: string }>(sql`select ${clockMillisSql} as ms`);
+  return dateFromMillis(result.rows[0]?.ms);
 }
 
 /**
@@ -190,10 +198,18 @@ export async function withCoordinationRead<T>(
   db: Db,
   fn: (context: CoordinationContext) => Promise<T>,
 ): Promise<T> {
-  return db.transaction(async (tx) => fn({ tx, now: await readNow(tx) }), {
-    isolationLevel: "repeatable read",
-    accessMode: "read only",
-  });
+  return withReadSnapshot(db, async (tx) => fn({ tx, now: await readNow(tx) }));
+}
+
+/**
+ * The transaction `withCoordinationRead` runs `fn` in: REPEATABLE READ and
+ * READ ONLY, so every statement reads the snapshot that the first one takes.
+ * `fn`'s first statement should read whatever must agree with that snapshot
+ * (`now`, or the Event feed's horizon in `withFeedSnapshot`). `db` must be the
+ * client, not a transaction, so the snapshot is as short as `fn`.
+ */
+export async function withReadSnapshot<T>(db: Db, fn: (tx: Transaction) => Promise<T>): Promise<T> {
+  return db.transaction(fn, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 export type TryCoordinationLockResult<T> =
