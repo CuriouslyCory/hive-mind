@@ -664,8 +664,8 @@ describe("status", () => {
       body.complete.myClaims = false;
       return Response.json(body);
     };
-    const more = await run(["status"], { ...withSession(id), fetch: truncated });
-    expect(more.stdout).toContain("(more: hivemind session claims)");
+    const more = await run(["status", "--session", id], { fetch: truncated });
+    expect(more.stdout).toContain(`(more: hivemind session claims --session ${id})`);
     const brief = await run(["status", "--brief"]);
     expect(brief.stdout.split("\n")[0]).toMatch(/^1 active Plans, 1 live Sessions/);
   });

@@ -47,7 +47,12 @@ function fullLines(status: ApiProjectStatus): string[] {
   } else {
     if (status.myClaims.length === 0) lines.push("  None.");
     lines.push(...status.myClaims.map((task) => `  ${taskLine(task)}`));
-    lines.push(...more(status.complete.myClaims, "hivemind session claims"));
+    lines.push(
+      ...more(
+        status.complete.myClaims,
+        `hivemind session claims --session ${status.selectedSessionId}`,
+      ),
+    );
   }
 
   lines.push("", "Recently ended Sessions:");
