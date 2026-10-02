@@ -362,6 +362,15 @@ describeDb("Plan helpers", () => {
       beforeSeq: all.items[1]?.seq,
     });
     expect(older).toMatchObject({ hasMore: false });
+    // Past the bigint range: refused before the query, never a cast error.
+    await expect(
+      listEvents(testDb.db, {
+        projectId: project.id,
+        filter: { kind: "project" },
+        limit: 2,
+        beforeSeq: "9223372036854775808",
+      }),
+    ).rejects.toThrow("beforeSeq must be a decimal bigint.");
     expect(older.items.map((row) => row.planId)).toEqual([first.id]);
     const ofPlan = await listEvents(testDb.db, {
       projectId: project.id,

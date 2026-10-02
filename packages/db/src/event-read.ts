@@ -17,7 +17,13 @@ export type EventFilter =
   /** Events the Session acted through or that affected it. */
   | { kind: "session"; sessionId: string };
 
-const DECIMAL = /^(?:0|[1-9][0-9]{0,19})$/;
+const DECIMAL = /^(?:0|[1-9][0-9]{0,18})$/;
+const MAX_BIGINT = 9_223_372_036_854_775_807n;
+
+/** Whether `value` is a decimal a Postgres bigint can hold, so the cast cannot fail. */
+function isSeq(value: string): boolean {
+  return DECIMAL.test(value) && BigInt(value) <= MAX_BIGINT;
+}
 
 /**
  * A page of the Project's Events matching `filter`, newest first.
@@ -38,7 +44,7 @@ export async function listEvents(
     );
   }
   if (input.beforeSeq !== undefined) {
-    if (!DECIMAL.test(input.beforeSeq)) throw new Error("beforeSeq must be a decimal string.");
+    if (!isSeq(input.beforeSeq)) throw new Error("beforeSeq must be a decimal bigint.");
     conditions.push(sql`${event.seq} < ${input.beforeSeq}::bigint`);
   }
   const rows = await db

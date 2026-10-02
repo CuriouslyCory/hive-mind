@@ -2,7 +2,7 @@ import { type Db, type EventFilter, listEvents, projectHasSession } from "@hivem
 import { authorizeProject, sessionNotFound } from "./coordination-auth";
 import { toEventDto } from "./coordination-dto";
 import { api } from "./implementer";
-import { DECIMAL_POSITION, decodeKeysetCursor, encodeKeysetCursor } from "./keyset";
+import { decodeKeysetCursor, encodeKeysetCursor, SEQ_POSITION } from "./keyset";
 import { pageLimit } from "./pagination";
 
 // Event reads (issue #12 step 5): a Project's activity and one Session's
@@ -28,7 +28,7 @@ export async function listEventPage(
   ];
   const limit = pageLimit(input.limit);
   const beforeSeq = input.cursor
-    ? decodeKeysetCursor(scope, input.cursor, [DECIMAL_POSITION])[0]
+    ? decodeKeysetCursor(scope, input.cursor, [SEQ_POSITION])[0]
     : undefined;
   const page = await listEvents(db, { projectId, filter, limit, beforeSeq });
   const last = page.items.at(-1);

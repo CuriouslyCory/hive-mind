@@ -14,9 +14,10 @@ import { toCollectionDto, toOverlapDto, toScopeDto } from "./coordination-dto";
 import { api } from "./implementer";
 import {
   type CursorScope,
-  DECIMAL_POSITION,
   decodeKeysetCursor,
+  EPOCH_MS_POSITION,
   encodeKeysetCursor,
+  SAFE_INTEGER_POSITION,
   UUID_POSITION,
 } from "./keyset";
 
@@ -34,7 +35,7 @@ export const listSessionScopes = api.projects.sessions.scopes.list.handler(
     let after: ScopeCursor | null = null;
     if (input.cursor) {
       const [ms = "", id = ""] = decodeKeysetCursor(scope, input.cursor, [
-        DECIMAL_POSITION,
+        EPOCH_MS_POSITION,
         UUID_POSITION,
       ]);
       after = { createdAt: new Date(Number(ms)), id };
@@ -105,7 +106,7 @@ function decodeOverlapCursor(scope: CursorScope, cursor: string): OverlapCursor 
   const [candidatesAfter = "", resultOffset = "", earlierIncomplete = ""] = decodeKeysetCursor(
     scope,
     cursor,
-    [OVERLAP_CANDIDATE, DECIMAL_POSITION, OVERLAP_FLAG],
+    [OVERLAP_CANDIDATE, SAFE_INTEGER_POSITION, OVERLAP_FLAG],
   );
   return {
     candidatesAfter: candidatesAfter === OVERLAP_START ? null : candidatesAfter,

@@ -26,6 +26,7 @@ import { agentSession, event } from "@hivemind/db/schema";
 import { describeDb } from "@hivemind/db/testing";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { encodeKeysetCursor } from "../src/server/api/keyset";
 import {
   type ApiHarness,
   createApiHarness,
@@ -371,6 +372,89 @@ describeDb("/api/v1 Sessions, Task actions, Scopes and status", () => {
       expect(sessionSchema.parse(await ok(call(owner.token, `${base}/${session.id}`))).status).toBe(
         "active",
       );
+    });
+  });
+
+  describe("cursors", () => {
+    // The scope hash is unkeyed, so a caller can build a well-formed cursor
+    // for a list it may read. A position outside its column's range is the
+    // list's 400, never a database error (500).
+    it("answers 400 to a forged cursor whose position is out of range", async () => {
+      const projectId = await api.createProject(owner);
+      const session = await startSession(owner.token, projectId);
+      const { plan } = await activeTask(projectId);
+      const uuidPosition = uuid();
+      const forged: [string, string][] = [
+        [
+          `/projects/${projectId}/events`,
+          encodeKeysetCursor(["events", projectId, "project", null], ["9223372036854775808"]),
+        ],
+        [
+          `/projects/${projectId}/events`,
+          encodeKeysetCursor(["events", projectId, "project", null], ["99999999999999999999"]),
+        ],
+        [
+          `/projects/${projectId}/plans`,
+          encodeKeysetCursor(["plans", projectId, null], ["2147483648"]),
+        ],
+        [
+          `/projects/${projectId}/plans/${plan.key}/tasks`,
+          encodeKeysetCursor(
+            ["plan-tasks", projectId, plan.key, null],
+            ["9999999999", uuidPosition],
+          ),
+        ],
+        [
+          `/projects/${projectId}/sessions/${session.id}/scopes`,
+          encodeKeysetCursor(
+            ["session-scopes", projectId, session.id, null],
+            ["99999999999999999999", uuidPosition],
+          ),
+        ],
+        [
+          `/projects/${projectId}/sessions/${session.id}/scopes`,
+          encodeKeysetCursor(
+            ["session-scopes", projectId, session.id, null],
+            ["253402300800000", uuidPosition],
+          ),
+        ],
+        [
+          `/projects/${projectId}/sessions/${session.id}/overlaps`,
+          encodeKeysetCursor(
+            ["overlaps", projectId, session.id],
+            ["start", "99999999999999999999", "0"],
+          ),
+        ],
+      ];
+      for (const [path, cursor] of forged) {
+        const response = await call(owner.token, `${path}?cursor=${cursor}`);
+        expect([path, response.status, await errorCode(response)]).toEqual([
+          path,
+          400,
+          "BAD_REQUEST",
+        ]);
+      }
+      // The largest values each column holds are still accepted.
+      const inRange: [string, string][] = [
+        [
+          `/projects/${projectId}/events`,
+          encodeKeysetCursor(["events", projectId, "project", null], ["9223372036854775807"]),
+        ],
+        [
+          `/projects/${projectId}/plans`,
+          encodeKeysetCursor(["plans", projectId, null], ["2147483647"]),
+        ],
+        [
+          `/projects/${projectId}/sessions/${session.id}/scopes`,
+          encodeKeysetCursor(
+            ["session-scopes", projectId, session.id, null],
+            ["253402300799999", uuidPosition],
+          ),
+        ],
+      ];
+      for (const [path, cursor] of inRange) {
+        await ok(call(owner.token, `${path}?cursor=${cursor}`));
+      }
     });
   });
 
