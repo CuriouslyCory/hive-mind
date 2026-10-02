@@ -92,7 +92,7 @@ apps/cli/dist/hivemind --server http://localhost:3000 whoami
 Tests beyond the four checks below:
 
 - **CLI tests** run as part of `pnpm test`. They need no database; many of them build and run the compiled binary.
-- **Browser tests** (Playwright: the device approval page, and the CLI flow from `login` to `logout` against `next dev`):
+- **Browser tests** (Playwright against `next dev`: the device approval page, the CLI flow from `login` to `logout`, and two compiled CLIs coordinating a Plan from two worktrees):
 
   ```bash
   pnpm --filter @hivemind/web exec playwright install chromium   # once
