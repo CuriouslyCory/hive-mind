@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, ne, or, type SQL, sql } from "drizzle-orm";
 import {
   allocatePlanNumber,
+  type CoordinationContext,
   type Transaction,
   withAuthorizedCoordinationLock,
   withCoordinationRead,
@@ -331,10 +332,24 @@ export async function getPlan(
   projectId: string,
   ref: string,
 ): Promise<PlanView | undefined> {
-  return withCoordinationRead(db, async ({ tx }) => {
-    const row = await resolvePlan(tx, projectId, ref);
-    return row && viewOf(tx, row);
-  });
+  return withCoordinationRead(db, ({ tx }) => readPlan(tx, projectId, ref));
+}
+
+/** `getPlan` inside the caller's read transaction. */
+export async function readPlan(
+  tx: Db | Transaction,
+  projectId: string,
+  ref: string,
+): Promise<PlanView | undefined> {
+  const row = await resolvePlan(tx, projectId, ref);
+  return row && viewOf(tx, row);
+}
+
+export interface ListPlansInput {
+  projectId: string;
+  status?: PlanStatus;
+  limit: number;
+  beforeNumber?: number;
 }
 
 /**
@@ -343,30 +358,36 @@ export async function getPlan(
  */
 export async function listPlans(
   db: Db,
-  input: { projectId: string; status?: PlanStatus; limit: number; beforeNumber?: number },
+  input: ListPlansInput,
 ): Promise<{ items: PlanView[]; hasMore: boolean }> {
-  return withCoordinationRead(db, async ({ tx }) => {
-    const conditions: SQL[] = [eq(plan.projectId, input.projectId)];
-    if (input.status) conditions.push(eq(plan.status, input.status));
-    if (input.beforeNumber !== undefined) {
-      conditions.push(sql`${plan.number} < ${input.beforeNumber}`);
-    }
-    const rows = await tx
-      .select()
-      .from(plan)
-      .where(and(...conditions))
-      .orderBy(desc(plan.number))
-      .limit(input.limit + 1);
-    const page = rows.slice(0, input.limit);
-    const progress = await progressOf(
-      tx,
-      page.map((row) => row.id),
-    );
-    return {
-      items: page.map((row) => ({ plan: row, progress: progress.get(row.id) ?? EMPTY_PROGRESS })),
-      hasMore: rows.length > input.limit,
-    };
-  });
+  return withCoordinationRead(db, ({ tx }) => readPlans(tx, input));
+}
+
+/** `listPlans` inside the caller's read transaction. */
+export async function readPlans(
+  tx: Db | Transaction,
+  input: ListPlansInput,
+): Promise<{ items: PlanView[]; hasMore: boolean }> {
+  const conditions: SQL[] = [eq(plan.projectId, input.projectId)];
+  if (input.status) conditions.push(eq(plan.status, input.status));
+  if (input.beforeNumber !== undefined) {
+    conditions.push(sql`${plan.number} < ${input.beforeNumber}`);
+  }
+  const rows = await tx
+    .select()
+    .from(plan)
+    .where(and(...conditions))
+    .orderBy(desc(plan.number))
+    .limit(input.limit + 1);
+  const page = rows.slice(0, input.limit);
+  const progress = await progressOf(
+    tx,
+    page.map((row) => row.id),
+  );
+  return {
+    items: page.map((row) => ({ plan: row, progress: progress.get(row.id) ?? EMPTY_PROGRESS })),
+    hasMore: rows.length > input.limit,
+  };
 }
 
 export type UpdatePlanOutcome =
@@ -725,31 +746,39 @@ export async function addTask(
  */
 export async function listPlanTasks(
   db: Db,
-  input: {
-    projectId: string;
-    ref: string;
-    status?: TaskStatus;
-    limit: number;
-    after?: { position: number; id: string };
-  },
+  input: ListPlanTasksInput,
 ): Promise<{ items: TaskView[]; hasMore: boolean } | undefined> {
-  return withCoordinationRead(db, async ({ tx, now }) => {
-    const row = await resolvePlan(tx, input.projectId, input.ref);
-    if (!row) return undefined;
-    const conditions: SQL[] = [eq(task.planId, row.id), eq(task.projectId, input.projectId)];
-    if (input.status) conditions.push(eq(task.status, input.status));
-    if (input.after) {
-      conditions.push(
-        sql`(${task.position}, ${task.id}) > (${input.after.position}, ${input.after.id}::uuid)`,
-      );
-    }
-    const rows = await selectTaskViews(tx)
-      .where(and(...conditions))
-      .orderBy(asc(task.position), asc(task.id))
-      .limit(input.limit + 1);
-    return {
-      items: rows.slice(0, input.limit).map((view) => toTaskView(view, now)),
-      hasMore: rows.length > input.limit,
-    };
-  });
+  return withCoordinationRead(db, (context) => readPlanTasks(context, input));
+}
+
+export interface ListPlanTasksInput {
+  projectId: string;
+  ref: string;
+  status?: TaskStatus;
+  limit: number;
+  after?: { position: number; id: string };
+}
+
+/** `listPlanTasks` inside the caller's read transaction, judging claims at its `now`. */
+export async function readPlanTasks(
+  { tx, now }: CoordinationContext,
+  input: ListPlanTasksInput,
+): Promise<{ items: TaskView[]; hasMore: boolean } | undefined> {
+  const row = await resolvePlan(tx, input.projectId, input.ref);
+  if (!row) return undefined;
+  const conditions: SQL[] = [eq(task.planId, row.id), eq(task.projectId, input.projectId)];
+  if (input.status) conditions.push(eq(task.status, input.status));
+  if (input.after) {
+    conditions.push(
+      sql`(${task.position}, ${task.id}) > (${input.after.position}, ${input.after.id}::uuid)`,
+    );
+  }
+  const rows = await selectTaskViews(tx)
+    .where(and(...conditions))
+    .orderBy(asc(task.position), asc(task.id))
+    .limit(input.limit + 1);
+  return {
+    items: rows.slice(0, input.limit).map((view) => toTaskView(view, now)),
+    hasMore: rows.length > input.limit,
+  };
 }

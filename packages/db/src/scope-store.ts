@@ -344,52 +344,56 @@ export async function listScopes(
   db: Db,
   input: ListScopesInput,
 ): Promise<ScopeStoreOutcome<{ items: Scope[]; nextCursor: ScopeCursor | null }>> {
-  const limit = pageLimit(input.limit);
-  return withCoordinationRead(db, async ({ tx, now }) => {
-    const conditions: (SQL | undefined)[] = [eq(scope.projectId, input.projectId)];
-    if (input.sessionId !== undefined) {
-      const [session] = await tx
-        .select({ id: agentSession.id })
-        .from(agentSession)
-        .where(
-          and(eq(agentSession.id, input.sessionId), eq(agentSession.projectId, input.projectId)),
-        )
-        .limit(1);
-      if (!session) return { status: "not_found" };
-      conditions.push(eq(scope.sessionId, input.sessionId));
-    } else {
-      conditions.push(
-        inArray(
-          scope.sessionId,
-          tx
-            .select({ id: agentSession.id })
-            .from(agentSession)
-            .where(and(eq(agentSession.projectId, input.projectId), liveSessionCondition(now))),
-        ),
-      );
-    }
-    if (input.source !== undefined) conditions.push(eq(scope.source, input.source));
-    if (input.after) {
-      conditions.push(
-        or(
-          gt(scope.createdAt, input.after.createdAt),
-          and(eq(scope.createdAt, input.after.createdAt), gt(scope.id, input.after.id)),
-        ),
-      );
-    }
+  return withCoordinationRead(db, (context) => readScopes(context, input));
+}
 
-    const rows = await tx
-      .select()
-      .from(scope)
-      .where(and(...conditions))
-      .orderBy(asc(scope.createdAt), asc(scope.id))
-      .limit(limit + 1);
-    const items = rows.slice(0, limit);
-    const last = items.at(-1);
-    const nextCursor =
-      rows.length > limit && last ? { createdAt: last.createdAt, id: last.id } : null;
-    return { status: "ok", items, nextCursor };
-  });
+/** `listScopes` inside the caller's read transaction, at its `now`. */
+export async function readScopes(
+  { tx, now }: CoordinationContext,
+  input: ListScopesInput,
+): Promise<ScopeStoreOutcome<{ items: Scope[]; nextCursor: ScopeCursor | null }>> {
+  const limit = pageLimit(input.limit);
+  const conditions: (SQL | undefined)[] = [eq(scope.projectId, input.projectId)];
+  if (input.sessionId !== undefined) {
+    const [session] = await tx
+      .select({ id: agentSession.id })
+      .from(agentSession)
+      .where(and(eq(agentSession.id, input.sessionId), eq(agentSession.projectId, input.projectId)))
+      .limit(1);
+    if (!session) return { status: "not_found" };
+    conditions.push(eq(scope.sessionId, input.sessionId));
+  } else {
+    conditions.push(
+      inArray(
+        scope.sessionId,
+        tx
+          .select({ id: agentSession.id })
+          .from(agentSession)
+          .where(and(eq(agentSession.projectId, input.projectId), liveSessionCondition(now))),
+      ),
+    );
+  }
+  if (input.source !== undefined) conditions.push(eq(scope.source, input.source));
+  if (input.after) {
+    conditions.push(
+      or(
+        gt(scope.createdAt, input.after.createdAt),
+        and(eq(scope.createdAt, input.after.createdAt), gt(scope.id, input.after.id)),
+      ),
+    );
+  }
+
+  const rows = await tx
+    .select()
+    .from(scope)
+    .where(and(...conditions))
+    .orderBy(asc(scope.createdAt), asc(scope.id))
+    .limit(limit + 1);
+  const items = rows.slice(0, limit);
+  const last = items.at(-1);
+  const nextCursor =
+    rows.length > limit && last ? { createdAt: last.createdAt, id: last.id } : null;
+  return { status: "ok", items, nextCursor };
 }
 
 // --- Touched-path collections -------------------------------------------------
