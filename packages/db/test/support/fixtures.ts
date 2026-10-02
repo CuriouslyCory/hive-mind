@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import type { Db } from "../../src/index.ts";
 import { creatorColumns, type Principal, sessionOwnerColumns } from "../../src/principal.ts";
-import { organization, user } from "../../src/schema/auth.ts";
+import { apikey, member, organization, user } from "../../src/schema/auth.ts";
 import { agentSession, plan, task } from "../../src/schema/coordination.ts";
 import { project } from "../../src/schema/project.ts";
+import { projectApiKey } from "../../src/schema/project-api-key.ts";
 
 // Rows for database tests of the coordination schema. They insert directly,
 // without the coordination lock or Events, so tests can set up any state.
@@ -28,7 +30,49 @@ export async function insertUser(db: Db) {
   );
 }
 
-/** An organization with one Project, and a User to act in it. */
+/**
+ * A User who is a Member of `organizationId`. Coordination changes recheck
+ * the caller's access under the Project lock, so every User that acts in a
+ * Project must be one.
+ */
+export async function insertMember(db: Db, organizationId: string) {
+  const row = await insertUser(db);
+  await db.insert(member).values({ organizationId, userId: row.id, role: "member" });
+  return row;
+}
+
+async function organizationOf(db: Db, projectId: string): Promise<string> {
+  const [row] = await db
+    .select({ organizationId: project.organizationId })
+    .from(project)
+    .where(eq(project.id, projectId));
+  if (!row) throw new Error(`Project ${projectId} does not exist.`);
+  return row.organizationId;
+}
+
+/** A User who is a Member of the Organization that owns `projectId`. */
+export async function insertProjectMember(db: Db, projectId: string) {
+  return insertMember(db, await organizationOf(db, projectId));
+}
+
+/** A live Project key bound to `projectId`, as a principal. */
+export async function insertProjectKey(
+  db: Db,
+  projectId: string,
+): Promise<Principal & { kind: "project_key" }> {
+  const organizationId = await organizationOf(db, projectId);
+  const key = first(
+    await db
+      .insert(apikey)
+      .values({ referenceId: organizationId, key: `hash-${randomUUID()}` })
+      .returning(),
+    "apikey",
+  );
+  await db.insert(projectApiKey).values({ keyId: key.id, projectId, organizationId });
+  return { kind: "project_key", keyId: key.id };
+}
+
+/** An organization with one Project, and a User (a Member) to act in it. */
 export async function insertProject(db: Db) {
   const slug = `org-${randomUUID().slice(0, 8)}`;
   const org = first(await db.insert(organization).values({ name: slug, slug }).returning(), "org");
@@ -39,7 +83,7 @@ export async function insertProject(db: Db) {
       .returning(),
     "project",
   );
-  return { organization: org, project: row, user: await insertUser(db) };
+  return { organization: org, project: row, user: await insertMember(db, org.id) };
 }
 
 export async function insertPlan(

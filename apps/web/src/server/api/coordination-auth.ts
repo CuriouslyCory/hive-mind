@@ -5,13 +5,14 @@ import type {
   PlanClosed,
   PlanNotFound,
   Principal,
+  ProjectAccessLostError,
   SessionEnded,
   SessionForbidden,
   SessionNotFound,
 } from "@hivemind/db";
 import type { project } from "@hivemind/db/schema";
 import type { ORPCError } from "@orpc/server";
-import { apiError, requireReadableProject } from "./authorize";
+import { apiError, projectNotFound, requireReadableProject } from "./authorize";
 import { invalidCursor } from "./keyset";
 import type { ApiPrincipal } from "./principal";
 
@@ -38,7 +39,9 @@ import type { ApiPrincipal } from "./principal";
 //    of Plan writes), never 404.
 //
 // 401 (no or bad credential) is answered before any handler runs, and
-// verifier or database failures stay 500.
+// verifier or database failures stay 500. Every mutation rechecks Project
+// access once it holds the Project lock (`@hivemind/db` coordination.ts); a
+// caller that lost it meanwhile gets `accessLostError`.
 
 type ProjectRow = typeof project.$inferSelect;
 
@@ -67,6 +70,15 @@ export async function authorizeProject(
     }
   }
   return { project: row, principal: toDbPrincipal(principal) };
+}
+
+/**
+ * The answer for a caller whose access was revoked while its change waited
+ * for the Project lock: what the request-start check would now answer, 401
+ * for a deleted, disabled or expired Project key, 404 otherwise.
+ */
+export function accessLostError(error: ProjectAccessLostError) {
+  return error.reason === "key_unusable" ? apiError("UNAUTHORIZED") : projectNotFound();
 }
 
 /** The API caller as a `@hivemind/db` principal. */

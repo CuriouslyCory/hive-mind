@@ -1,5 +1,5 @@
 import { and, eq, gt, inArray, ne, type SQL, sql } from "drizzle-orm";
-import { type CoordinationContext, withCoordinationLock } from "./coordination.ts";
+import { type CoordinationContext, withAuthorizedCoordinationLock } from "./coordination.ts";
 import { insertEvent } from "./event.ts";
 import type { Db } from "./index.ts";
 import {
@@ -74,10 +74,10 @@ export type TaskActionResult<T = object> =
  */
 async function taskAction<T extends object>(
   db: Db,
-  projectId: string,
+  input: { projectId: string; principal: Principal },
   fn: (context: CoordinationContext) => Promise<TaskActionOutcome<T>>,
 ): Promise<TaskActionResult<T>> {
-  return withCoordinationLock(db, projectId, async (context) => {
+  return withAuthorizedCoordinationLock(db, input, async (context) => {
     const outcome = await fn(context);
     if (outcome.status !== "ok") return outcome;
     return { ...outcome, view: await loadTaskView(context.tx, outcome.task.id, context.now) };
@@ -163,87 +163,83 @@ export async function claimTask(
   db: Db,
   input: TaskActionInput & { steal?: boolean },
 ): Promise<TaskActionResult<{ stolenFromSessionId: string | null }>> {
-  return taskAction<{ stolenFromSessionId: string | null }>(
-    db,
-    input.projectId,
-    async (context) => {
-      const { tx, now } = context;
-      const loaded = await loadAction(context, input);
-      if (loaded.status !== "ok") return loaded;
-      const { session, task: before, holder } = loaded;
-      const notLive = notLiveSessionConflict(session);
-      if (notLive) return notLive;
-      if (loaded.planStatus !== "active") {
-        return conflict(
-          `The Plan is ${loaded.planStatus}; Tasks can be claimed only in an active Plan.`,
-        );
-      }
-      if (before.status === "done") return conflict("The Task is done.");
-      if (holder?.id === session.id && isClaimUsable(before, holder, now)) {
-        return { status: "ok", task: before, changed: false, stolenFromSessionId: null };
-      }
+  return taskAction<{ stolenFromSessionId: string | null }>(db, input, async (context) => {
+    const { tx, now } = context;
+    const loaded = await loadAction(context, input);
+    if (loaded.status !== "ok") return loaded;
+    const { session, task: before, holder } = loaded;
+    const notLive = notLiveSessionConflict(session);
+    if (notLive) return notLive;
+    if (loaded.planStatus !== "active") {
+      return conflict(
+        `The Plan is ${loaded.planStatus}; Tasks can be claimed only in an active Plan.`,
+      );
+    }
+    if (before.status === "done") return conflict("The Task is done.");
+    if (holder?.id === session.id && isClaimUsable(before, holder, now)) {
+      return { status: "ok", task: before, changed: false, stolenFromSessionId: null };
+    }
 
-      const eligible = input.steal ? sql`true` : claimableCondition(now);
-      const leaseExpiresAt = new Date(now.getTime() + CLAIM_LEASE_MS);
-      const [claimed] = await tx
-        .update(task)
-        .set({ claimedBySessionId: session.id, claimedAt: now, leaseExpiresAt, updatedAt: now })
-        .where(
-          and(
-            eq(task.id, before.id),
-            eq(task.projectId, input.projectId),
-            ne(task.status, "done"),
-            sql`exists (select 1 from ${plan} where ${plan.id} = ${task.planId} and ${plan.status} = 'active')`,
-            eligible,
-          ),
-        )
-        .returning();
-      if (!claimed) return notHolderConflict(loaded, now);
+    const eligible = input.steal ? sql`true` : claimableCondition(now);
+    const leaseExpiresAt = new Date(now.getTime() + CLAIM_LEASE_MS);
+    const [claimed] = await tx
+      .update(task)
+      .set({ claimedBySessionId: session.id, claimedAt: now, leaseExpiresAt, updatedAt: now })
+      .where(
+        and(
+          eq(task.id, before.id),
+          eq(task.projectId, input.projectId),
+          ne(task.status, "done"),
+          sql`exists (select 1 from ${plan} where ${plan.id} = ${task.planId} and ${plan.status} = 'active')`,
+          eligible,
+        ),
+      )
+      .returning();
+    if (!claimed) return notHolderConflict(loaded, now);
 
-      let stolenFromSessionId: string | null = null;
-      const actor = { ...input.principal, sessionId: session.id };
-      if (holder && before.leaseExpiresAt) {
-        if (holder.id !== session.id && isClaimUsable(before, holder, now)) {
-          stolenFromSessionId = holder.id;
-        } else {
-          // The old claim had lapsed: record when, attributed to the system.
-          const holderState = sessionState(holder, now);
-          const leaseLapsed = before.leaseExpiresAt.getTime() <= now.getTime();
-          const reason = leaseLapsed
-            ? "lease_expired"
-            : holderState.effectiveStatus === "stale"
-              ? "session_stale"
-              : "session_abandoned";
-          await insertEvent(tx, {
-            projectId: input.projectId,
-            type: "task.released",
-            payload: { reason },
-            actor: { kind: "system" },
-            planId: before.planId,
-            taskId: before.id,
-            sessionId: holder.id,
-            now,
-            effectiveAt: leaseLapsed
-              ? before.leaseExpiresAt
-              : reason === "session_stale"
-                ? staleAt(holder)
-                : abandonedAt(holder),
-          });
-        }
+    let stolenFromSessionId: string | null = null;
+    const actor = { ...input.principal, sessionId: session.id };
+    if (holder && before.leaseExpiresAt) {
+      if (holder.id !== session.id && isClaimUsable(before, holder, now)) {
+        stolenFromSessionId = holder.id;
+      } else {
+        // The old claim had lapsed: record when, attributed to the system.
+        const holderState = sessionState(holder, now);
+        const leaseLapsed = before.leaseExpiresAt.getTime() <= now.getTime();
+        const reason = leaseLapsed
+          ? "lease_expired"
+          : holderState.effectiveStatus === "stale"
+            ? "session_stale"
+            : "session_abandoned";
+        await insertEvent(tx, {
+          projectId: input.projectId,
+          type: "task.released",
+          payload: { reason },
+          actor: { kind: "system" },
+          planId: before.planId,
+          taskId: before.id,
+          sessionId: holder.id,
+          now,
+          effectiveAt: leaseLapsed
+            ? before.leaseExpiresAt
+            : reason === "session_stale"
+              ? staleAt(holder)
+              : abandonedAt(holder),
+        });
       }
-      await insertEvent(tx, {
-        projectId: input.projectId,
-        type: "task.claimed",
-        payload: { stolenFromSessionId, leaseExpiresAt: leaseExpiresAt.toISOString() },
-        actor,
-        planId: claimed.planId,
-        taskId: claimed.id,
-        sessionId: session.id,
-        now,
-      });
-      return { status: "ok", task: claimed, changed: true, stolenFromSessionId };
-    },
-  );
+    }
+    await insertEvent(tx, {
+      projectId: input.projectId,
+      type: "task.claimed",
+      payload: { stolenFromSessionId, leaseExpiresAt: leaseExpiresAt.toISOString() },
+      actor,
+      planId: claimed.planId,
+      taskId: claimed.id,
+      sessionId: session.id,
+      now,
+    });
+    return { status: "ok", task: claimed, changed: true, stolenFromSessionId };
+  });
 }
 
 /**
@@ -254,7 +250,7 @@ export async function claimTask(
  * of the caller whose lease expired is released as `lease_expired`.
  */
 export async function releaseTask(db: Db, input: TaskActionInput): Promise<TaskActionResult> {
-  return taskAction<object>(db, input.projectId, async (context) => {
+  return taskAction<object>(db, input, async (context) => {
     const { tx, now } = context;
     const loaded = await loadAction(context, input);
     if (loaded.status !== "ok") return loaded;
@@ -287,7 +283,7 @@ export async function releaseTask(db: Db, input: TaskActionInput): Promise<TaskA
  * Plan allows no start). Already `in_progress` is a no-op.
  */
 export async function startTask(db: Db, input: TaskActionInput): Promise<TaskActionResult> {
-  return taskAction<object>(db, input.projectId, async (context) => {
+  return taskAction<object>(db, input, async (context) => {
     const { tx, now } = context;
     const loaded = await loadAction(context, input);
     if (loaded.status !== "ok") return loaded;
@@ -342,7 +338,7 @@ export async function blockTask(
   db: Db,
   input: TaskActionInput & { reason: string },
 ): Promise<TaskActionResult> {
-  return taskAction<object>(db, input.projectId, async (context) => {
+  return taskAction<object>(db, input, async (context) => {
     const { tx, now } = context;
     const loaded = await loadAction(context, input);
     if (loaded.status !== "ok") return loaded;
@@ -383,7 +379,7 @@ export async function blockTask(
  * no-op, so a retried `done` succeeds.
  */
 export async function doneTask(db: Db, input: TaskActionInput): Promise<TaskActionResult> {
-  return taskAction<object>(db, input.projectId, async (context) => {
+  return taskAction<object>(db, input, async (context) => {
     const { tx, now } = context;
     const loaded = await loadAction(context, input);
     if (loaded.status !== "ok") return loaded;

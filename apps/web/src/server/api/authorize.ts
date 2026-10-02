@@ -134,6 +134,7 @@ async function requireBoundProject(
   return row;
 }
 
-function projectNotFound() {
+/** The 404 for a Project that is absent or not accessible to the caller. */
+export function projectNotFound() {
   return apiError("NOT_FOUND", "Project not found.");
 }

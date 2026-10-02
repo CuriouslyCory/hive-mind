@@ -159,7 +159,7 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
  * Creates a record under a caller-supplied UUID, or recognizes a retry of an
  * earlier creation. Looks the UUID up first; if it is free, runs `create`,
  * which must insert the record with `request.id`, its fingerprint and
- * principal, together with its Event. Run it inside `withCoordinationLock` for
+ * principal, together with its Event. Run it inside the coordination lock for
  * `request.projectId`, before allocating anything (such as a Plan number) that
  * a replay must not consume.
  *

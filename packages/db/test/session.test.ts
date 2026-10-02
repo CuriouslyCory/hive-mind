@@ -13,7 +13,13 @@ import {
 } from "../src/index.ts";
 import { agentSession, task as taskTable } from "../src/schema/coordination.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
-import { insertPlan, insertSession, insertTask, insertUser } from "./support/fixtures.ts";
+import {
+  insertPlan,
+  insertProjectKey,
+  insertProjectMember,
+  insertSession,
+  insertTask,
+} from "./support/fixtures.ts";
 import {
   ago,
   dbNow,
@@ -127,7 +133,7 @@ describeDb("startSession", () => {
     expect(await startSession(testDb.db, { ...input, intent: "Other" })).toMatchObject({
       status: "conflict",
     });
-    const stranger = await insertUser(testDb.db);
+    const stranger = await insertProjectMember(testDb.db, project.id);
     expect(
       await startSession(testDb.db, { ...input, principal: otherUser(stranger.id) }),
     ).toMatchObject({ status: "conflict" });
@@ -169,7 +175,7 @@ describeDb("updateSession", () => {
   it("separates foreign, absent and terminal Sessions", async () => {
     const { project, principal } = await setupProject(testDb.db);
     const session = await sessionAged(testDb.db, project.id, principal, MINUTE);
-    const stranger = await insertUser(testDb.db);
+    const stranger = await insertProjectMember(testDb.db, project.id);
     const changes = { intent: "x" };
 
     expect(
@@ -185,7 +191,7 @@ describeDb("updateSession", () => {
       await updateSession(testDb.db, {
         projectId: other.project.id,
         sessionId: session.id,
-        principal,
+        principal: other.principal,
         changes,
       }),
     ).toEqual({ status: "not_found" });
@@ -397,12 +403,11 @@ describeDb("heartbeatSession", () => {
   it("is owner-only", async () => {
     const { project, principal } = await setupProject(testDb.db);
     const session = await sessionAged(testDb.db, project.id, principal, MINUTE);
-    const stranger = await insertUser(testDb.db);
     expect(
       await heartbeatSession(testDb.db, {
         projectId: project.id,
         sessionId: session.id,
-        principal: { kind: "project_key", keyId: stranger.id },
+        principal: await insertProjectKey(testDb.db, project.id),
         collectionId: uuid(),
       }),
     ).toEqual({ status: "forbidden" });

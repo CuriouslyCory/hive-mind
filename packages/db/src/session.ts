@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
-import { withCoordinationLock, withCoordinationRead } from "./coordination.ts";
+import { withAuthorizedCoordinationLock, withCoordinationRead } from "./coordination.ts";
 import { createOnce } from "./creation.ts";
 import { insertEvent, type SessionUpdateField } from "./event.ts";
 import { creationFingerprint, sha256Hex } from "./fingerprint.ts";
@@ -81,7 +81,7 @@ export async function startSession(db: Db, input: StartSessionInput): Promise<St
     gitCommit: input.gitCommit,
     worktreePath: input.worktreePath,
   });
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const outcome = await createOnce(
       tx,
       {
@@ -167,7 +167,7 @@ export async function updateSession(
   db: Db,
   input: UpdateSessionInput,
 ): Promise<SessionResult<{ session: SessionState; changed: boolean }>> {
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const loaded = await loadOwnedSession(
       tx,
       input.projectId,
@@ -238,7 +238,7 @@ export async function attachSession(
   db: Db,
   input: AttachSessionInput,
 ): Promise<SessionResult<{ session: SessionState; changed: boolean }>> {
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const loaded = await loadOwnedSession(
       tx,
       input.projectId,
@@ -393,7 +393,7 @@ export async function heartbeatSession(
   db: Db,
   input: HeartbeatSessionInput,
 ): Promise<SessionResult<HeartbeatResult>> {
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const loaded = await loadOwnedSession(
       tx,
       input.projectId,
@@ -503,7 +503,7 @@ export async function endSession(
   input: EndSessionInput,
 ): Promise<SessionResult<{ session: SessionState; changed: boolean; releasedTaskIds: string[] }>> {
   const fingerprint = sha256Hex(input.summary);
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const loaded = await loadOwnedSession(
       tx,
       input.projectId,

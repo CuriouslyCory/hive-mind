@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
   blockTask,
@@ -8,7 +9,10 @@ import {
   releaseTask,
   startTask,
 } from "../src/index.ts";
+import type { Principal } from "../src/principal.ts";
+import { apikey, member } from "../src/schema/auth.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
+import { insertProjectKey, insertProjectMember } from "./support/fixtures.ts";
 import {
   eventsOf,
   holdProjectLock,
@@ -218,6 +222,78 @@ describeDb("coordination races", () => {
         (e) => e.type === "task.released",
       );
       expect(released).toHaveLength(1);
+    }
+  });
+
+  // ADR-0014: the transaction rechecks access once it holds the Project lock,
+  // so a revocation committed while a request waited for the lock stops it.
+  it("refuses a change whose caller lost access while it waited for the lock", async () => {
+    const revocations = [
+      {
+        name: "Membership removed",
+        reason: "no_access",
+        principal: async (projectId: string): Promise<Principal> => ({
+          kind: "user",
+          userId: (await insertProjectMember(testDb.db, projectId)).id,
+        }),
+        revoke: (principal: Principal) =>
+          principal.kind === "user"
+            ? testDb.db.delete(member).where(eq(member.userId, principal.userId))
+            : Promise.reject(new Error("user expected")),
+      },
+      {
+        name: "key deleted",
+        reason: "key_unusable",
+        principal: (projectId: string) => insertProjectKey(testDb.db, projectId),
+        revoke: (principal: Principal) =>
+          principal.kind === "project_key"
+            ? testDb.db.delete(apikey).where(eq(apikey.id, principal.keyId))
+            : Promise.reject(new Error("key expected")),
+      },
+      {
+        name: "key disabled",
+        reason: "key_unusable",
+        principal: (projectId: string) => insertProjectKey(testDb.db, projectId),
+        revoke: (principal: Principal) =>
+          principal.kind === "project_key"
+            ? testDb.db.update(apikey).set({ enabled: false }).where(eq(apikey.id, principal.keyId))
+            : Promise.reject(new Error("key expected")),
+      },
+      {
+        name: "key expired",
+        reason: "key_unusable",
+        principal: (projectId: string) => insertProjectKey(testDb.db, projectId),
+        revoke: (principal: Principal) =>
+          principal.kind === "project_key"
+            ? testDb.db
+                .update(apikey)
+                .set({ expiresAt: new Date(Date.now() - SECOND) })
+                .where(eq(apikey.id, principal.keyId))
+            : Promise.reject(new Error("key expected")),
+      },
+    ] as const;
+    for (const revocation of revocations) {
+      const { project, task } = await setupProject(testDb.db);
+      const principal = await revocation.principal(project.id);
+      const session = await sessionAged(testDb.db, project.id, principal, MINUTE);
+      const before = (await eventsOf(testDb.db, project.id)).length;
+      const holder = await holdProjectLock(pools.db(0), project.id);
+      const claim = claimTask(pools.db(1), {
+        projectId: project.id,
+        taskId: task.id,
+        sessionId: session.id,
+        principal,
+      }).catch((error: unknown) => error);
+      await waitForLockWaiters(testDb);
+      await revocation.revoke(principal);
+      await holder.release();
+      const outcome = await claim;
+      expect([revocation.name, outcome]).toEqual([
+        revocation.name,
+        expect.objectContaining({ name: "ProjectAccessLostError", reason: revocation.reason }),
+      ]);
+      expect((await taskRow(testDb.db, task.id)).claimedBySessionId).toBeNull();
+      expect(await eventsOf(testDb.db, project.id)).toHaveLength(before);
     }
   });
 });
