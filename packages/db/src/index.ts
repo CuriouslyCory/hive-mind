@@ -50,6 +50,22 @@ export {
   MAX_EVENT_DTO_BYTES,
   MAX_EVENT_PAYLOAD_BYTES,
 } from "./event.ts";
+export {
+  compareFeedPositions,
+  FEED_EVENT_OVERHEAD_BYTES,
+  FEED_ORIGIN,
+  type FeedBatch,
+  type FeedPollInput,
+  type FeedPosition,
+  type FeedSnapshotContext,
+  feedPositionOf,
+  isFeedPosition,
+  isIssuableFeedPosition,
+  MAX_FEED_BATCH_EVENTS,
+  pollEventFeed,
+  readFeedHorizon,
+  withFeedSnapshot,
+} from "./event-feed.ts";
 export { type EventFilter, listEvents, projectHasSession } from "./event-read.ts";
 export {
   type CanonicalJson,

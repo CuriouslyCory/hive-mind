@@ -1,0 +1,9 @@
+[
+  {
+    "procedure": "projects.events.stream",
+    "operationId": "streamProjectEvents",
+    "method": "GET",
+    "path": "/projects/{id}/events/stream",
+    "successStatus": 200
+  }
+]

@@ -6,6 +6,7 @@ export * from "./common.ts";
 export * from "./config.ts";
 export * from "./errors.ts";
 export * from "./event.ts";
+export * from "./event-stream.ts";
 export * from "./keys.ts";
 export * from "./output.ts";
 export * from "./plan.ts";

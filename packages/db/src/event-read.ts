@@ -19,10 +19,11 @@ export type EventFilter =
   | { kind: "session"; sessionId: string };
 
 const DECIMAL = /^(?:0|[1-9][0-9]{0,18})$/;
-const MAX_BIGINT = 9_223_372_036_854_775_807n;
+/** The largest value a Postgres bigint holds. */
+export const MAX_BIGINT = 9_223_372_036_854_775_807n;
 
 /** Whether `value` is a decimal a Postgres bigint can hold, so the cast cannot fail. */
-function isSeq(value: string): boolean {
+export function isSeq(value: string): boolean {
   return DECIMAL.test(value) && BigInt(value) <= MAX_BIGINT;
 }
 
