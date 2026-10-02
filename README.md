@@ -114,6 +114,7 @@ export HIVEMIND_URL=http://localhost:3000
 hivemind login
 mkdir /tmp/hm-scratch && cd /tmp/hm-scratch && git init -q
 hivemind init --name 'Local test' --slug local-test     # writes .hivemind.json
+git add .hivemind.json && git commit -q -m 'Bind to hive-mind'   # linked worktrees need it committed
 
 export HIVEMIND_SESSION="$(hivemind session start --agent claude-code --intent 'Try the M2 workflow')"
 hivemind plan create --title 'Try the M2 workflow' --status active   # prints PLAN-1
@@ -133,7 +134,7 @@ unset HIVEMIND_SESSION
 
 - Heartbeats are manual in M2: run `hivemind session heartbeat` from the worktree at least every 60 seconds while working (a background loop is in [docs/cli.md](docs/cli.md#heartbeats)). Five minutes without one makes the Session stale, and its claims can then be taken; after 30 minutes it is abandoned.
 - Each heartbeat also uploads the worktree's changed paths as touched Scopes, so `scope check` warns when two live Sessions work on the same files.
-- To see two agents interact, run a second Session from another worktree of the same repository (`git worktree add`), with its own `HIVEMIND_SESSION`.
+- To see two agents interact, run a second Session from another worktree of the same repository, with its own `HIVEMIND_SESSION`: `git worktree add ../hm-scratch-b`, then `cd ../hm-scratch-b` and start a Session there. A linked worktree finds `.hivemind.json` only in its own checkout, which is why the binding is committed above.
 - Stale and abandoned Sessions and expired claims take effect at request time. The minute sweep that stores them runs only on Production; to run it locally, see [docs/setup.md](docs/setup.md#h8-coordination-sweep-cron).
 
 ## Checks

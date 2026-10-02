@@ -15,7 +15,7 @@ import {
   CLI_ERROR_CODES,
   CliError,
   isCliError,
-  UNCERTAIN_OUTCOME_CODES,
+  isUncertainOutcome,
   usageError,
 } from "../errors.ts";
 import { bindingDirFor } from "../project-resolution.ts";
@@ -244,7 +244,7 @@ async function resolveProject(
       repoUrl,
     });
   } catch (error) {
-    if (isCliError(error) && UNCERTAIN_OUTCOME_CODES.has(error.code)) {
+    if (isCliError(error) && isUncertainOutcome(error)) {
       throw new CliError(error.code, error.message, {
         hint: `The Project may have been created anyway. Rerun the same command with --org ${organizationId}: it reuses that Project instead of creating a second one.`,
         cause: error,

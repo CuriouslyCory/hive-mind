@@ -23,7 +23,7 @@ import type {
   PageInput,
 } from "../client.ts";
 import type { CommandContext, OptionSpec } from "../command.ts";
-import { CliError, isCliError, UNCERTAIN_OUTCOME_CODES, usageError } from "../errors.ts";
+import { CliError, isCliError, isUncertainOutcome, usageError } from "../errors.ts";
 import { resolveProjectId } from "../project-resolution.ts";
 
 export const PROJECT_OPTION = {
@@ -157,10 +157,12 @@ export function choiceOf<T extends string>(value: string, choices: readonly T[],
 }
 
 /**
- * Runs a create whose request carries the caller-generated `id`. When the
- * answer is lost (timeout, network, cancel, unreadable), the record may exist:
- * the error names the id and how to check before retrying with `--id`, and
- * the same guidance goes to stderr in `--json` mode too. Nothing is retried.
+ * Runs a create whose request carries the caller-generated `id`. Unless the
+ * server definitively rejected it (see `isUncertainOutcome`), the record may
+ * exist: a 5xx can come after the commit, and a lost answer says nothing.
+ * The error then names the id and how to check before retrying with `--id`,
+ * and the same guidance goes to stderr in `--json` mode too, so the id is
+ * never lost. Nothing is retried.
  */
 export async function createWithRecovery<T>(
   context: CommandContext,
@@ -170,12 +172,13 @@ export async function createWithRecovery<T>(
   try {
     return await create();
   } catch (error) {
-    if (isCliError(error) && UNCERTAIN_OUTCOME_CODES.has(error.code)) {
-      const hint = `The ${recovery.what} may have been created anyway with id ${recovery.id}. Check with '${recovery.inspect}' before retrying, and retry only with --id ${recovery.id}.`;
-      if (context.json) context.report.warn(hint);
-      throw new CliError(error.code, error.message, { hint, cause: error });
-    }
-    throw error;
+    if (!isUncertainOutcome(error)) throw error;
+    const hint = `The ${recovery.what} may have been created anyway with id ${recovery.id}. Check with '${recovery.inspect}' before retrying, and retry only with --id ${recovery.id}.`;
+    // An unexpected exception becomes the shell's INTERNAL_ERROR with its own
+    // hint, so the guidance goes to stderr in every mode.
+    if (context.json || !isCliError(error)) context.report.warn(hint);
+    if (!isCliError(error)) throw error;
+    throw new CliError(error.code, error.message, { hint, cause: error });
   }
 }
 
@@ -220,7 +223,7 @@ export function scopeLine(scope: ApiScope): string {
 }
 
 export function eventLine(event: ApiEvent): string {
-  const session = event.actorSessionId ? `  session ${event.actorSessionId}` : "";
+  const session = event.actorSessionId ? `  Session ${event.actorSessionId}` : "";
   const payload = event.payload as { message?: unknown } | null;
   const message =
     event.type === "plan.log_appended" && typeof payload?.message === "string"

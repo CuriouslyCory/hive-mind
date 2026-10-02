@@ -4,6 +4,7 @@ import {
   HEARTBEAT_INTERVAL_SECONDS,
   hostnameSchema,
   liveSessionStatusSchema,
+  MAX_COLLECTION_PATHS,
   SESSION_STATUSES,
   sessionIntentSchema,
   sessionListFilterSchema,
@@ -219,6 +220,10 @@ async function heartbeatRun(context: CommandContext) {
   const renewal = heartbeat
     ? "The heartbeat itself succeeded (leases renewed)."
     : "No heartbeat was sent.";
+  // The next heartbeat replaces an unfinished collection, which marks the
+  // Session's Scope history incomplete for good (docs/cli.md, "Resuming an
+  // upload"), so the only safe remedy is a resume before then.
+  const resumeFirst = `Resume with '${resume}' before the next heartbeat (pause any heartbeat loop first), while the worktree is unchanged. A new heartbeat instead of a resume leaves this Session's Scope coverage incomplete until it ends; only a new Session resets it.`;
 
   const touched = await collectTouchedPaths(context.cwd, context.env);
   if (!touched.available) {
@@ -237,7 +242,7 @@ async function heartbeatRun(context: CommandContext) {
       throw new CliError(CLI_ERROR_CODES.io, `Cannot collect touched paths: ${touched.failure}.`);
     }
     context.report.warn(
-      `Cannot collect touched paths: ${touched.failure}. ${renewal} Coverage stays incomplete; retry with '${resume}'.`,
+      `Cannot collect touched paths: ${touched.failure}. ${renewal} ${resumeFirst}`,
     );
     return { data, human: heartbeatLines(data, sessionId) };
   }
@@ -247,7 +252,7 @@ async function heartbeatRun(context: CommandContext) {
   data.omittedPathCount = manifest.omittedPathCount;
   if (manifest.omittedPathCount > 0) {
     context.report.warn(
-      `${manifest.omittedPathCount} changed paths cannot be sent (not UTF-8, longer than 256 bytes, or beyond ${manifest.pathCount} paths); this Session's Scope coverage is incomplete from now on.`,
+      `${manifest.omittedPathCount} changed paths cannot be sent (not UTF-8, longer than 256 bytes, or beyond the first ${MAX_COLLECTION_PATHS.toLocaleString("en-US")} paths); this Session's Scope coverage is incomplete from now on.`,
     );
   }
   const upload = await uploadCollection(api, { projectId, sessionId, collectionId }, manifest);
@@ -263,12 +268,10 @@ async function heartbeatRun(context: CommandContext) {
     const failed = `Touched-path upload failed at ${upload.error.step} (${upload.error.code}): ${upload.error.message}`;
     if (resumeId !== undefined || upload.error.code === CLI_ERROR_CODES.cancelled) {
       throw new CliError(upload.error.code, failed, {
-        hint: `${renewal} If the worktree is unchanged, resume with '${resume}'; otherwise run a new heartbeat.`,
+        hint: `${renewal} ${resumeFirst}`,
       });
     }
-    context.report.warn(
-      `${failed}. ${renewal} Coverage stays incomplete; resume with '${resume}' while the worktree is unchanged, or wait for the next heartbeat.`,
-    );
+    context.report.warn(`${failed}. ${renewal} ${resumeFirst}`);
   }
   return { data, human: heartbeatLines(data, sessionId) };
 }
@@ -482,24 +485,29 @@ export const sessionList: CommandDefinition = {
   },
 };
 
+/** The Session given as `<sessionId>` or by `--session`/`HIVEMIND_SESSION`. */
+function shownSessionOf(context: CommandContext): string {
+  const positional = context.args[0];
+  if (positional !== undefined && context.options.session !== undefined) {
+    throw usageError("Give the Session either as <sessionId> or with --session, not both.");
+  }
+  return positional === undefined ? sessionOf(context) : requireUuid(positional, "<sessionId>");
+}
+
 export const sessionShow: CommandDefinition = {
   name: "session show",
   summary: "Show a Session with its claims, Scopes and recent Events",
   description: [
     "Any Session of the Project; default: --session, then HIVEMIND_SESSION.",
     "Shows the first page of its claims, Scopes and Events (newest first);",
-    "each has its own nextCursor in --json output.",
+    "each has its own nextCursor in --json output. Page through older Events",
+    "with 'hivemind session log' and through Scopes with 'hivemind scope list'.",
   ].join("\n"),
   args: [{ name: "sessionId", description: "The Session's id" }],
   options: { limit: LIMIT_OPTION, session: SESSION_OPTION, project: PROJECT_OPTION },
   examples: ["hivemind session show", "hivemind session show 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f"],
   async run(context) {
-    const positional = context.args[0];
-    if (positional !== undefined && context.options.session !== undefined) {
-      throw usageError("Give the Session either as <sessionId> or with --session, not both.");
-    }
-    const sessionId =
-      positional === undefined ? sessionOf(context) : requireUuid(positional, "<sessionId>");
+    const sessionId = shownSessionOf(context);
     const page = pageOf(context);
     const projectId = await projectOf(context);
     const api = await context.api();
@@ -509,21 +517,50 @@ export const sessionShow: CommandDefinition = {
       api.listSessionScopes(projectId, sessionId, page),
       api.listSessionEvents(projectId, sessionId, page),
     ]);
-    const more = "More exist: see nextCursor in --json output.";
+    const more = (command: string, cursor: string | null) =>
+      `More: hivemind ${command} --session ${sessionId} --cursor ${cursor}`;
     return {
       data: { session, claims, scopes, events },
       human: [
         ...sessionLines(session),
         "",
         "Claims:",
-        ...pageLines(claims, taskLine, "None.", more),
+        ...pageLines(claims, taskLine, "None.", "More claims exist: see --json output."),
         "",
         "Scopes:",
-        ...pageLines(scopes, scopeLine, "None.", more),
+        ...pageLines(scopes, scopeLine, "None.", more("scope list", scopes.nextCursor)),
         "",
         "Events:",
-        ...pageLines(events, eventLine, "None.", more),
+        ...pageLines(events, eventLine, "None.", more("session log", events.nextCursor)),
       ],
     };
+  },
+};
+
+export const sessionLog: CommandDefinition = {
+  name: "session log",
+  summary: "List a Session's Events, newest first (one page)",
+  description: [
+    "Any Session of the Project; default: --session, then HIVEMIND_SESSION.",
+    "Lists the Session's Events (heartbeats, claims, Scopes, status changes),",
+    "newest first. Pass nextCursor to --cursor for older Events.",
+  ].join("\n"),
+  args: [{ name: "sessionId", description: "The Session's id" }],
+  options: {
+    limit: LIMIT_OPTION,
+    cursor: CURSOR_OPTION,
+    session: SESSION_OPTION,
+    project: PROJECT_OPTION,
+  },
+  examples: [
+    "hivemind session log",
+    "hivemind session log 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f --limit 100 --json",
+  ],
+  async run(context) {
+    const sessionId = shownSessionOf(context);
+    const page = pageOf(context);
+    const projectId = await projectOf(context);
+    const events = await (await context.api()).listSessionEvents(projectId, sessionId, page);
+    return { data: events, human: pageLines(events, eventLine, "No Events.") };
   },
 };

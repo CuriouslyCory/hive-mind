@@ -106,6 +106,8 @@ const garbledBody = () =>
     headers: { "content-type": "application/json" },
   });
 
+const gatewayTimeout = () => new Response("FUNCTION_INVOCATION_TIMEOUT", { status: 504 });
+
 /** Aborts `controller` once the fake fetch has handed out a stalled body. */
 function abortSoon(controller: AbortController): void {
   setTimeout(() => controller.abort(new Error("received SIGINT")), 50);
@@ -443,12 +445,14 @@ describe("init", () => {
     expect(bound(root)).toEqual({ version: 1, projectId: other.id });
   });
 
-  it("says a rerun reuses the Project when the create answer is lost or unreadable", async () => {
+  it("says a rerun reuses the Project when the create answer is lost, unreadable or a 5xx", async () => {
     await loginAs();
     const controller = new AbortController();
     const cases = [
       { respond: stalledBody, code: "CANCELLED", signal: controller.signal },
       { respond: garbledBody, code: "INVALID_RESPONSE", signal: undefined },
+      // A 5xx may come after the commit, e.g. a platform gateway timeout.
+      { respond: gatewayTimeout, code: "GATEWAY_TIMEOUT", signal: undefined },
     ];
     for (const { respond, code, signal } of cases) {
       const { root } = gitRepo();
@@ -630,6 +634,7 @@ describe("key", () => {
         code: "INVALID_RESPONSE",
         signal: undefined,
       },
+      { respond: gatewayTimeout, code: "GATEWAY_TIMEOUT", signal: undefined },
     ];
     for (const { respond, code, signal } of cases) {
       if (signal) abortSoon(controller);
