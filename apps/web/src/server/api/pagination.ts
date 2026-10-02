@@ -19,6 +19,13 @@ export interface Position {
 const POSITION_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
 const POSITION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+function isPositionTime(value: string): boolean {
+  if (!POSITION_TIME.test(value) || Number(value.slice(0, 4)) < 1) return false;
+  const seconds = value.slice(0, 19);
+  const parsed = new Date(`${seconds}Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 19) === seconds;
+}
+
 /** The row's position as exact UTC text; select it alongside the row. */
 export function positionOf(createdAt: AnyColumn): SQL<string> {
   return sql<string>`to_char(${createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
@@ -38,7 +45,7 @@ export function decodeCursor(cursor: string): Position {
   const [createdAt = "", id = "", ...rest] = Buffer.from(cursor, "base64url")
     .toString("utf8")
     .split("|");
-  if (rest.length > 0 || !POSITION_TIME.test(createdAt) || !POSITION_ID.test(id)) {
+  if (rest.length > 0 || !isPositionTime(createdAt) || !POSITION_ID.test(id)) {
     throw apiError("BAD_REQUEST", "The cursor is not one this server returned.");
   }
   return { createdAt, id };

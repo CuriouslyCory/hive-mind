@@ -102,7 +102,10 @@ interface EventRow {
   seq: string;
   writerXid: string;
   payloadVersion: 1;
-  actor: { kind: "user"; userId: string } | { kind: "project_key"; keyId: string };
+  actor:
+    | { kind: "user"; userId: string }
+    | { kind: "project_key"; keyId: string }
+    | { kind: "system" };
   actorSessionId: string | null;
   planId: string | null;
   taskId: string | null;
@@ -157,7 +160,7 @@ export function createFakeCoordination(): FakeCoordination {
   const planNumbers = new Map<string, number>();
   let seq = 0;
 
-  const actorOf = (owner: FakeOwner): EventRow["actor"] =>
+  const actorOf = (owner: FakeOwner): Exclude<EventRow["actor"], { kind: "system" }> =>
     owner.kind === "user"
       ? { kind: "user", userId: owner.userId }
       : { kind: "project_key", keyId: owner.keyId };
@@ -432,12 +435,30 @@ export function createFakeCoordination(): FakeCoordination {
         }
         const stolen = heldByOther ? holder.id : null;
         task.claim = { sessionId: session.id, claimedAt: now(), leaseExpiresAt: later(300) };
-        addEvent("task.claimed", owner, {
-          taskId: task.id,
-          planId: plan.id,
-          sessionId: session.id,
-          actorSessionId: session.id,
-        });
+        if (stolen !== null) {
+          addEvent(
+            "task.released",
+            owner,
+            {
+              taskId: task.id,
+              planId: plan.id,
+              sessionId: stolen,
+              actorSessionId: session.id,
+            },
+            { reason: "stolen" },
+          );
+        }
+        addEvent(
+          "task.claimed",
+          owner,
+          {
+            taskId: task.id,
+            planId: plan.id,
+            sessionId: session.id,
+            actorSessionId: session.id,
+          },
+          { stolenFromSessionId: stolen },
+        );
         return ok({ task: taskDto(task), changed: true, stolenFromSessionId: stolen });
       }
       if (sub === "release") {

@@ -366,6 +366,27 @@ describe("task", () => {
       sessionId: rival,
       steal: true,
     });
+    const formerLog = await run(["session", "log", holder]);
+    expect(formerLog.stdout).toContain(
+      `task.released  Session ${rival}  reason stolen, from Session ${holder}`,
+    );
+    expect((await run(["session", "log", rival])).stdout).toContain(
+      `task.claimed  Session ${rival}  from Session ${holder}`,
+    );
+    const release = api.coordination.events.find((event) => event.type === "task.released");
+    expect(release).toBeDefined();
+    if (!release) throw new Error("Expected the stolen release Event.");
+    release.actorSessionId = null;
+    release.actor = { kind: "system" };
+    release.payload = { reason: "lease_expired" };
+    expect((await run(["session", "log", holder])).stdout).toContain(
+      `task.released  reason lease_expired, from Session ${holder}`,
+    );
+    release.actorSessionId = holder;
+    release.payload = { reason: "released" };
+    expect((await run(["session", "log", holder])).stdout).toContain(
+      `task.released  Session ${holder}  reason released\n`,
+    );
   });
 
   it("adds, starts, blocks with a reason from stdin, finishes and releases", async () => {
@@ -471,6 +492,37 @@ describe("session", () => {
     });
     expect((await json(["session", "end", "--summary", "Other."], as)).code).toBe(2);
     expect((await json(["session", "end"], as)).code).toBe(1);
+  });
+
+  it("pages Session claims to the end and session show points to the next page", async () => {
+    const { planKey, taskId } = await activePlanWithTask();
+    const id = await startSession();
+    const as = withSession(id);
+    const added = await json(["task", "add", planKey, "--title", "Docs"]);
+    const otherId = at(added.data, "task.id");
+    await json(["task", "claim", taskId], as);
+    await json(["task", "claim", otherId], as);
+    const first = await json(["session", "claims", "--limit", "1"], as);
+    const cursor = at(first.data, "nextCursor");
+    expect(cursor).toEqual(expect.any(String));
+    expect((await run(["session", "show", id, "--limit", "1"])).stdout).toContain(
+      `More: hivemind session claims --session ${id} --cursor ${cursor}`,
+    );
+    const seen = [at(first.data, "items.0.id")];
+    let next: string | null = cursor;
+    while (next !== null) {
+      const page = await json(["session", "claims", id, "--limit", "1", "--cursor", next]);
+      expect(coordinationRequests().at(-1)?.url).toContain(`cursor=${next}`);
+      seen.push(at(page.data, "items.0.id"));
+      next = at<string | null>(page.data, "nextCursor");
+    }
+    expect(seen).toEqual([taskId, otherId]);
+    expect((await json(["session", "claims", id, "--session", id])).code).toBe(1);
+    const empty = await startSession();
+    expect((await run(["session", "claims", empty])).stdout).toBe("No claims.\n");
+    expect((await run(["session", "claims", "--help"])).stdout).toContain(
+      "start again without --cursor",
+    );
   });
 
   it("pages older Session Events with session log, which session show points to", async () => {
@@ -606,6 +658,14 @@ describe("status", () => {
     const full = await run(["status"], withSession(id));
     expect(full.stdout).toContain("Active Plans:");
     expect(full.stdout).toContain("(selected)");
+    const truncated: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      const body = (await response.json()) as { complete: { myClaims: boolean } };
+      body.complete.myClaims = false;
+      return Response.json(body);
+    };
+    const more = await run(["status", "--session", id], { fetch: truncated });
+    expect(more.stdout).toContain(`(more: hivemind session claims --session ${id})`);
     const brief = await run(["status", "--brief"]);
     expect(brief.stdout.split("\n")[0]).toMatch(/^1 active Plans, 1 live Sessions/);
   });

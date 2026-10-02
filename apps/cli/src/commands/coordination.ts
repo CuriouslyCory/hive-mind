@@ -224,12 +224,26 @@ export function scopeLine(scope: ApiScope): string {
 
 export function eventLine(event: ApiEvent): string {
   const session = event.actorSessionId ? `  Session ${event.actorSessionId}` : "";
-  const payload = event.payload as { message?: unknown } | null;
+  const payload = event.payload as {
+    message?: unknown;
+    reason?: unknown;
+    stolenFromSessionId?: unknown;
+  } | null;
+  const details: string[] = [];
+  if (event.type === "task.released") {
+    if (typeof payload?.reason === "string") details.push(`reason ${payload.reason}`);
+    if (typeof event.sessionId === "string" && event.sessionId !== event.actorSessionId) {
+      details.push(`from Session ${event.sessionId}`);
+    }
+  } else if (event.type === "task.claimed" && typeof payload?.stolenFromSessionId === "string") {
+    details.push(`from Session ${payload.stolenFromSessionId}`);
+  }
+  const detail = details.length > 0 ? `  ${details.join(", ")}` : "";
   const message =
     event.type === "plan.log_appended" && typeof payload?.message === "string"
       ? `  ${firstLine(payload.message)}`
       : "";
-  return `${event.createdAt}  #${event.seq}  ${event.type}${session}${message}`;
+  return `${event.createdAt}  #${event.seq}  ${event.type}${session}${detail}${message}`;
 }
 
 export function overlapLine(overlap: ApiOverlap): string {

@@ -238,7 +238,7 @@ The CLI never picks a Session from the server's list of live Sessions. A value t
 
 - **Required** by `task claim`, `release`, `start`, `block` and `done`; `session heartbeat`, `update`, `attach` and `end`; and every `scope` command. Without a Session they fail with `USAGE_ERROR`.
 - **Optional attribution** on `plan create`, `plan edit`, `plan status`, `plan log --message` and `task add`: when a Session is set, the Event names it as the actor Session. It must then be one of your Sessions and not ended or abandoned, so unset `HIVEMIND_SESSION` after `session end`; otherwise these commands fail with `CONFLICT` (exit 2).
-- `status` uses the Session only to fill `myClaims`. `session show` and `session log` take the Session as an argument or from these two sources.
+- `status` uses the Session only to fill `myClaims`. `session show`, `session claims` and `session log` take the Session as an argument or from these two sources.
 
 Your Sessions are the ones started by the same principal: the same User (through any of that User's logins) or the same Project key. A Session started with a Project key cannot be used with a user login, and the reverse.
 
@@ -287,7 +287,7 @@ A Task's status is `todo`, `in_progress`, `blocked` or `done`. Claiming is separ
   { "schemaVersion": 1, "command": "task claim", "ok": false, "error": { "code": "CONFLICT", "message": "https://hivemind.curiouslycory.com: The Task is claimed by Session 5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9 (intent: \"Run the coordination checks\")." } }
   ```
 
-- **`--steal`** takes over a claim that another live Session holds. Use it only when you know the holder has stopped working on the Task, for example after asking its owner. A holder that stopped heartbeating does not need it: its claim becomes claimable when the lease expires or the Session goes stale. The takeover is recorded as a `task.claimed` Event naming the former holder, `data.stolenFromSessionId` is set, and stderr says `Took the claim over from Session <id>`. From then on the former holder's heartbeats, releases, starts, blocks and dones cannot change the new claim.
+- **`--steal`** takes over a claim that another live Session holds. Use it only when you know the holder has stopped working on the Task, for example after asking its owner. A holder that stopped heartbeating does not need it: its claim becomes claimable when the lease expires or the Session goes stale. The takeover writes two Events: `task.released` with reason `stolen`, affecting the former holder, then `task.claimed` naming it in `stolenFromSessionId`. Both Sessions' `session log` show it; `data.stolenFromSessionId` is set, and stderr says `Took the claim over from Session <id>`. From then on the former holder's heartbeats, releases, starts, blocks and dones cannot change the new claim.
 
 ### Sessions and timing
 
@@ -400,10 +400,11 @@ List commands return one page: `{ items, nextCursor }`. `--limit` takes 1 to 100
 | `plan show <plan> [--task-status <s>]` | the Plan, then its Tasks by position |
 | `plan log <plan>` | newest Event first |
 | `session log [sessionId]` | newest Event first |
+| `session claims [sessionId]` | oldest claim first; the cursor stops working once its claim ends |
 | `session list [--status <s>]` | newest Session first; `<s>` is `live`, `terminal`, `active`, `idle`, `stale`, `ended` or `abandoned` |
 | `scope list` | oldest Scope first |
 
-`session show` and `status` return only the first page or the first 20 entries of each section; `nextCursor` and `complete` say whether more exist. Page through a Session's older Events with `session log <sessionId> --cursor <events.nextCursor>` and its Scopes with `scope list --session <sessionId> --cursor <scopes.nextCursor>`; `session show` prints these commands when more exist.
+`session show` and `status` return only the first page or the first 20 entries of each section; `nextCursor` and `complete` say whether more exist. Page through a Session's claims with `session claims <sessionId> --cursor <claims.nextCursor>`, older Events with `session log <sessionId> --cursor <events.nextCursor>` and its Scopes with `scope list --session <sessionId> --cursor <scopes.nextCursor>`; `session show` prints these commands when more exist. If a claims cursor returns `BAD_REQUEST` because its claim was released, stolen or expired, start again without `--cursor`.
 
 ### Text input
 
@@ -488,6 +489,7 @@ All take `--project <id>`. "Session" means `--session <id>` or `HIVEMIND_SESSION
 | `session end` | `--summary` or `--summary-file` (required), Session | `{ session, changed, releasedClaims: { items, complete } }` |
 | `session list` | `--status <s>`, `--limit`, `--cursor` | `{ items, nextCursor }` of Sessions |
 | `session show [sessionId]` | `--limit` | `{ session, claims, scopes, events }`, each list a first page |
+| `session claims [sessionId]` | `--limit`, `--cursor`, Session | `{ items, nextCursor }` of the Session's claims |
 | `session log [sessionId]` | `--limit`, `--cursor` | `{ items, nextCursor }` of the Session's Events |
 | `scope add <pattern>` | Session | `{ scope, created }` |
 | `scope remove <scopeId>` | Session | `{ id, sessionId, removed }` |

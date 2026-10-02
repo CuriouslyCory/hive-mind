@@ -758,6 +758,20 @@ describeDb("/api/v1 Sessions, Task actions, Scopes and status", () => {
         task: { claim: { sessionId: thief.id } },
       });
 
+      const history = eventPageSchema.parse(
+        await ok(call(owner.token, `/projects/${projectA}/sessions/${former.id}/events`)),
+      );
+      expect(history.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "task.released",
+            sessionId: former.id,
+            actorSessionId: thief.id,
+            taskId: task.id,
+            payload: { reason: "stolen" },
+          }),
+        ]),
+      );
       const conflict = taskClaimConflictMessage({ sessionId: thief.id, intent: "Second" });
       for (const [action, extra] of [
         ["release", {}],

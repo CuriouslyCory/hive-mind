@@ -359,6 +359,20 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
     stolenFromSessionId: holder.sessionId,
   });
   expect(stolen.stderr).toContain(`Took the claim over from Session ${holder.sessionId}`);
+  const formerLog = okData<{ items: EventDto[] }>(
+    await as(holder, ["session", "log", holder.sessionId, "--json"]),
+  );
+  expect(formerLog.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        type: "task.released",
+        sessionId: holder.sessionId,
+        actorSessionId: other.sessionId,
+        taskId: lexerTask,
+        payload: expect.objectContaining({ reason: "stolen" }),
+      }),
+    ]),
+  );
   for (const action of ["start", "done", "release"]) {
     const rejected = failure(await as(holder, ["task", action, lexerTask, "--json"]), 2);
     expect(rejected.code).toBe("CONFLICT");
