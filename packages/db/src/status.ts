@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
-import { withCoordinationRead } from "./coordination.ts";
+import { type CoordinationContext, withCoordinationRead } from "./coordination.ts";
 import type { Db } from "./index.ts";
 import {
   claimedBy,
@@ -83,152 +83,160 @@ export async function projectStatus(
   db: Db,
   input: ProjectStatusInput,
 ): Promise<({ status: "ok" } & ProjectStatus) | NotFound> {
+  return withCoordinationRead(db, (context) => readProjectStatus(context, input));
+}
+
+/**
+ * `projectStatus` inside the caller's read transaction (`withCoordinationRead`
+ * or another READ ONLY REPEATABLE READ snapshot), so it can be combined with
+ * other reads of the same snapshot.
+ */
+export async function readProjectStatus(
+  context: CoordinationContext,
+  input: ProjectStatusInput,
+): Promise<({ status: "ok" } & ProjectStatus) | NotFound> {
   const limit = input.sectionLimit;
-  return withCoordinationRead(db, async (context) => {
-    const { tx, now } = context;
-    let selected: SessionState | null = null;
-    if (input.sessionId !== undefined) {
-      const [row] = await tx
-        .select()
-        .from(agentSession)
-        .where(
-          and(eq(agentSession.id, input.sessionId), eq(agentSession.projectId, input.projectId)),
-        )
-        .limit(1);
-      if (!row) return notFound;
-      selected = sessionState(row, now);
-    }
-
-    const planRows = await tx
-      .select()
-      .from(plan)
-      .where(and(eq(plan.projectId, input.projectId), eq(plan.status, "active")))
-      .orderBy(desc(plan.number))
-      .limit(limit + 1);
-    const shownPlans = planRows.slice(0, limit);
-    const progress = await progressOf(
-      tx,
-      shownPlans.map((row) => row.id),
-    );
-    const activePlans = section(
-      planRows.map((row) => ({ plan: row, progress: progress.get(row.id) ?? emptyProgress() })),
-      limit,
-    );
-
-    const liveRows = await tx
+  const { tx, now } = context;
+  let selected: SessionState | null = null;
+  if (input.sessionId !== undefined) {
+    const [row] = await tx
       .select()
       .from(agentSession)
-      .where(and(eq(agentSession.projectId, input.projectId), liveSessionCondition(now)))
-      .orderBy(desc(agentSession.lastHeartbeatAt), desc(agentSession.id))
-      .limit(limit + 1);
-    const terminalRows = await tx
-      .select()
-      .from(agentSession)
+      .where(and(eq(agentSession.id, input.sessionId), eq(agentSession.projectId, input.projectId)))
+      .limit(1);
+    if (!row) return notFound;
+    selected = sessionState(row, now);
+  }
+
+  const planRows = await tx
+    .select()
+    .from(plan)
+    .where(and(eq(plan.projectId, input.projectId), eq(plan.status, "active")))
+    .orderBy(desc(plan.number))
+    .limit(limit + 1);
+  const shownPlans = planRows.slice(0, limit);
+  const progress = await progressOf(
+    tx,
+    shownPlans.map((row) => row.id),
+  );
+  const activePlans = section(
+    planRows.map((row) => ({ plan: row, progress: progress.get(row.id) ?? emptyProgress() })),
+    limit,
+  );
+
+  const liveRows = await tx
+    .select()
+    .from(agentSession)
+    .where(and(eq(agentSession.projectId, input.projectId), liveSessionCondition(now)))
+    .orderBy(desc(agentSession.lastHeartbeatAt), desc(agentSession.id))
+    .limit(limit + 1);
+  const terminalRows = await tx
+    .select()
+    .from(agentSession)
+    .where(
+      and(
+        eq(agentSession.projectId, input.projectId),
+        inArray(effectiveSessionStatusSql(now), ["ended", "abandoned"]) as SQL,
+      ),
+    )
+    .orderBy(desc(agentSession.lastHeartbeatAt), desc(agentSession.id))
+    .limit(limit + 1);
+  const live = liveRows.slice(0, limit);
+  const terminal = terminalRows.slice(0, limit);
+  const numbers = await planNumbers(tx, input.projectId, [
+    ...live.map((row) => row.attachedPlanId),
+    ...terminal.map((row) => row.attachedPlanId),
+  ]);
+  const view = (row: typeof agentSession.$inferSelect): SessionView => ({
+    session: sessionState(row, now),
+    attachedPlanNumber: row.attachedPlanId ? (numbers.get(row.attachedPlanId) ?? null) : null,
+  });
+
+  const liveIds = live.map((row) => row.id);
+  const declared =
+    liveIds.length === 0
+      ? []
+      : await tx
+          .select()
+          .from(scope)
+          .where(and(inArray(scope.sessionId, liveIds), eq(scope.source, "declared")))
+          .orderBy(asc(scope.createdAt), asc(scope.id));
+  const touchedCounts =
+    liveIds.length === 0
+      ? []
+      : await tx
+          .select({ sessionId: scope.sessionId, count: sql<number>`count(*)::int` })
+          .from(scope)
+          .where(and(inArray(scope.sessionId, liveIds), eq(scope.source, "touched")))
+          .groupBy(scope.sessionId);
+  const claimCounts =
+    liveIds.length === 0
+      ? []
+      : await tx
+          .select({ sessionId: task.claimedBySessionId, count: sql<number>`count(*)::int` })
+          .from(task)
+          .where(
+            and(
+              eq(task.projectId, input.projectId),
+              inArray(task.claimedBySessionId, liveIds),
+              gt(task.leaseExpiresAt, now),
+            ),
+          )
+          .groupBy(task.claimedBySessionId);
+  const declaredBySession = Map.groupBy(declared, (row) => row.sessionId);
+  const touchedBySession = new Map(touchedCounts.map((row) => [row.sessionId, row.count]));
+  const claimsBySession = new Map(claimCounts.map((row) => [row.sessionId, row.count]));
+  const liveSessions = {
+    items: live.map((row) => ({
+      ...view(row),
+      declaredScopes: declaredBySession.get(row.id) ?? [],
+      touchedScopeCount: touchedBySession.get(row.id) ?? 0,
+      claimCount: claimsBySession.get(row.id) ?? 0,
+    })),
+    complete: liveRows.length <= limit,
+  };
+
+  let myClaims: StatusSection<TaskView> = { items: [], complete: true };
+  if (selected && isSessionLive(selected, now)) {
+    const rows = await selectTaskViews(tx)
       .where(
         and(
-          eq(agentSession.projectId, input.projectId),
-          inArray(effectiveSessionStatusSql(now), ["ended", "abandoned"]) as SQL,
+          eq(task.projectId, input.projectId),
+          claimedBy(selected.id),
+          gt(task.leaseExpiresAt, now),
         ),
       )
-      .orderBy(desc(agentSession.lastHeartbeatAt), desc(agentSession.id))
+      .orderBy(asc(task.claimedAt), asc(task.id))
       .limit(limit + 1);
-    const live = liveRows.slice(0, limit);
-    const terminal = terminalRows.slice(0, limit);
-    const numbers = await planNumbers(tx, input.projectId, [
-      ...live.map((row) => row.attachedPlanId),
-      ...terminal.map((row) => row.attachedPlanId),
-    ]);
-    const view = (row: typeof agentSession.$inferSelect): SessionView => ({
-      session: sessionState(row, now),
-      attachedPlanNumber: row.attachedPlanId ? (numbers.get(row.attachedPlanId) ?? null) : null,
-    });
+    myClaims = section(
+      rows.map((row) => toTaskView(row, now)),
+      limit,
+    );
+  }
 
-    const liveIds = live.map((row) => row.id);
-    const declared =
-      liveIds.length === 0
-        ? []
-        : await tx
-            .select()
-            .from(scope)
-            .where(and(inArray(scope.sessionId, liveIds), eq(scope.source, "declared")))
-            .orderBy(asc(scope.createdAt), asc(scope.id));
-    const touchedCounts =
-      liveIds.length === 0
-        ? []
-        : await tx
-            .select({ sessionId: scope.sessionId, count: sql<number>`count(*)::int` })
-            .from(scope)
-            .where(and(inArray(scope.sessionId, liveIds), eq(scope.source, "touched")))
-            .groupBy(scope.sessionId);
-    const claimCounts =
-      liveIds.length === 0
-        ? []
-        : await tx
-            .select({ sessionId: task.claimedBySessionId, count: sql<number>`count(*)::int` })
-            .from(task)
-            .where(
-              and(
-                eq(task.projectId, input.projectId),
-                inArray(task.claimedBySessionId, liveIds),
-                gt(task.leaseExpiresAt, now),
-              ),
-            )
-            .groupBy(task.claimedBySessionId);
-    const declaredBySession = Map.groupBy(declared, (row) => row.sessionId);
-    const touchedBySession = new Map(touchedCounts.map((row) => [row.sessionId, row.count]));
-    const claimsBySession = new Map(claimCounts.map((row) => [row.sessionId, row.count]));
-    const liveSessions = {
-      items: live.map((row) => ({
-        ...view(row),
-        declaredScopes: declaredBySession.get(row.id) ?? [],
-        touchedScopeCount: touchedBySession.get(row.id) ?? 0,
-        claimCount: claimsBySession.get(row.id) ?? 0,
-      })),
-      complete: liveRows.length <= limit,
-    };
-
-    let myClaims: StatusSection<TaskView> = { items: [], complete: true };
-    if (selected && isSessionLive(selected, now)) {
-      const rows = await selectTaskViews(tx)
-        .where(
-          and(
-            eq(task.projectId, input.projectId),
-            claimedBy(selected.id),
-            gt(task.leaseExpiresAt, now),
-          ),
-        )
-        .orderBy(asc(task.claimedAt), asc(task.id))
-        .limit(limit + 1);
-      myClaims = section(
-        rows.map((row) => toTaskView(row, now)),
-        limit,
-      );
-    }
-
-    const summary = await summarizeProjectOverlaps(context, {
-      projectId: input.projectId,
-      sessionLimit: OVERLAP_SESSION_LIMIT,
-      overlapLimit: OVERLAP_ITEM_LIMIT,
-    });
-    const overlapItems = selected
-      ? summary.overlaps.flatMap((item) => orientTo(item, selected.id))
-      : summary.overlaps;
-    const overlaps = {
-      items: overlapItems.slice(0, limit),
-      complete: summary.complete && overlapItems.length <= limit,
-    };
-
-    return {
-      status: "ok",
-      asOf: now,
-      selectedSessionId: selected?.id ?? null,
-      activePlans,
-      liveSessions,
-      myClaims,
-      recentTerminalSessions: section(terminalRows.map(view), limit),
-      overlaps,
-    };
+  const summary = await summarizeProjectOverlaps(context, {
+    projectId: input.projectId,
+    sessionLimit: OVERLAP_SESSION_LIMIT,
+    overlapLimit: OVERLAP_ITEM_LIMIT,
   });
+  const overlapItems = selected
+    ? summary.overlaps.flatMap((item) => orientTo(item, selected.id))
+    : summary.overlaps;
+  const overlaps = {
+    items: overlapItems.slice(0, limit),
+    complete: summary.complete && overlapItems.length <= limit,
+  };
+
+  return {
+    status: "ok",
+    asOf: now,
+    selectedSessionId: selected?.id ?? null,
+    activePlans,
+    liveSessions,
+    myClaims,
+    recentTerminalSessions: section(terminalRows.map(view), limit),
+    overlaps,
+  };
 }
 
 function section<T>(rows: T[], limit: number): StatusSection<T> {

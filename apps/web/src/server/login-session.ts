@@ -29,6 +29,32 @@ export const getLoginSession = cache(async (): Promise<SignedIn | null> => {
 });
 
 /**
+ * Like `getLoginSession`, but always looks the login session up in the
+ * database (`disableCookieCache`), so a revoked or expired login session is
+ * refused even if a cookie cache is enabled later. Dashboard pages use it
+ * (issue #11, "Authorization and transport"). Deduplicated per request only:
+ * every navigation and `router.refresh()` checks again.
+ */
+export const getFreshLoginSession = cache(async (): Promise<SignedIn | null> => {
+  const requestHeaders = await headers();
+  const result = await auth.api.getSession({
+    headers: requestHeaders,
+    query: { disableCookieCache: true },
+  });
+  return result && { user: result.user, loginSession: result.session };
+});
+
+/**
+ * `requireLoginSession` with the database check of `getFreshLoginSession`.
+ * Call it next to every dashboard read.
+ */
+export async function requireFreshLoginSession(returnPath = "/"): Promise<SignedIn> {
+  const signedIn = await getFreshLoginSession();
+  if (!signedIn) redirect(signInPath(returnPath));
+  return signedIn;
+}
+
+/**
  * Like `getLoginSession`, but redirects to `/sign-in` when signed out, with
  * `returnPath` (validated there) as where to come back to. Call it
  * in every page and layout data read that needs a User: the proxy only checks

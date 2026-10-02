@@ -1,4 +1,5 @@
 import { and, desc, eq, or, type SQL, sql } from "drizzle-orm";
+import type { Transaction } from "./coordination.ts";
 import type { Db } from "./index.ts";
 import { agentSession } from "./schema/coordination.ts";
 import { type Event, event } from "./schema/event.ts";
@@ -30,10 +31,11 @@ export function isSeq(value: string): boolean {
  * A page of the Project's Events matching `filter`, newest first.
  * `beforeSeq` (a decimal string from a previous page) continues after that
  * page's last Event. The caller resolves the Plan or Session within the
- * Project first; ids from another Project match nothing here anyway.
+ * Project first; ids from another Project match nothing here anyway. Pass a
+ * transaction to read inside the caller's snapshot.
  */
 export async function listEvents(
-  db: Db,
+  db: Db | Transaction,
   input: { projectId: string; filter: EventFilter; limit: number; beforeSeq?: string },
 ): Promise<{ items: Event[]; hasMore: boolean }> {
   const conditions: SQL[] = [eq(event.projectId, input.projectId)];
