@@ -38,7 +38,7 @@ date: 2026-10-01
 
 - `/api/*` is excluded from the proxy (ADR-0003), so the `/api/v1` handler authenticates every request itself, and authorizes through Project → organization membership (ADR-0007, ADR-0013).
 - The contract is a compatibility promise from the first CLI release: old binaries keep calling it. A change that requires editing a v1 fixture breaks released CLIs, and review sees it as a fixture diff. M1 did not decide how an incompatible change would ship.
-- Upgrading oRPC means moving all six `@orpc/*` catalog entries together.
+- Upgrading oRPC means moving every `@orpc/*` catalog entry together (seven since M3 added `@orpc/standard-server`, #11).
 - Output validation is what keeps key secrets out of key list and revoke responses: a server change that leaked a field would fail with a 500. Contract tests check that the key metadata and list schemas reject secret fields.
 - `POST /projects` is create-or-reuse and returns 200 with `{ project, created }` in both cases, since oRPC's success status is static. `DELETE /projects/{id}/keys/{keyId}` returns 200 with JSON so the CLI has a result to print; repeating it is a 404.
 - Without a committed OpenAPI file, drift shows up as failing tests rather than as a diff. Other clients fetch the document from a deployment.
