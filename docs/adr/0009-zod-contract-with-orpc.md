@@ -43,6 +43,7 @@ date: 2026-10-01
 - `POST /projects` is create-or-reuse and returns 200 with `{ project, created }` in both cases, since oRPC's success status is static. `DELETE /projects/{id}/keys/{keyId}` returns 200 with JSON so the CLI has a result to print; repeating it is a 404.
 - Without a committed OpenAPI file, drift shows up as failing tests rather than as a diff. Other clients fetch the document from a deployment.
 - If the dashboard (M3) calls `/api/v1`, it needs cookie support with CSRF and Origin checks for mutations; M1 has no browser caller.
+- **The dashboard does not call `/api/v1`** (clarified 2026-10-01 for [#11](https://github.com/CuriouslyCory/hive-mind/issues/11)). Its pages read the database on the server, and its live updates use a separate cookie adapter, `GET /api/dashboard/projects/[projectId]/events/stream`. That route mounts only the Event stream procedure, with the same contract schemas and frames as `GET /api/v1/projects/{id}/events/stream`, accepts only GET and serves a read-only feed, so a cookie authorizes no coordination mutation. `/api/v1` stays bearer-only (ADR-0010, docs/dashboard.md).
 - M2 adds its routes to this contract, with fixtures, and writes Events in its mutations. M1's routes write no Events.
 
 ## Alternatives considered

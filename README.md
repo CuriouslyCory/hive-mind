@@ -12,7 +12,9 @@ M1 (CLI and CLI auth) adds the `hivemind` CLI, browser-approved CLI login, Proje
 
 M2 (Plans, Tasks and Sessions) is implemented and awaiting review: Plans with logs and ordered Tasks, Task claims with 5-minute leases, Sessions with manual heartbeats, declared and touched Scopes with overlap warnings, an Event for every change, and a minute Cron sweep. See [Coordinating agents](#coordinating-agents) and ADR-0014. M2 is done once it is deployed and this repository's own development has been tracked with it ([docs/dogfooding.md](docs/dogfooding.md)); its plan is [#12](https://github.com/CuriouslyCory/hive-mind/issues/12).
 
-Next come M3 (dashboard), M4 (ADRs), M5 (search), M6 (agent skills and hooks) and M7 (hardening). The full plan is in [#1](https://github.com/CuriouslyCory/hive-mind/issues/1); M0's plan is in [#2](https://github.com/CuriouslyCory/hive-mind/issues/2) and M1's in [#3](https://github.com/CuriouslyCory/hive-mind/issues/3).
+M3 (dashboard) is implemented and awaiting review: read-only Project, Plan and Session pages that update live from the Event feed over SSE. See [The dashboard](#the-dashboard) and [docs/dashboard.md](docs/dashboard.md); its plan is [#11](https://github.com/CuriouslyCory/hive-mind/issues/11).
+
+Next come M4 (ADRs), M5 (search), M6 (agent skills and hooks) and M7 (hardening). The full plan is in [#1](https://github.com/CuriouslyCory/hive-mind/issues/1); M0's plan is in [#2](https://github.com/CuriouslyCory/hive-mind/issues/2) and M1's in [#3](https://github.com/CuriouslyCory/hive-mind/issues/3).
 
 ## Workspaces
 
@@ -137,6 +139,12 @@ unset HIVEMIND_SESSION
 - To see two agents interact, run a second Session from another worktree of the same repository, with its own `HIVEMIND_SESSION`: `git worktree add ../hm-scratch-b`, then `cd ../hm-scratch-b` and start a Session there. A linked worktree finds `.hivemind.json` only in its own checkout, which is why the binding is committed above.
 - Stale and abandoned Sessions and expired claims take effect at request time. The minute sweep that stores them runs only on Production; to run it locally, see [docs/setup.md](docs/setup.md#h8-coordination-sweep-cron).
 
+## The dashboard
+
+With `pnpm dev` running, sign in at http://localhost:3000 and open `/`. It lists the Projects of your Organizations; a new User has none until `hivemind init` creates one (see [Coordinating agents](#coordinating-agents)). Open a Project to see its Plans, live Sessions and overlaps, and leave the page open while you run CLI commands: it updates within a few seconds. Plan and Session pages are linked from the overview.
+
+[docs/dashboard.md](docs/dashboard.md) covers authorization, the initial snapshot, how live updates refresh the page, the stream's bounds and the known limitations.
+
 ## Checks
 
 These are the checks CI runs. All four must pass:
@@ -157,6 +165,7 @@ CI also runs the installer tests and the browser tests on every PR. A PR that to
 ## More
 
 - [docs/cli.md](docs/cli.md): installing and using the `hivemind` CLI.
+- [docs/dashboard.md](docs/dashboard.md): the dashboard pages, their authorization and the live Event stream.
 - [docs/setup.md](docs/setup.md): one-time Vercel, Neon, GitHub OAuth, release and Cron setup, and the post-deploy checklist.
 - [docs/dogfooding.md](docs/dogfooding.md): tracking this repository's own development with hive-mind after M2 is deployed.
 - [docs/adr/](docs/adr/): architecture decision records.
