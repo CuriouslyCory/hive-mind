@@ -49,12 +49,14 @@ export interface EventPayloads {
   "task.claimed": { stolenFromSessionId: string | null; leaseExpiresAt: string };
   /**
    * The claim ended without the Task being done. The released holder is the
-   * Event's session_id. `lease_expired` and `session_abandoned` are
+   * Event's session_id. A steal releases the former holder with reason `stolen`.
+   * `lease_expired` and `session_abandoned` are
    * time-driven: actor `system`, `effectiveAt` when the threshold was crossed.
    */
   "task.released": {
     reason:
       | "released"
+      | "stolen"
       | "lease_expired"
       | "session_ended"
       | "session_stale"

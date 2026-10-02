@@ -190,8 +190,34 @@ describeDb("coordination races", () => {
     const events = await eventsOf(testDb.db, project.id);
     expect(events.map((e) => e.type)).toEqual([
       "task.claimed",
+      "task.released",
       "task.claimed",
       "session.heartbeat",
+    ]);
+  });
+
+  it("serializes competing steals and releases each previous holder once", async () => {
+    const { project, task, sessions, as } = await setup(3);
+    const [a, b, c] = sessions;
+    if (!a || !b || !c) throw new Error("setup");
+    await claimTask(testDb.db, as(a.id));
+    const results = await queueBehindLock(project.id, [
+      (pool) => claimTask(pools.db(pool), { ...as(b.id), steal: true }),
+      (pool) => claimTask(pools.db(pool), { ...as(c.id), steal: true }),
+    ]);
+    expect(results).toMatchObject([
+      { status: "ok", stolenFromSessionId: a.id },
+      { status: "ok", stolenFromSessionId: b.id },
+    ]);
+    expect((await taskRow(testDb.db, task.id)).claimedBySessionId).toBe(c.id);
+    expect(
+      (await eventsOf(testDb.db, project.id)).map((e) => [e.type, e.sessionId, e.payload]),
+    ).toEqual([
+      ["task.claimed", a.id, { stolenFromSessionId: null, leaseExpiresAt: expect.any(String) }],
+      ["task.released", a.id, { reason: "stolen" }],
+      ["task.claimed", b.id, { stolenFromSessionId: a.id, leaseExpiresAt: expect.any(String) }],
+      ["task.released", b.id, { reason: "stolen" }],
+      ["task.claimed", c.id, { stolenFromSessionId: b.id, leaseExpiresAt: expect.any(String) }],
     ]);
   });
 

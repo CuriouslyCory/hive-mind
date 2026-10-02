@@ -112,7 +112,7 @@ In a second shell, in `../hive-mind-dogfood-b`, start Session B with its own `HI
 - [ ] Both Sessions declare overlapping Scopes (for example `docs/**` and `docs/cli.md`). `hivemind scope check` in each shows the overlap with a witness path, and `hivemind status` lists it.
 - [ ] Both edit the same file and heartbeat. `scope check` shows a touched/touched overlap.
 - [ ] B claims a Task that A holds: exit 2, with A's Session id and intent in the message.
-- [ ] B claims it with `--steal`. A's `task done` on that Task then fails with exit 2, and `hivemind plan log "$PLAN"` shows the `task.claimed` Event naming the former holder.
+- [ ] B claims it with `--steal`. A's `task done` on that Task then fails with exit 2, and `hivemind plan log "$PLAN"` shows the `task.claimed` Event naming the former holder. `hivemind session log <A>` also shows `task.released` with reason `stolen`.
 - [ ] Both Sessions end with summaries. Remove the worktree with `git worktree remove ../hive-mind-dogfood-b`.
 
 ## 7. Check the record

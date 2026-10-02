@@ -23,7 +23,7 @@ One agent run, recorded from start to end: which agent, owned by which User or P
 _Avoid_: agent session, run, login session
 
 **Claim**:
-A Session's exclusive hold on a Task, with a lease that expires 5 minutes after it was last renewed. A Session can hold several claims. `--steal` moves a live claim to another Session and is recorded as an Event.
+A Session's exclusive hold on a Task, with a lease that expires 5 minutes after it was last renewed. A Session can hold several claims. `--steal` moves a live claim to another Session and is recorded in the Events of both Sessions.
 _Avoid_: lock, assignment
 
 **Heartbeat**:

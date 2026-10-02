@@ -209,6 +209,15 @@ describeDb("the Event catalog", () => {
       .from(schema.event)
       .where(eq(schema.event.projectId, project.id))
       .orderBy(asc(schema.event.seq));
+    const release = rows
+      .map(toEventDto)
+      .find((row) => row.type === "task.released" && row.payload.reason === "stolen");
+    if (!release) throw new Error("Expected a release Event");
+    expect(release).toMatchObject({
+      type: "task.released",
+      payloadVersion: 1,
+      payload: { reason: "stolen" },
+    });
     const types = rows.map((row) => toEventDto(row).type);
     expect([...new Set(types)].sort()).toEqual(Object.keys(EVENT_PAYLOAD_VERSIONS).sort());
     expect(rows.find((row) => row.type === "scope.coverage_lost")?.payload).toMatchObject({

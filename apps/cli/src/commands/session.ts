@@ -499,9 +499,11 @@ export const sessionShow: CommandDefinition = {
   summary: "Show a Session with its claims, Scopes and recent Events",
   description: [
     "Any Session of the Project; default: --session, then HIVEMIND_SESSION.",
-    "Shows the first page of its claims, Scopes and Events (newest first);",
-    "each has its own nextCursor in --json output. Page through older Events",
-    "with 'hivemind session log' and through Scopes with 'hivemind scope list'.",
+    "Shows the first page of its claims, Scopes and Events. Claims are oldest",
+    "first and Events newest first;",
+    "each has its own nextCursor in --json output. Page through claims with",
+    "'hivemind session claims', Events with 'hivemind session log', and Scopes",
+    "with 'hivemind scope list'.",
   ].join("\n"),
   args: [{ name: "sessionId", description: "The Session's id" }],
   options: { limit: LIMIT_OPTION, session: SESSION_OPTION, project: PROJECT_OPTION },
@@ -525,7 +527,7 @@ export const sessionShow: CommandDefinition = {
         ...sessionLines(session),
         "",
         "Claims:",
-        ...pageLines(claims, taskLine, "None.", "More claims exist: see --json output."),
+        ...pageLines(claims, taskLine, "None.", more("session claims", claims.nextCursor)),
         "",
         "Scopes:",
         ...pageLines(scopes, scopeLine, "None.", more("scope list", scopes.nextCursor)),
@@ -562,5 +564,30 @@ export const sessionLog: CommandDefinition = {
     const projectId = await projectOf(context);
     const events = await (await context.api()).listSessionEvents(projectId, sessionId, page);
     return { data: events, human: pageLines(events, eventLine, "No Events.") };
+  },
+};
+
+export const sessionClaims: CommandDefinition = {
+  name: "session claims",
+  summary: "List the Tasks a Session holds claims on, oldest claim first (one page)",
+  description: [
+    "Any Session of the Project; default: --session, then HIVEMIND_SESSION.",
+    "Pass nextCursor to --cursor for the next page of claims.",
+    "A 400 on --cursor means the claim it pointed at has ended; start again without --cursor.",
+  ].join("\n"),
+  args: [{ name: "sessionId", description: "The Session's id" }],
+  options: {
+    limit: LIMIT_OPTION,
+    cursor: CURSOR_OPTION,
+    session: SESSION_OPTION,
+    project: PROJECT_OPTION,
+  },
+  examples: ["hivemind session claims", "hivemind session claims --limit 100 --json"],
+  async run(context) {
+    const sessionId = shownSessionOf(context);
+    const page = pageOf(context);
+    const projectId = await projectOf(context);
+    const claims = await (await context.api()).listSessionClaims(projectId, sessionId, page);
+    return { data: claims, human: pageLines(claims, taskLine, "No claims.") };
   },
 };

@@ -155,9 +155,9 @@ function heldBy(sessionId: string, now: Date): SQL {
  * expired or its holder is not live (stale, ended or abandoned); the old
  * claim is released with a `system` Event effective when it lapsed. A live
  * competing claim is a conflict naming the holder, unless `steal` is set,
- * which takes the claim over; its `task.claimed` Event names the former
- * holder in `stolenFromSessionId`. The holder repeating its valid claim is a no-op: no lease
- * extension, no Event.
+ * which writes `task.released` with reason `stolen` for the former holder,
+ * then `task.claimed` naming it in `stolenFromSessionId`. The holder repeating
+ * its valid claim is a no-op: no lease extension, no Event.
  */
 export async function claimTask(
   db: Db,
@@ -202,6 +202,16 @@ export async function claimTask(
     if (holder && before.leaseExpiresAt) {
       if (holder.id !== session.id && isClaimUsable(before, holder, now)) {
         stolenFromSessionId = holder.id;
+        await insertEvent(tx, {
+          projectId: input.projectId,
+          type: "task.released",
+          payload: { reason: "stolen" },
+          actor,
+          planId: before.planId,
+          taskId: before.id,
+          sessionId: holder.id,
+          now,
+        });
       } else {
         // The old claim had lapsed: record when, attributed to the system.
         const holderState = sessionState(holder, now);

@@ -30,9 +30,10 @@ export const MAX_EVENT_BYTES = 64 * 1024;
 /** Version of every payload below. A changed payload shape gets a new version. */
 export const EVENT_PAYLOAD_VERSION = 1;
 
-/** Why a claim ended without `done`. */
+/** Why a claim ended without `done`. Clients must accept reasons they do not know. */
 export const CLAIM_RELEASE_REASONS = [
   "released",
+  "stolen",
   "lease_expired",
   "session_stale",
   "session_ended",
