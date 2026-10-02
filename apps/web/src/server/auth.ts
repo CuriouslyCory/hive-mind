@@ -4,7 +4,7 @@ import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import type { Db } from "@hivemind/db";
 import * as schema from "@hivemind/db/schema";
 import type { BetterAuthPlugin } from "better-auth";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
 import { nextCookies } from "better-auth/next-js";
 import { bearer, deviceAuthorization, oAuthProxy, organization } from "better-auth/plugins";
@@ -505,22 +505,6 @@ export function slugify(value: string): string {
 export function suffixedSlug(base: string, suffix: string): string {
   const room = MAX_SLUG_LENGTH - suffix.length - 1;
   return `${base.slice(0, room).replace(/-+$/, "")}-${suffix}`;
-}
-
-/**
- * The login session's active organization, or `null` if it has none or the
- * user is no longer a member of it. In that case better-auth also clears
- * the login session's `activeOrganizationId`.
- */
-export async function getActiveOrganization(instance: Auth, headers: Headers) {
-  try {
-    return await instance.api.getFullOrganization({ headers, query: { membersLimit: 1 } });
-  } catch (error) {
-    if (isAPIError(error) && error.body?.code === "USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION") {
-      return null;
-    }
-    throw error;
-  }
 }
 
 /**

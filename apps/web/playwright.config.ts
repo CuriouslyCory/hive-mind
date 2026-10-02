@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { E2E_AUTH_ENV, E2E_BASE_URL, E2E_SERVES_BUILD } from "./test/e2e/e2e-env";
 
-// Browser tests for the CLI's device approval page and the compiled CLI
-// against the real app (issues #3 and #12; the dashboard's browser tests are
-// M3's). Run with `pnpm test:e2e` from
-// apps/web; they are not part of `pnpm test`, which needs no browser.
+// Browser tests for the CLI's device approval page, the compiled CLI and the
+// dashboard with its live updates, against the real app (issues #3, #12 and
+// #11). Run with `pnpm test:e2e` from apps/web; they are not part of
+// `pnpm test`, which needs no browser.
 //
 // The app runs against its own database on the TEST_DATABASE_URL server,
 // created and migrated by global-setup.ts and dropped afterwards. The app

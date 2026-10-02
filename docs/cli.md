@@ -568,3 +568,5 @@ The exit code always follows from `error.code`, and any code not listed here als
 ## The API
 
 The CLI calls the `/api/v1` HTTP API with `Authorization: Bearer <token>`. The API accepts only bearer tokens (a login token or a Project key), never cookies. Its OpenAPI document is served without authentication at `/api/v1/openapi.json`. Login and logout use better-auth's own routes under `/api/auth`. ADR-0009 and ADR-0013 record the design.
+
+`GET /api/v1/projects/{id}/events/stream` is a Server-Sent Events stream of a Project's Events, bearer-only like the other routes. No CLI command uses it yet. [docs/dashboard.md](dashboard.md#the-stream) describes its start cursor (`cursor` query parameter or `Last-Event-ID`; none means tail from now, `feedOriginCursor` replays), its frames (`ready`, `event`, `heartbeat`, `access_lost`) and its 400, 401 and 404 answers before the stream opens.

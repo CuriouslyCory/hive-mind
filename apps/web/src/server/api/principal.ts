@@ -1,6 +1,6 @@
 import { defaultKeyHasher } from "@better-auth/api-key";
 import { PROJECT_KEY_PERMISSIONS, type ProjectKeyPermission } from "@hivemind/contract";
-import type { Db } from "@hivemind/db";
+import type { Db, DbOrTransaction } from "@hivemind/db";
 import { apikey, project, projectApiKey } from "@hivemind/db/schema";
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { type Auth, PROJECT_KEY_PREFIX } from "../auth";
@@ -17,6 +17,11 @@ import { type Auth, PROJECT_KEY_PREFIX } from "../auth";
 export interface UserPrincipal {
   kind: "user";
   user: { id: string; name: string; email: string };
+  /**
+   * The id of the login session row that authenticated the request. The
+   * Event stream rechecks that row before every batch while it runs.
+   */
+  loginSessionId: string;
 }
 
 export interface ProjectKeyPrincipal {
@@ -100,7 +105,7 @@ async function resolveLoginSession(
   });
   if (!result) return null;
   const { id, name, email } = result.user;
-  return { kind: "user", user: { id, name, email } };
+  return { kind: "user", user: { id, name, email }, loginSessionId: result.session.id };
 }
 
 /**
@@ -122,11 +127,30 @@ async function resolveProjectKey(
     return null;
   }
 
-  const now = new Date();
-  // One row only if the key is still live, uses the single expected
-  // configuration with no plugin permissions, and its binding, its
-  // organization and its Project's organization all agree. Anything else,
-  // including a key with no binding, fails closed.
+  return readLiveProjectKey(
+    db,
+    { keyId: verified.key.id, organizationId: verified.key.referenceId },
+    new Date(),
+  );
+}
+
+/**
+ * The principal of Project key `keyId` of `organizationId`, read from the
+ * database, or `null` unless at `now` the key is still live, uses the single
+ * expected configuration with no plugin permissions, and its binding, its
+ * organization and its Project's organization all agree. Anything else,
+ * including a key with no binding, fails closed.
+ *
+ * `resolveProjectKey` calls it after verifying the secret. The Event stream
+ * calls it again before every batch, so a deleted, disabled or expired key
+ * stops delivery without re-verifying the secret (which records a use of the
+ * key) every second.
+ */
+export async function readLiveProjectKey(
+  db: DbOrTransaction,
+  key: { keyId: string; organizationId: string },
+  now: Date,
+): Promise<ProjectKeyPrincipal | null> {
   const [bound] = await db
     .select({
       keyId: apikey.id,
@@ -146,11 +170,7 @@ async function resolveProjectKey(
       ),
     )
     .where(
-      and(
-        eq(apikey.id, verified.key.id),
-        eq(apikey.referenceId, verified.key.referenceId),
-        ...liveKey(now),
-      ),
+      and(eq(apikey.id, key.keyId), eq(apikey.referenceId, key.organizationId), ...liveKey(now)),
     )
     .limit(1);
   if (!bound) return null;

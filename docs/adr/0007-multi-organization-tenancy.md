@@ -11,18 +11,20 @@ In [#1](https://github.com/CuriouslyCory/hive-mind/issues/1), a Project belongs 
 
 The M0 plan ([#2](https://github.com/CuriouslyCory/hive-mind/issues/2), open question 1) assumed #1's recommendation and marked this ADR "accepted (pending owner confirmation)". The owner accepted that default by proceeding with the plan through the merge of [PR #6](https://github.com/CuriouslyCory/hive-mind/pull/6), which implemented it. This ADR records that answer to #1's open question 4.
 
+Amended 2026-10-01 by M3's plan, [#11](https://github.com/CuriouslyCory/hive-mind/issues/11): this ADR first deferred invitations, teams and the organization switcher to M3, but #1's M3 checklist covers only the read-only dashboard and live updates. They are now follow-up work with no milestone. The decision to defer them, the restrictions below and the membership rules are unchanged.
+
 ## Decision
 
 - **Multi-organization from the start,** using better-auth's `organization` plugin. A User can be a Member of more than one hive-mind organization.
 - **Personal organization on first sign-in.** `databaseHooks.user.create.after` creates an organization with the User as `owner`. Its slug is the GitHub login, lowercased; on a collision a random suffix is added. Creation is idempotent per User: it runs in one transaction that first takes `pg_advisory_xact_lock(hashtextextended(user_id::text, 0))` and re-checks membership, so concurrent calls for one User create one organization and the rest reuse it.
 - **Active organization.** `databaseHooks.session.create.before` sets each new login session's `activeOrganizationId` to the User's first membership, which is their personal organization.
 - **Authorization rule (for M2 on):** `activeOrganizationId` is a UI default and never an authorization input. Access to a Project's data is authorized through project → organization membership.
-- **Deferred to M3:** invitations, teams and the organization switcher.
-- **The organization API is restricted in M0** (`createAuth` in `apps/web/src/server/auth.ts`), so every User has exactly their personal organization until M3:
+- **Deferred:** invitations, teams and the organization switcher, as follow-up work after M3 (see Context).
+- **The organization API is restricted in M0** (`createAuth` in `apps/web/src/server/auth.ts`), so every User has exactly their personal organization until invitations are built:
   - `disableOrganizationDeletion: true`: `/organization/delete` answers 404 `ORGANIZATION_DELETION_DISABLED`.
   - `allowUserToCreateOrganization: false`: `/organization/create` answers 403 `YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION`. The personal organization is inserted through Drizzle, not this endpoint, so the option does not block it.
   - better-auth's `disabledPaths` makes the invitation routes (`invite-member`, `cancel-invitation`, `accept-invitation`, `reject-invitation`, `get-invitation`, `list-invitations`, `list-user-invitations`) and the member-management routes (`remove-member`, `update-member-role`, `leave`) answer 404. Team routes do not exist because teams are off.
-  - Still served: reading the organization (`get-full-organization`, which `/` uses), `list`, `set-active`, `update` and the member read routes. M3 lifts these restrictions when it builds invitations and the switcher.
+  - Still served: reading the organization (`get-full-organization`), `list`, `set-active`, `update` and the member read routes. The work that builds invitations and the switcher lifts these restrictions.
 - **Open sign-up:** any GitHub user can create an account (#2's open question 3); such a User gets only an empty personal organization.
 
 ## Consequences
@@ -35,6 +37,7 @@ The M0 plan ([#2](https://github.com/CuriouslyCory/hive-mind/issues/2), open que
 - `session.active_organization_id` is set to null if its organization is deleted.
 - **M2 must follow the authorization rule** in every `/api/v1` route and Server Action: resolve the Project, then check the caller's membership in its organization. Trusting `activeOrganizationId` would let a client choose its own tenant. See ADR-0013.
 - **Open sign-up** means anyone with a GitHub account can create rows on the public deployment. Revisit in M7 alongside rate limits.
-- The `invitation` table exists now because the organization plugin's schema includes it. Nothing writes to it until M3: the invitation routes are disabled, and a test checks that an invite attempt stores no row.
+- The `invitation` table exists now because the organization plugin's schema includes it. Nothing writes to it until invitations are built: the invitation routes are disabled, and a test checks that an invite attempt stores no row.
 - Tests cover personal organization creation with `owner` role, the active organization on a new login session, slug collisions, concurrent first login sessions, and each M0 restriction on the organization API. Removing the organization plugin, either hook, the advisory lock or any of the three restrictions fails them.
-- **`/` shows "Organization: none"** when the User is no longer a Member of the login session's active organization. better-auth answers `getFullOrganization` with 403 `USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION` and clears `activeOrganizationId`; `getActiveOrganization` in `auth.ts` turns that into `null`.
+- **The dashboard needs no organization switcher.** Since M3, `/` lists the Projects of every organization the User is a Member of, with each organization's name, and every dashboard read checks Project → organization membership; `activeOrganizationId` plays no part (docs/dashboard.md).
+- **A login session's active organization can name an organization the User has left:** better-auth answers `getFullOrganization` with 403 `USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION` and clears `activeOrganizationId`. Before M3, `/` read the active organization through a `getActiveOrganization` helper in `auth.ts` to show "Organization: none"; M3 removed the helper with its last caller.

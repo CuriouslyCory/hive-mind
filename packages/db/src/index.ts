@@ -17,7 +17,12 @@ export function createDb(pool: pg.Pool) {
 
 export type Db = ReturnType<typeof createDb>;
 
-export { createClient, createPool, describeConnectionError } from "./connection.ts";
+export {
+  createClient,
+  createPool,
+  describeConnectionError,
+  describeFailure,
+} from "./connection.ts";
 export {
   allocatePlanNumber,
   COORDINATION_LOCK_NAMESPACE,
@@ -50,6 +55,22 @@ export {
   MAX_EVENT_DTO_BYTES,
   MAX_EVENT_PAYLOAD_BYTES,
 } from "./event.ts";
+export {
+  compareFeedPositions,
+  FEED_EVENT_OVERHEAD_BYTES,
+  FEED_ORIGIN,
+  type FeedBatch,
+  type FeedPollInput,
+  type FeedPosition,
+  type FeedSnapshotContext,
+  feedPositionOf,
+  isFeedPosition,
+  isIssuableFeedPosition,
+  MAX_FEED_BATCH_EVENTS,
+  pollEventFeed,
+  readFeedHorizon,
+  withFeedSnapshot,
+} from "./event-feed.ts";
 export { type EventFilter, listEvents, projectHasSession } from "./event-read.ts";
 export {
   type CanonicalJson,
@@ -94,6 +115,8 @@ export {
   getPlan,
   type InitialPlanStatus,
   isTerminalPlanStatus,
+  type ListPlansInput,
+  type ListPlanTasksInput,
   listPlans,
   listPlanTasks,
   PLAN_TRANSITIONS,
@@ -104,6 +127,9 @@ export {
   type PlanWriter,
   planKey,
   planNumbers,
+  readPlan,
+  readPlans,
+  readPlanTasks,
   resolvePlan,
   type SessionEnded,
   type SessionForbidden,
@@ -201,6 +227,7 @@ export {
   type OwnSessionInput,
   type ProjectOverlapSummary,
   type RemoveScopeInput,
+  readScopes,
   recordCollectionManifest,
   removeScope,
   SCOPE_PAGE_DEFAULT_LIMIT,
@@ -227,6 +254,7 @@ export {
   type HeartbeatSessionInput,
   heartbeatSession,
   type InvalidCursor,
+  type ListSessionsInput,
   listSessionClaims,
   listSessions,
   MAX_PAGE_LIMIT,
@@ -235,6 +263,8 @@ export {
   type Page,
   type PlanRef,
   pageLimit,
+  readSession,
+  readSessions,
   type SessionListFilter,
   type SessionMetadata,
   type SessionResult,
@@ -249,6 +279,7 @@ export {
   type ProjectStatus,
   type ProjectStatusInput,
   projectStatus,
+  readProjectStatus,
   type SessionView,
   type StatusSection,
   sessionViews,

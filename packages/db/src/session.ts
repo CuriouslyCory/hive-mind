@@ -1,5 +1,9 @@
 import { and, asc, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
-import { withAuthorizedCoordinationLock, withCoordinationRead } from "./coordination.ts";
+import {
+  type CoordinationContext,
+  withAuthorizedCoordinationLock,
+  withCoordinationRead,
+} from "./coordination.ts";
 import { createOnce } from "./creation.ts";
 import { insertEvent, type SessionUpdateField } from "./event.ts";
 import { creationFingerprint, sha256Hex } from "./fingerprint.ts";
@@ -603,14 +607,20 @@ export async function getSession(
   db: Db,
   input: { projectId: string; sessionId: string },
 ): Promise<{ status: "ok"; session: SessionState } | NotFound> {
-  return withCoordinationRead(db, async ({ tx, now }) => {
-    const [row] = await tx
-      .select()
-      .from(agentSession)
-      .where(and(eq(agentSession.id, input.sessionId), eq(agentSession.projectId, input.projectId)))
-      .limit(1);
-    return row ? { status: "ok", session: sessionState(row, now) } : notFound;
-  });
+  return withCoordinationRead(db, (context) => readSession(context, input));
+}
+
+/** `getSession` inside the caller's read transaction, at its `now`. */
+export async function readSession(
+  { tx, now }: CoordinationContext,
+  input: { projectId: string; sessionId: string },
+): Promise<{ status: "ok"; session: SessionState } | NotFound> {
+  const [row] = await tx
+    .select()
+    .from(agentSession)
+    .where(and(eq(agentSession.id, input.sessionId), eq(agentSession.projectId, input.projectId)))
+    .limit(1);
+  return row ? { status: "ok", session: sessionState(row, now) } : notFound;
 }
 
 /** `live` is active or idle; `terminal` is ended or abandoned; otherwise one effective status. */
@@ -633,42 +643,58 @@ const FILTER_STATUSES: Record<SessionListFilter, SessionStatus[]> = {
  */
 export async function listSessions(
   db: Db,
-  input: { projectId: string; filter?: SessionListFilter; limit?: number; after?: string },
+  input: ListSessionsInput,
+): Promise<({ status: "ok" } & Page<SessionState>) | InvalidCursor> {
+  return withCoordinationRead(db, (context) => readSessions(context, input));
+}
+
+export interface ListSessionsInput {
+  projectId: string;
+  filter?: SessionListFilter;
+  /** Only Sessions currently attached to this Plan (by UUID). */
+  attachedPlanId?: string;
+  limit?: number;
+  after?: string;
+}
+
+/** `listSessions` inside the caller's read transaction, at its `now`. */
+export async function readSessions(
+  { tx, now }: CoordinationContext,
+  input: ListSessionsInput,
 ): Promise<({ status: "ok" } & Page<SessionState>) | InvalidCursor> {
   const limit = pageLimit(input.limit);
-  return withCoordinationRead(db, async ({ tx, now }) => {
-    const conditions: SQL[] = [eq(agentSession.projectId, input.projectId)];
-    if (input.filter) {
-      conditions.push(
-        inArray(effectiveSessionStatusSql(now), FILTER_STATUSES[input.filter]) as SQL,
-      );
-    }
-    if (input.after !== undefined) {
-      const [cursor] = await tx
-        .select({ createdAt: agentSession.createdAt, id: agentSession.id })
-        .from(agentSession)
-        .where(and(eq(agentSession.id, input.after), eq(agentSession.projectId, input.projectId)))
-        .limit(1);
-      if (!cursor) return { status: "invalid_cursor" };
-      // Compared in SQL against the stored row so microsecond timestamps
-      // written by database defaults page correctly.
-      conditions.push(
-        sql`(${agentSession.createdAt}, ${agentSession.id}) < (select created_at, id from agent_session where id = ${cursor.id})`,
-      );
-    }
-    const rows = await tx
-      .select()
+  const conditions: SQL[] = [eq(agentSession.projectId, input.projectId)];
+  if (input.attachedPlanId !== undefined) {
+    conditions.push(eq(agentSession.attachedPlanId, input.attachedPlanId));
+  }
+  if (input.filter) {
+    conditions.push(inArray(effectiveSessionStatusSql(now), FILTER_STATUSES[input.filter]) as SQL);
+  }
+  if (input.after !== undefined) {
+    const [cursor] = await tx
+      .select({ createdAt: agentSession.createdAt, id: agentSession.id })
       .from(agentSession)
-      .where(and(...conditions))
-      .orderBy(desc(agentSession.createdAt), desc(agentSession.id))
-      .limit(limit + 1);
-    const items = rows.slice(0, limit).map((row) => sessionState(row, now));
-    return {
-      status: "ok",
-      items,
-      next: rows.length > limit ? (items.at(-1)?.id ?? null) : null,
-    };
-  });
+      .where(and(eq(agentSession.id, input.after), eq(agentSession.projectId, input.projectId)))
+      .limit(1);
+    if (!cursor) return { status: "invalid_cursor" };
+    // Compared in SQL against the stored row so microsecond timestamps
+    // written by database defaults page correctly.
+    conditions.push(
+      sql`(${agentSession.createdAt}, ${agentSession.id}) < (select created_at, id from agent_session where id = ${cursor.id})`,
+    );
+  }
+  const rows = await tx
+    .select()
+    .from(agentSession)
+    .where(and(...conditions))
+    .orderBy(desc(agentSession.createdAt), desc(agentSession.id))
+    .limit(limit + 1);
+  const items = rows.slice(0, limit).map((row) => sessionState(row, now));
+  return {
+    status: "ok",
+    items,
+    next: rows.length > limit ? (items.at(-1)?.id ?? null) : null,
+  };
 }
 
 /**

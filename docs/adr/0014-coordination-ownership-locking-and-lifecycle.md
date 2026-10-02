@@ -89,6 +89,8 @@ Every new endpoint resolves Project access first, then nested resources, then ca
 
 ADR-0010 stays proposed. #11 owns the stream, cursors, snapshots and the safe-horizon queries, and accepts, amends or supersedes ADR-0010. M2 supplies only the `writer_xid` and `seq` columns, their indexes and paginated reads.
 
+Amended 2026-10-01 by M3, [#11](https://github.com/CuriouslyCory/hive-mind/issues/11): M3 accepted ADR-0010, which now records the stream, cursors and snapshot handoff built on these columns.
+
 ## Consequences
 
 - A live steal writes `task.released` with reason `stolen` for the former holder before `task.claimed` for the new holder, in the same transaction ([#14](https://github.com/CuriouslyCory/hive-mind/issues/14)). Older steals are not backfilled. The additive reason keeps payload version 1, but a deployment that predates the widened reason rejects these stored Events on reads. After the first such Event, rollback must retain the widened reader and revert only the writer.

@@ -38,11 +38,12 @@ date: 2026-10-01
 
 - `/api/*` is excluded from the proxy (ADR-0003), so the `/api/v1` handler authenticates every request itself, and authorizes through Project → organization membership (ADR-0007, ADR-0013).
 - The contract is a compatibility promise from the first CLI release: old binaries keep calling it. A change that requires editing a v1 fixture breaks released CLIs, and review sees it as a fixture diff. M1 did not decide how an incompatible change would ship.
-- Upgrading oRPC means moving all six `@orpc/*` catalog entries together.
+- Upgrading oRPC means moving every `@orpc/*` catalog entry together (seven since M3 added `@orpc/standard-server`, #11).
 - Output validation is what keeps key secrets out of key list and revoke responses: a server change that leaked a field would fail with a 500. Contract tests check that the key metadata and list schemas reject secret fields.
 - `POST /projects` is create-or-reuse and returns 200 with `{ project, created }` in both cases, since oRPC's success status is static. `DELETE /projects/{id}/keys/{keyId}` returns 200 with JSON so the CLI has a result to print; repeating it is a 404.
 - Without a committed OpenAPI file, drift shows up as failing tests rather than as a diff. Other clients fetch the document from a deployment.
 - If the dashboard (M3) calls `/api/v1`, it needs cookie support with CSRF and Origin checks for mutations; M1 has no browser caller.
+- **The dashboard does not call `/api/v1`** (clarified 2026-10-01 for [#11](https://github.com/CuriouslyCory/hive-mind/issues/11)). Its pages read the database on the server, and its live updates use a separate cookie adapter, `GET /api/dashboard/projects/[projectId]/events/stream`. That route mounts only the Event stream procedure, with the same contract schemas and frames as `GET /api/v1/projects/{id}/events/stream`, accepts only GET and serves a read-only feed, so a cookie authorizes no coordination mutation. `/api/v1` stays bearer-only (ADR-0010, docs/dashboard.md).
 - M2 adds its routes to this contract, with fixtures, and writes Events in its mutations. M1's routes write no Events.
 
 ## Alternatives considered
