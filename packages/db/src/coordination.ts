@@ -177,14 +177,23 @@ export async function withAuthorizedCoordinationLock<T>(
  * Runs `fn` in a short transaction without the coordination lock, with one
  * database `now` for the whole read. Status, list and show reads use it so
  * effective liveness and usable claims are computed from a single timestamp
- * and never depend on the sweep having materialized them. Reads must not
- * write: expired state is reconciled only by mutations and the sweep.
+ * and never depend on the sweep having materialized them.
+ *
+ * The transaction is REPEATABLE READ, so every statement in `fn` reads the
+ * same snapshot: a claim or end committed between two statements of a status
+ * or overlap read cannot mix states. The snapshot is taken by the first
+ * statement, which reads `now`, so the data and `now` agree. It is also READ
+ * ONLY: reads must not write, since expired state is reconciled only by
+ * mutations and the sweep, and Postgres refuses any write attempted here.
  */
 export async function withCoordinationRead<T>(
   db: Db,
   fn: (context: CoordinationContext) => Promise<T>,
 ): Promise<T> {
-  return db.transaction(async (tx) => fn({ tx, now: await readNow(tx) }));
+  return db.transaction(async (tx) => fn({ tx, now: await readNow(tx) }), {
+    isolationLevel: "repeatable read",
+    accessMode: "read only",
+  });
 }
 
 export type TryCoordinationLockResult<T> =
