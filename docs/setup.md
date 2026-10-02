@@ -168,7 +168,7 @@ The route accepts a request only with `Authorization: Bearer <CRON_SECRET>`, whi
 
 | Request | Answer |
 |---|---|
-| `CRON_SECRET` unset or empty (or not a valid value) | 500 `{"error":"Cron is not configured."}`; nothing runs |
+| `CRON_SECRET` unset, empty or not a valid value | 500 `{"error":"Cron is not configured."}`; nothing runs. Only this route is affected: the secret is validated apart from the rest of the server environment, so sign-in and `/api/v1` keep working. |
 | No `Authorization` header, or a wrong secret | 401 `{"error":"Unauthorized."}` |
 | The right secret | 200 with the run's counts: `{ projectsSwept, projectsSkipped, sessionsStale, sessionsAbandoned, claimsReleased, moreWork }` |
 
@@ -182,7 +182,7 @@ Every answer is `cache-control: no-store`. Until the secret is set the route ref
 
 - [ ] Redeploy Production, since variable changes apply only to new deployments.
 
-`CRON_SECRET` is a server-only variable. Only the route handler reads it, through `apps/web/src/env.ts`; it has no `NEXT_PUBLIC_` prefix, so it never reaches a browser bundle. Never print it in logs or paste it into issues or transcripts.
+`CRON_SECRET` is a server-only variable. Only the route handler reads it, through `readCronSecret` in `apps/web/src/env.ts`; it has no `NEXT_PUBLIC_` prefix, so it never reaches a browser bundle. Never print it in logs or paste it into issues or transcripts.
 
 **Calling the sweep by hand.** Vercel runs Cron jobs only on Production deployments. Locally, add a value to `apps/web/.env.local`, start `pnpm dev` and call the route:
 

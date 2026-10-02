@@ -16,7 +16,7 @@ export const CRON_SWEEP_LIMITS = {
 } as const;
 
 export interface CronDeps {
-  /** Read per request, so builds need no secret. Unset or empty fails closed. */
+  /** Read per request, so builds need no secret. Unset, empty or invalid (undefined) fails closed. */
   cronSecret: () => string | undefined;
   db: () => Db;
 }
@@ -45,7 +45,9 @@ export function createCronHandler(deps: CronDeps): (request: Request) => Promise
       const token = bearerToken(authorization);
       const secret = deps.cronSecret();
       if (!secret) {
-        console.error("/api/cron/coordination: CRON_SECRET is not set; refusing to run.");
+        console.error(
+          "/api/cron/coordination: CRON_SECRET is not set or not valid; refusing to run.",
+        );
         return json({ error: "Cron is not configured." }, 500);
       }
       if (token === null || !sameSecret(token, secret)) {
