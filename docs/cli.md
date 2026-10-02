@@ -264,7 +264,7 @@ Your Sessions are the ones started by the same principal: the same User (through
 - `plan status <plan> <status>` takes `active`, `paused`, `done` or `abandoned`. The current status is a no-op (`changed: false`); a move not in the table is `CONFLICT`. `done` needs every Task done and no claims left. `abandoned` releases the remaining claims and reports how many in `releasedClaimCount`.
 - Tasks can be claimed and started only in an `active` Plan. In a `paused` Plan the current holders can still heartbeat, block, finish and release.
 - In a `done` or `abandoned` Plan, `plan log --message` still works; `plan edit` and `task add` are `CONFLICT`.
-- `plan log <plan>` without `--message` lists the Plan's Events, log entries included, newest first.
+- `plan log <plan>` without `--message` lists the Plan's Events, log entries included, newest first. A Session attached to the Plan when it ends adds its `session end` summary there too.
 
 ### Tasks
 

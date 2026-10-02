@@ -560,6 +560,11 @@ export async function endSession(
       type: "session.ended",
       payload: { from: session.effectiveStatus, summary: input.summary },
       actor,
+      // The attached Plan and Task are affected records, so the final
+      // summary appears in the Plan's log (`plan log PLAN-N`) as well as in
+      // the Session's history.
+      planId: session.attachedPlanId,
+      taskId: session.attachedTaskId,
       sessionId: session.id,
       now,
     });
