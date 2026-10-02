@@ -126,18 +126,19 @@ export const scopeCheck: CommandDefinition = {
     "when the comparison ran out of budget. complete is false whenever an",
     "overlap could be missing (budget, too many candidates, or a Session whose",
     "touched-path coverage is incomplete), so no output is a false all-clear.",
-    "Overlaps are warnings: the exit code is 0 either way.",
+    "Overlaps are warnings: the exit code is 0 either way. It reads up to 20",
+    "pages of 100; if more remain, pass nextCursor to --cursor to continue.",
   ].join("\n"),
-  options: SESSION_OPTIONS,
+  options: { cursor: CURSOR_OPTION, ...SESSION_OPTIONS },
   examples: ["hivemind scope check", "hivemind scope check --json"],
   async run(context) {
     const sessionId = sessionOf(context);
+    let cursor = pageOf(context).cursor;
     const projectId = await projectOf(context);
     const api = await context.api();
     const items: ApiOverlap[] = [];
     const incomplete = new Set<string>();
     let complete = true;
-    let cursor: string | undefined;
     let nextCursor: string | null = null;
     for (let page = 0; page < MAX_CHECK_PAGES; page++) {
       const result = await api.checkSessionOverlaps(projectId, sessionId, { limit: 100, cursor });
@@ -156,6 +157,7 @@ export const scopeCheck: CommandDefinition = {
         incomplete.size > 0 ? ` Incomplete coverage: ${[...incomplete].join(", ")}.` : "";
       human.push(`The check is incomplete: an overlap may be missing.${sessions}`);
     }
+    if (nextCursor !== null) human.push(`More: --cursor ${nextCursor}`);
     return {
       data: {
         sessionId,

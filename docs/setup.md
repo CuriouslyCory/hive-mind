@@ -191,7 +191,7 @@ Every answer is `cache-control: no-store`. Until the secret is set the route ref
 curl -sS -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/coordination
 ```
 
-To try it on a preview, add a separate Preview value with `vercel env add CRON_SECRET preview --sensitive`, redeploy the preview and call `https://<preview-host>/api/cron/coordination` the same way. Previews are behind Vercel Authentication (H1), so the request also needs a Deployment Protection bypass, such as the `x-vercel-protection-bypass` header with the project's automation bypass secret.
+To try it on a preview, add a separate Preview value with `vercel env add CRON_SECRET preview --sensitive`, redeploy the preview and call `https://<preview-host>/api/cron/coordination` the same way. Previews are behind Vercel Authentication (H1), so the request also needs a Deployment Protection bypass, such as the `x-vercel-protection-bypass` header with the Vercel project's automation bypass secret.
 
 **Cleanup timing.**
 

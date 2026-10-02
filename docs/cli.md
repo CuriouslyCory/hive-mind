@@ -197,7 +197,7 @@ hivemind key list
 hivemind key revoke <keyId>
 ```
 
-- **`key create`** prints the secret exactly once, on stdout (as `data.secret` with `--json`). It cannot be shown again. Details and the warning go to stderr, so redirecting stdout captures only the secret. Store it right away, for example as a `HIVEMIND_TOKEN` CI secret. `--expires-in-days` takes 1 to 365; without it the key never expires. Creation is never retried: if the command times out, loses the connection or gets an unreadable answer after sending the request, the key may exist anyway, so check `key list` and revoke keys you cannot use.
+- **`key create`** prints the secret exactly once, on stdout (as `data.secret` with `--json`). It cannot be shown again. Details and the warning go to stderr, so redirecting stdout captures only the secret. Store it right away, for example as a `HIVEMIND_TOKEN` CI secret. `--expires-in-days` takes 1 to 365; without it the key never expires. Creation is never retried: if the command times out, loses the connection, gets an unreadable answer or a server error (5xx) after sending the request, the key may exist anyway, so check `key list` and revoke keys you cannot use.
 - **`key list`** shows the Project's enabled, unexpired keys: id, name, creation time and expiry. Secrets are never listed.
 - **`key revoke <keyId>`** deletes the key at once. Requests with it then exit 3. An unknown or already revoked key is `NOT_FOUND` (exit 4).
 
@@ -238,7 +238,7 @@ The CLI never picks a Session from the server's list of live Sessions. A value t
 
 - **Required** by `task claim`, `release`, `start`, `block` and `done`; `session heartbeat`, `update`, `attach` and `end`; and every `scope` command. Without a Session they fail with `USAGE_ERROR`.
 - **Optional attribution** on `plan create`, `plan edit`, `plan status`, `plan log --message` and `task add`: when a Session is set, the Event names it as the actor Session. It must then be one of your Sessions and not ended or abandoned, so unset `HIVEMIND_SESSION` after `session end`; otherwise these commands fail with `CONFLICT` (exit 2).
-- `status` uses the Session only to fill `myClaims`. `session show` takes the Session as an argument or from these two sources.
+- `status` uses the Session only to fill `myClaims`. `session show` and `session log` take the Session as an argument or from these two sources.
 
 Your Sessions are the ones started by the same principal: the same User (through any of that User's logins) or the same Project key. A Session started with a Project key cannot be used with a user login, and the reverse.
 
@@ -326,7 +326,7 @@ One heartbeat does this:
 3. It sorts the paths, keeps the first 1,024, and counts the rest, together with paths that are not valid UTF-8 or longer than 256 bytes, as omitted.
 4. It uploads a manifest, then batches of at most 16 paths, then finalizes the collection.
 
-If the upload fails after the renewal succeeded, the command still exits 0: the renewal is what keeps the claims. stderr names the failed step and the resume command, and `data.collectionError` is set. The Session's Scope coverage stays incomplete until a collection is finalized.
+If the upload fails after the renewal succeeded, the command still exits 0: the renewal is what keeps the claims. stderr names the failed step and the resume command, and `data.collectionError` is set. Resume before the next heartbeat (pause a heartbeat loop first): a new heartbeat replaces the unfinished collection and leaves the Session's coverage incomplete until it ends. The Session's Scope coverage stays incomplete until a collection is finalized.
 
 `--json` `data` for `session heartbeat`:
 
@@ -376,7 +376,7 @@ Rejected with `USAGE_ERROR` before any request (the server checks again): a lead
 - the request's comparison budget (4,096 comparisons) ran out. Two Sessions at the maximum of 32 declared and 96 touched Scopes already exceed it;
 - a pair ran out of its state budget (the pair is also listed as `possible`);
 - a compared Session, yours included, has `scopeComplete: false`. These Sessions are listed in `incompleteSessionIds`;
-- results remain on further pages. `scope check` follows up to 20 pages of 100; if more remain, `nextCursor` is set and `complete` is false.
+- results remain on further pages. `scope check` follows up to 20 pages of 100; if more remain, `nextCursor` is set and `complete` is false. `scope check --cursor <nextCursor>` continues from there; human output ends with `More: --cursor <cursor>`.
 
 Human output then ends with `The check is incomplete: an overlap may be missing.` Overlaps never change the exit code: `scope check` exits 0 either way.
 
@@ -399,10 +399,11 @@ List commands return one page: `{ items, nextCursor }`. `--limit` takes 1 to 100
 | `plan list [--status <s>]` | newest Plan first |
 | `plan show <plan> [--task-status <s>]` | the Plan, then its Tasks by position |
 | `plan log <plan>` | newest Event first |
+| `session log [sessionId]` | newest Event first |
 | `session list [--status <s>]` | newest Session first; `<s>` is `live`, `terminal`, `active`, `idle`, `stale`, `ended` or `abandoned` |
 | `scope list` | oldest Scope first |
 
-`session show` and `status` return only the first page or the first 20 entries of each section; `nextCursor` and `complete` say whether more exist.
+`session show` and `status` return only the first page or the first 20 entries of each section; `nextCursor` and `complete` say whether more exist. Page through a Session's older Events with `session log <sessionId> --cursor <events.nextCursor>` and its Scopes with `scope list --session <sessionId> --cursor <scopes.nextCursor>`; `session show` prints these commands when more exist.
 
 ### Text input
 
@@ -413,7 +414,7 @@ List commands return one page: `{ items, nextCursor }`. `--limit` takes 1 to 100
 
 ### Lost answers and retries
 
-The CLI never retries a write. `plan create`, `plan log --message`, `task add` and `session start` generate the new record's UUID once per run. If the request times out, loses its connection, is cancelled or gets an unreadable answer (`TIMEOUT`, `NETWORK_ERROR`, `CANCELLED`, `INVALID_RESPONSE`), the record may exist anyway, and the error says so:
+The CLI never retries a write. `plan create`, `plan log --message`, `task add` and `session start` generate the new record's UUID once per run. Unless the server rejected the request with a documented 4xx code (`BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`) or the CLI stopped before sending it, the record may exist anyway. That covers a timeout, a lost connection, a cancel, an unreadable answer and any 5xx: a gateway timeout or a failed output check can come after the server committed. The error says so and names the generated id (on stderr in `--json` mode too):
 
 ```text
 The Plan may have been created anyway with id 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b. Check with 'hivemind plan show 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b' before retrying, and retry only with --id 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b.
@@ -487,10 +488,11 @@ All take `--project <id>`. "Session" means `--session <id>` or `HIVEMIND_SESSION
 | `session end` | `--summary` or `--summary-file` (required), Session | `{ session, changed, releasedClaims: { items, complete } }` |
 | `session list` | `--status <s>`, `--limit`, `--cursor` | `{ items, nextCursor }` of Sessions |
 | `session show [sessionId]` | `--limit` | `{ session, claims, scopes, events }`, each list a first page |
+| `session log [sessionId]` | `--limit`, `--cursor` | `{ items, nextCursor }` of the Session's Events |
 | `scope add <pattern>` | Session | `{ scope, created }` |
 | `scope remove <scopeId>` | Session | `{ id, sessionId, removed }` |
 | `scope list` | `--source declared\|touched`, `--limit`, `--cursor`, Session | `{ items, nextCursor }` of Scopes |
-| `scope check` | Session | `{ sessionId, items, nextCursor, complete, incompleteSessionIds }` |
+| `scope check` | `--cursor`, Session | `{ sessionId, items, nextCursor, complete, incompleteSessionIds }` |
 
 The schemas of these `data` objects are the `/api/v1` output schemas in `packages/contract/src/` (`plan.ts`, `task.ts`, `session.ts`, `scope.ts`, `event.ts`, `status.ts`), with golden examples in `packages/contract/test/fixtures/v1/cli.*.json`. A Session's `status` is always its effective status at the time of the request. Event types and payloads are listed in `eventSchema` (`packages/contract/src/event.ts`).
 

@@ -6,7 +6,7 @@ import {
 } from "@hivemind/contract";
 import type { ApiProjectKey } from "../client.ts";
 import type { CommandDefinition, OptionSpec } from "../command.ts";
-import { CliError, isCliError, UNCERTAIN_OUTCOME_CODES, usageError } from "../errors.ts";
+import { CliError, isCliError, isUncertainOutcome, usageError } from "../errors.ts";
 import { resolveProjectId } from "../project-resolution.ts";
 
 /**
@@ -90,7 +90,7 @@ export const keyCreate: CommandDefinition = {
     } catch (error) {
       // The request may have reached the server: point at the safe follow-up
       // instead of encouraging a blind rerun that could mint a second key.
-      if (isCliError(error) && UNCERTAIN_OUTCOME_CODES.has(error.code)) {
+      if (isCliError(error) && isUncertainOutcome(error)) {
         throw new CliError(error.code, error.message, {
           hint: `The key may have been created anyway. Check 'hivemind key list --project ${projectId}' and revoke any key you did not receive.`,
           cause: error,

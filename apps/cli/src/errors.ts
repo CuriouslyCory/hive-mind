@@ -1,4 +1,9 @@
-import { type ExitCode, exitCodeForErrorCode } from "@hivemind/contract";
+import {
+  API_ERROR_CODES,
+  API_ERRORS,
+  type ExitCode,
+  exitCodeForErrorCode,
+} from "@hivemind/contract";
 
 /**
  * Error codes the CLI raises on its own, in addition to the API codes from
@@ -44,16 +49,28 @@ export const CLI_ERROR_CODES = {
 } as const;
 
 /**
- * Failures after which a non-idempotent request may still have succeeded on
- * the server: it was (or may have been) sent, and no usable answer came back.
- * Commands that create something turn these into "check before rerunning".
+ * Failures that prove a request changed nothing: the server rejected it with
+ * a documented 4xx code, or the CLI stopped before sending it.
  */
-export const UNCERTAIN_OUTCOME_CODES: ReadonlySet<string> = new Set([
-  CLI_ERROR_CODES.timeout,
-  CLI_ERROR_CODES.network,
-  CLI_ERROR_CODES.cancelled,
-  CLI_ERROR_CODES.invalidResponse,
+const DEFINITIVE_FAILURE_CODES: ReadonlySet<string> = new Set([
+  ...API_ERROR_CODES.filter((code) => API_ERRORS[code].status < 500),
+  CLI_ERROR_CODES.usage,
+  CLI_ERROR_CODES.invalidServer,
+  CLI_ERROR_CODES.credentialStore,
+  CLI_ERROR_CODES.io,
 ]);
+
+/**
+ * Whether a non-idempotent request may still have succeeded on the server
+ * after failing with `error`. Only a definitive rejection says it did not: a
+ * timeout, a lost connection, a cancel, an unreadable answer, any 5xx (a
+ * gateway timeout or an output check that fails after the commit) and any
+ * code the CLI does not know all leave the outcome open. Commands that create
+ * something turn these into "check before rerunning".
+ */
+export function isUncertainOutcome(error: unknown): boolean {
+  return !(isCliError(error) && DEFINITIVE_FAILURE_CODES.has(error.code));
+}
 
 export interface CliErrorOptions {
   /** The next step for the user, e.g. "Run `hivemind login`." Shown on its own line. */
