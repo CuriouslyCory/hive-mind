@@ -1,4 +1,6 @@
+import { decodeFeedCursor, type EventStreamFrame, type FeedPosition } from "@hivemind/contract";
 import { type Db, type EventFilter, listEvents, projectHasSession } from "@hivemind/db";
+import { apiError } from "./authorize";
 import { authorizeProject, sessionNotFound } from "./coordination-auth";
 import { toEventDto } from "./coordination-dto";
 import { api } from "./implementer";
@@ -43,6 +45,37 @@ export const listProjectEvents = api.projects.events.list.handler(
   async ({ input, context: { principal, db } }) => {
     await authorizeProject(db, principal, input.id, ["event:read"]);
     return listEventPage(db, input.id, { kind: "project" }, input);
+  },
+);
+
+/**
+ * Where a stream starts: the `Last-Event-ID` header (oRPC passes it to the
+ * handler as `lastEventId`), else the `cursor` query parameter, else `null`
+ * for the current safe boundary. An invalid cursor is 400 (ADR-0010).
+ */
+export function streamStart(
+  projectId: string,
+  lastEventId: string | undefined,
+  cursor: string | undefined,
+): FeedPosition | null {
+  const presented = lastEventId ?? cursor;
+  if (presented === undefined) return null;
+  const decoded = decodeFeedCursor(presented, projectId);
+  if (!decoded.ok)
+    throw apiError("BAD_REQUEST", "The cursor is not one this Project's Event stream issued.");
+  return decoded.position;
+}
+
+/**
+ * `GET /projects/{id}/events/stream`. PLACEHOLDER until the stream engine of
+ * issue #11 replaces it: it checks access and the cursor before the stream
+ * opens, as the engine will, then ends the stream without sending a frame.
+ */
+export const streamProjectEvents = api.projects.events.stream.handler(
+  async ({ input, lastEventId, context: { principal, db } }) => {
+    await authorizeProject(db, principal, input.id, ["event:read"]);
+    streamStart(input.id, lastEventId, input.cursor);
+    return (async function* (): AsyncGenerator<EventStreamFrame> {})();
   },
 );
 

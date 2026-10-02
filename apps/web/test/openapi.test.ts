@@ -1,17 +1,30 @@
 import { readFile } from "node:fs/promises";
-import { API_BASE_PATH, API_ERRORS, touchedPathsContentHash } from "@hivemind/contract";
+import {
+  API_BASE_PATH,
+  API_ERRORS,
+  feedOriginCursor,
+  MAX_CURSOR_LENGTH,
+  touchedPathsContentHash,
+} from "@hivemind/contract";
 import { agentSession } from "@hivemind/db/schema";
 import { describeDb } from "@hivemind/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateOpenAPIDocument, OPENAPI_DOCUMENT_PATH } from "../src/server/api/router";
-import { type ApiHarness, createApiHarness, ORIGIN, type SignedInUser } from "./support/api";
+import {
+  type ApiHarness,
+  createApiHarness,
+  errorCode,
+  ORIGIN,
+  type SignedInUser,
+} from "./support/api";
 
 // The OpenAPI document is generated from the contract the server implements.
-// These tests pin it to the contract's golden route tables (the M1 routes and
-// the coordination routes of #12) and check that the running handler answers
-// each documented operation with its documented success status.
+// These tests pin it to the contract's golden route tables (the M1 routes, the
+// coordination routes of #12 and the Event stream of #11) and check that the
+// running handler answers each documented operation with its documented
+// success status.
 
-const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json"];
+const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json", "routes.realtime.json"];
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -86,6 +99,25 @@ describe("the OpenAPI document", () => {
       bearer: { type: "http", scheme: "bearer" },
     });
   });
+
+  it("describes the Event stream as Server-Sent Events of stream frames", async () => {
+    const document = await generateOpenAPIDocument();
+    const operation = document.paths?.["/projects/{id}/events/stream"]?.get;
+    expect(operation?.operationId).toBe("streamProjectEvents");
+    const content = (operation?.responses?.["200"] as { content?: Record<string, unknown> })
+      ?.content;
+    expect(Object.keys(content ?? {})).toEqual(["text/event-stream"]);
+    // The message data is the frame union, discriminated by `type`.
+    const text = JSON.stringify(content);
+    for (const type of ["event", "heartbeat", "access_lost"]) {
+      expect(text).toContain(JSON.stringify(type));
+    }
+    const parameters = (operation?.parameters ?? []) as { name?: string; in?: string }[];
+    expect(parameters.map(({ name, in: location }) => `${location} ${name}`).sort()).toEqual([
+      "path id",
+      "query cursor",
+    ]);
+  });
 });
 
 describeDb("the served API", () => {
@@ -101,6 +133,42 @@ describeDb("the served API", () => {
 
   afterAll(async () => {
     await api?.drop();
+  });
+
+  it("checks the Event stream's access and cursor before it opens", async () => {
+    const path = `/projects/${projectId}/events/stream`;
+    const stream = (query = "", headers: Record<string, string> = {}) =>
+      api.request(`${path}${query}`, { token: owner.token, headers });
+    const valid = feedOriginCursor(projectId);
+    const foreign = feedOriginCursor(crypto.randomUUID());
+
+    for (const response of [
+      await stream(),
+      await stream(`?cursor=${valid}`),
+      await stream("", { "last-event-id": valid }),
+      // Last-Event-ID wins over the query cursor.
+      await stream(`?cursor=${foreign}`, { "last-event-id": valid }),
+    ]) {
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      await response.body?.cancel();
+    }
+
+    for (const response of [
+      await stream(`?cursor=${foreign}`),
+      await stream("?cursor=not-a-cursor"),
+      await stream(`?cursor=${"A".repeat(MAX_CURSOR_LENGTH + 1)}`),
+      await stream("", { "last-event-id": foreign }),
+      await stream(`?cursor=${valid}`, { "last-event-id": "not-a-cursor" }),
+    ]) {
+      expect([response.status, await errorCode(response)]).toEqual([400, "BAD_REQUEST"]);
+    }
+
+    const stranger = await api.signUp();
+    const hidden = await api.request(path, { token: stranger.token });
+    expect([hidden.status, await errorCode(hidden)]).toEqual([404, "NOT_FOUND"]);
+    const anonymous = await api.request(path);
+    expect(anonymous.status).toBe(401);
   });
 
   it("serves the document without credentials", async () => {

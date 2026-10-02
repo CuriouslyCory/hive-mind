@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import {
   type AnyContractProcedure,
   type AnyContractRouter,
+  getEventIteratorSchemaDetails,
   isContractProcedure,
 } from "@orpc/contract";
 import { describe, expect, it } from "vitest";
@@ -19,6 +20,7 @@ import {
   createProjectKeyOutputSchema,
   EXIT_CODES,
   errorEnvelope,
+  eventStreamFrameSchema,
   exitCodeForEnvelope,
   exitCodeForErrorCode,
   getProjectInputSchema,
@@ -44,6 +46,7 @@ import {
   revokeProjectKeyInputSchema,
   revokeProjectKeyOutputSchema,
   serializeHivemindConfig,
+  streamProjectEventsInputSchema,
   successEnvelope,
 } from "../src/index.ts";
 
@@ -96,11 +99,11 @@ function flattenRoutes(router: AnyContractRouter): RouteEntry[] {
   });
 }
 
-// The route table is the union of two golden fixtures: `routes.json`, the M1
-// routes released CLIs call (never edited), and `routes.coordination.json`,
-// the routes #12 added. A new route is added to a fixture; a changed or
-// missing M1 route fails here.
-const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json"];
+// The route table is the union of the golden fixtures: `routes.json`, the M1
+// routes released CLIs call (never edited), `routes.coordination.json`, the
+// routes #12 added, and `routes.realtime.json`, the Event stream of #11. A new
+// route is added to a fixture; a changed or missing M1 route fails here.
+const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json", "routes.realtime.json"];
 
 function fixtureRoutes(): RouteEntry[] {
   return ROUTE_FIXTURES.flatMap((name) => fixture(name) as RouteEntry[]);
@@ -146,6 +149,17 @@ describe("route table", () => {
         expect(errorMap[code]?.status).toBe(API_ERRORS[code].status);
       }
     }
+  });
+
+  it("serves the Event stream as an event iterator of stream frames", () => {
+    const stream = apiContract.projects.events.stream["~orpc"];
+    expect(stream.inputSchema).toBe(streamProjectEventsInputSchema);
+    expect(getEventIteratorSchemaDetails(stream.outputSchema)?.yields).toBe(eventStreamFrameSchema);
+    // Every other procedure answers with one JSON body.
+    const iterators = flattenProcedures(apiContract).filter(({ contract }) =>
+      getEventIteratorSchemaDetails(contract["~orpc"].outputSchema),
+    );
+    expect(iterators.map(({ procedure }) => procedure)).toEqual(["projects.events.stream"]);
   });
 });
 
