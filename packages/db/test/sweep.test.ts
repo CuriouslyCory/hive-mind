@@ -1,6 +1,11 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { heartbeatSession, type SweepOptions, sweepCoordination } from "../src/index.ts";
+import {
+  heartbeatSession,
+  type SweepOptions,
+  sweepCoordination,
+  updateSession,
+} from "../src/index.ts";
 import { agentSession } from "../src/schema/coordination.ts";
 import { event } from "../src/schema/event.ts";
 import { project as projectTable } from "../src/schema/project.ts";
@@ -107,6 +112,38 @@ describeDb("sweepCoordination", () => {
         collectionId: uuid(),
       }),
     ).toMatchObject({ status: "conflict" });
+  });
+
+  it("records a stale crossing once, however the owner tries to change the status", async () => {
+    const { project, principal } = await setupProject(testDb.db);
+    const session = await sessionAged(testDb.db, project.id, principal, 10 * MINUTE);
+    const staleEvents = async () =>
+      (await eventsOf(testDb.db, project.id)).filter(
+        (e) => e.type === "session.status_changed" && (e.payload as { to?: string }).to === "stale",
+      );
+    expect(await sweepCoordination(testDb.db, options())).toMatchObject({ sessionsStale: 1 });
+    // A status change is not a heartbeat; on a stale Session it is refused,
+    // so the stored status stays stale and the next sweep has nothing to do.
+    expect(
+      await updateSession(testDb.db, {
+        projectId: project.id,
+        sessionId: session.id,
+        principal,
+        changes: { status: "idle" },
+      }),
+    ).toMatchObject({ status: "conflict", message: expect.stringContaining("heartbeat") });
+    expect(await sweepCoordination(testDb.db, options())).toMatchObject({ sessionsStale: 0 });
+    expect(await staleEvents()).toHaveLength(1);
+    expect((await sessionRow(testDb.db, session.id)).status).toBe("stale");
+    // Other metadata can still change.
+    expect(
+      await updateSession(testDb.db, {
+        projectId: project.id,
+        sessionId: session.id,
+        principal,
+        changes: { intent: "Still here" },
+      }),
+    ).toMatchObject({ status: "ok", changed: true });
   });
 
   it("leaves live Sessions and unexpired claims alone", async () => {

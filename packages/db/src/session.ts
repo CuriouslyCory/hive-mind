@@ -161,7 +161,9 @@ export interface UpdateSessionInput extends OwnedSessionRef {
  * Changes the supplied metadata or the active/idle status of the caller's
  * Session. Equal values are a no-op (`changed: false`, no Event). An ended or
  * effectively abandoned Session is a conflict. Changing the status does not
- * count as a heartbeat, so a stale Session stays effectively stale.
+ * count as a heartbeat, so a stale Session stays effectively stale, and a
+ * status change on one is a conflict: storing active or idle over a swept
+ * `stale` would make the next sweep record the same crossing again.
  */
 export async function updateSession(
   db: Db,
@@ -179,6 +181,11 @@ export async function updateSession(
     const { session } = loaded;
     const terminal = terminalSessionConflict(session);
     if (terminal) return terminal;
+    if (input.changes.status !== undefined && session.effectiveStatus === "stale") {
+      return conflict(
+        `Session ${session.id} is stale: it sent no heartbeat for 5 minutes. Heartbeat it, then change its status.`,
+      );
+    }
 
     const changes: Partial<Pick<AgentSession, keyof UpdateSessionInput["changes"]>> = {};
     const fields: SessionUpdateField[] = [];
