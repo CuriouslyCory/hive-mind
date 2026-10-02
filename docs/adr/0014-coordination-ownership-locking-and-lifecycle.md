@@ -7,7 +7,7 @@ date: 2026-10-01
 
 ## Context
 
-[#1](https://github.com/CuriouslyCory/hive-mind/issues/1)'s M2 lets several agents on different machines share Plans, Tasks, Sessions and Scopes in one Project. Its plan, [#12](https://github.com/CuriouslyCory/hive-mind/issues/12), needs these decisions before the schema, contract and handlers are built:
+[#1](https://github.com/CuriouslyCory/hive-mind/issues/1)'s M2 lets several agents on different machines share Plans, Tasks, Sessions and Scopes in one Project. Its plan, [#12](https://github.com/CuriouslyCory/hive-mind/issues/12), needs these decisions before the schema, contract and handlers are built; M2 implements them in [PR #13](https://github.com/CuriouslyCory/hive-mind/pull/13):
 
 - ADR-0013 leaves two questions to M2: how a Project-key principal maps to a Session's owner and to Event attribution, and which coordination permissions Project keys get beyond `project:read`. M1 created no synthetic User for keys.
 - `CONTEXT.md` said every Session belongs to a User. A headless agent that authenticates with a Project key has no User.
