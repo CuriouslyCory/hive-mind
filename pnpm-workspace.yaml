@@ -11,6 +11,7 @@ catalog:
   "@orpc/openapi": 1.15.4
   "@orpc/openapi-client": 1.15.4
   "@orpc/server": 1.15.4
+  "@orpc/standard-server": 1.15.4
   "@orpc/zod": 1.15.4
   "@types/node": ^24.19.0
   "@types/pg": ^8.23.1
