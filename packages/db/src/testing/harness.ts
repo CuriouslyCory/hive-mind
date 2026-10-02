@@ -80,7 +80,23 @@ export function describeDb(name: string, fn: () => void): void {
 }
 
 async function dropDatabase(name: string): Promise<void> {
-  await withAdminClient((client) => client.query(`drop database if exists "${name}" with (force)`));
+  await withAdminClient(async (client) => {
+    // pg-pool's end() resolves before its clients' backends have exited. A
+    // forced drop would terminate those backends, and a client that is still
+    // ending then emits an error nothing listens for, which fails the run.
+    // Wait briefly for them to go; `force` only covers connections a test
+    // leaked.
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await client.query<{ count: string }>(
+        "select count(*) from pg_stat_activity where datname = $1",
+        [name],
+      );
+      if (Number(result.rows[0]?.count) === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    await client.query(`drop database if exists "${name}" with (force)`);
+  });
 }
 
 async function withAdminClient<T>(fn: (client: pg.Client) => Promise<T>): Promise<T> {
