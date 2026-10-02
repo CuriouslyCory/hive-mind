@@ -1,9 +1,18 @@
-import { integer, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  getTableConfig,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createdAt, id, timestamptz, updatedAt } from "../src/columns.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
 import {
   databaseConventionViolations,
+  describeTable,
   schemaConventionViolations,
   schemaTables,
 } from "./support/schema.ts";
@@ -54,6 +63,41 @@ describe("schemaConventionViolations", () => {
 
   it("finds no violations in the schema", () => {
     expect(schemaConventionViolations(schemaTables())).toEqual([]);
+  });
+});
+
+describe("table names and Project ownership", () => {
+  // The M2 coordination tables (issue #12). Each stores the Project it
+  // belongs to, so composite foreign keys can keep references within it.
+  const coordinationTables = [
+    "agent_session",
+    "event",
+    "plan",
+    "scope",
+    "scope_collection_batch",
+    "task",
+  ];
+
+  it("names every table in singular snake_case", () => {
+    const names = schemaTables().map((table) => describeTable(table).name.replace(/^public\./, ""));
+    expect(names.filter((name) => !/^[a-z][a-z0-9]*(_[a-z0-9]+)*$/.test(name))).toEqual([]);
+    // Plural names end in "s"; no table name here legitimately does.
+    expect(names.filter((name) => name.endsWith("s"))).toEqual([]);
+    expect(names).toEqual(expect.arrayContaining(coordinationTables));
+  });
+
+  it("gives every coordination table a non-null project_id", () => {
+    const missing = schemaTables()
+      .map((table) => ({ name: getTableConfig(table).name, config: getTableConfig(table) }))
+      .filter(({ name }) => coordinationTables.includes(name))
+      .filter(({ config }) => {
+        const column = config.columns.find(
+          (c) => c.name === "projectId" || c.name === "project_id",
+        );
+        return !column?.notNull;
+      })
+      .map(({ name }) => name);
+    expect(missing).toEqual([]);
   });
 });
 

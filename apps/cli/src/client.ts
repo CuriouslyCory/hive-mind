@@ -1,10 +1,30 @@
 import {
+  type AddSessionScopeInput,
+  type AddTaskInput,
   API_BASE_PATH,
   API_ERROR_CODES,
   API_ERRORS,
   type ApiContract,
+  type AppendPlanLogInput,
+  type AttachSessionInput,
   apiContract,
+  type BlockTaskInput,
+  type ClaimTaskInput,
+  type CreatePlanInput,
+  type EndSessionInput,
+  type FinalizeCollectionInput,
+  type HeartbeatSessionInput,
   isApiErrorCode,
+  type PlanStatus,
+  type RegisterCollectionManifestInput,
+  type RemoveSessionScopeInput,
+  type SessionListFilter,
+  type SetPlanStatusInput,
+  type StartSessionInput,
+  type TaskStatus,
+  type UpdatePlanInput,
+  type UpdateSessionInput,
+  type UploadCollectionBatchInput,
 } from "@hivemind/contract";
 import { createORPCClient, ORPCError } from "@orpc/client";
 import type { ContractRouterClient } from "@orpc/contract";
@@ -86,6 +106,170 @@ const revokedKey = z.looseObject({
   revoked: z.literal(true),
 });
 
+// Coordination (M2). Status values stay plain strings, so a status a later
+// server adds is shown rather than rejected.
+const nullableString = z.string().nullable();
+const planProgress = z.looseObject({
+  total: z.number(),
+  todo: z.number(),
+  inProgress: z.number(),
+  blocked: z.number(),
+  done: z.number(),
+});
+const planSummaryShape = {
+  id: z.string(),
+  projectId: z.string(),
+  key: z.string(),
+  title: z.string(),
+  status: z.string(),
+  progress: planProgress,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+};
+const planSummary = z.looseObject(planSummaryShape);
+const plan = z.looseObject({ ...planSummaryShape, body: nullableString });
+const task = z.looseObject({
+  id: z.string(),
+  planId: z.string(),
+  planKey: z.string(),
+  title: z.string(),
+  status: z.string(),
+  position: z.number(),
+  claim: z
+    .looseObject({ sessionId: z.string(), claimedAt: z.string(), leaseExpiresAt: z.string() })
+    .nullable(),
+  blockedReason: nullableString,
+});
+const session = z.looseObject({
+  id: z.string(),
+  projectId: z.string(),
+  agent: z.string(),
+  intent: z.string(),
+  status: z.string(),
+  hostname: nullableString,
+  gitBranch: nullableString,
+  gitCommit: nullableString,
+  attachedPlanId: nullableString,
+  attachedPlanKey: nullableString,
+  attachedTaskId: nullableString,
+  summary: nullableString,
+  scopeComplete: z.boolean(),
+  startedAt: z.string(),
+  lastHeartbeatAt: z.string(),
+  endedAt: nullableString,
+});
+const scope = z.looseObject({
+  id: z.string(),
+  sessionId: z.string(),
+  source: z.string(),
+  value: z.string(),
+  createdAt: z.string(),
+});
+const event = z.looseObject({
+  id: z.string(),
+  type: z.string(),
+  seq: z.string(),
+  actorSessionId: nullableString,
+  createdAt: z.string(),
+  payload: z.unknown(),
+});
+const overlapScope = z.looseObject({ id: z.string(), source: z.string(), value: z.string() });
+const overlap = z.looseObject({
+  sessionId: z.string(),
+  otherSessionId: z.string(),
+  scope: overlapScope,
+  otherScope: overlapScope,
+  kind: z.string(),
+  witness: nullableString,
+});
+const overlapPage = z.looseObject({
+  items: z.array(overlap),
+  nextCursor: nullableString,
+  complete: z.boolean(),
+  incompleteSessionIds: z.array(z.string()),
+});
+const claimedTaskIds = z.looseObject({ items: z.array(z.string()), complete: z.boolean() });
+const heartbeat = z.looseObject({
+  session,
+  previousStatus: z.string(),
+  renewedClaims: claimedTaskIds,
+  releasedClaims: claimedTaskIds,
+  leaseExpiresAt: nullableString,
+  collectionId: z.string(),
+  historicalScopeComplete: z.boolean(),
+});
+const nullableCount = z.number().nullable();
+const collectionState = z.looseObject({
+  collectionId: z.string(),
+  sessionId: z.string(),
+  pathCount: nullableCount,
+  batchCount: nullableCount,
+  omittedPathCount: nullableCount,
+  receivedBatchCount: z.number(),
+  finalized: z.boolean(),
+  collectionComplete: z.boolean(),
+  historicalScopeComplete: z.boolean(),
+  scopeComplete: z.boolean(),
+});
+const collectionChange = z.looseObject({ collection: collectionState, changed: z.boolean() });
+const collectionBatch = z.looseObject({
+  collection: collectionState,
+  changed: z.boolean(),
+  storedPathCount: z.number(),
+  overCapacityPathCount: z.number(),
+});
+const liveSessionEntry = z.looseObject({
+  session,
+  declaredScopes: z.array(scope),
+  touchedScopeCount: z.number(),
+  claimCount: z.number(),
+});
+const projectStatus = z.looseObject({
+  projectId: z.string(),
+  asOf: z.string(),
+  selectedSessionId: nullableString,
+  activePlans: z.array(planSummary),
+  liveSessions: z.array(liveSessionEntry),
+  myClaims: z.array(task),
+  recentTerminalSessions: z.array(session),
+  overlaps: z.array(overlap),
+  complete: z.looseObject({
+    activePlans: z.boolean(),
+    liveSessions: z.boolean(),
+    myClaims: z.boolean(),
+    recentTerminalSessions: z.boolean(),
+    overlaps: z.boolean(),
+  }),
+});
+const createdPlan = z.looseObject({ plan, created: z.boolean() });
+const changedPlan = z.looseObject({ plan, changed: z.boolean() });
+const planStatusChange = z.looseObject({
+  plan,
+  changed: z.boolean(),
+  releasedClaimCount: z.number(),
+});
+const appendedLog = z.looseObject({ event, created: z.boolean() });
+const createdTask = z.looseObject({ task, created: z.boolean() });
+const taskAction = z.looseObject({ task, changed: z.boolean() });
+const claimedTask = z.looseObject({
+  task,
+  changed: z.boolean(),
+  stolenFromSessionId: nullableString,
+});
+const createdSession = z.looseObject({ session, created: z.boolean() });
+const sessionChange = z.looseObject({ session, changed: z.boolean() });
+const endedSession = z.looseObject({
+  session,
+  changed: z.boolean(),
+  releasedClaims: claimedTaskIds,
+});
+const createdScope = z.looseObject({ scope, created: z.boolean() });
+const removedScope = z.looseObject({
+  id: z.string(),
+  sessionId: z.string(),
+  removed: z.boolean(),
+});
+
 export const lenientSchemas = {
   organization,
   principal,
@@ -97,12 +281,49 @@ export const lenientSchemas = {
   createdProject,
   createdKey,
   revokedKey,
+  planPage: page(planSummary),
+  plan,
+  createdPlan,
+  changedPlan,
+  planStatusChange,
+  eventPage: page(event),
+  appendedLog,
+  taskPage: page(task),
+  createdTask,
+  taskAction,
+  claimedTask,
+  sessionPage: page(session),
+  session,
+  createdSession,
+  sessionChange,
+  heartbeat,
+  endedSession,
+  scopePage: page(scope),
+  createdScope,
+  removedScope,
+  overlapPage,
+  collectionChange,
+  collectionBatch,
+  projectStatus,
 } as const;
 
 export type ApiOrganization = z.infer<typeof organization>;
 export type ApiPrincipal = z.infer<typeof principal>;
 export type ApiProject = z.infer<typeof project>;
 export type ApiProjectKey = z.infer<typeof projectKey>;
+export type ApiPlanSummary = z.infer<typeof planSummary>;
+export type ApiPlan = z.infer<typeof plan>;
+export type ApiTask = z.infer<typeof task>;
+export type ApiSession = z.infer<typeof session>;
+export type ApiScope = z.infer<typeof scope>;
+export type ApiEvent = z.infer<typeof event>;
+export type ApiOverlap = z.infer<typeof overlap>;
+export type ApiOverlapPage = z.infer<typeof overlapPage>;
+export type ApiHeartbeat = z.infer<typeof heartbeat>;
+export type ApiCollectionState = z.infer<typeof collectionState>;
+export type ApiProjectStatus = z.infer<typeof projectStatus>;
+export type TaskAction = "release" | "start" | "done";
+
 export interface ApiPage<T> {
   items: T[];
   nextCursor: string | null;
@@ -136,6 +357,120 @@ export interface HivemindApi {
     projectId: string,
     keyId: string,
   ): Promise<{ id: string; projectId: string; revoked: true }>;
+
+  // Coordination. Creation methods take a caller-generated UUID (`planId`,
+  // `taskId`, `sessionId`, `eventId`) so a lost answer can be checked and
+  // replayed with the same ID; none of them is ever retried here.
+  listPlans(
+    projectId: string,
+    input?: PageInput & { status?: PlanStatus },
+  ): Promise<ApiPage<ApiPlanSummary>>;
+  createPlan(
+    projectId: string,
+    input: Omit<CreatePlanInput, "id">,
+  ): Promise<{ plan: ApiPlan; created: boolean }>;
+  getPlan(projectId: string, planRef: string): Promise<ApiPlan>;
+  updatePlan(
+    projectId: string,
+    input: Omit<UpdatePlanInput, "id">,
+  ): Promise<{ plan: ApiPlan; changed: boolean }>;
+  setPlanStatus(
+    projectId: string,
+    input: Omit<SetPlanStatusInput, "id">,
+  ): Promise<{ plan: ApiPlan; changed: boolean; releasedClaimCount: number }>;
+  listPlanLog(projectId: string, planRef: string, input?: PageInput): Promise<ApiPage<ApiEvent>>;
+  appendPlanLog(
+    projectId: string,
+    input: Omit<AppendPlanLogInput, "id">,
+  ): Promise<{ event: ApiEvent; created: boolean }>;
+  listPlanTasks(
+    projectId: string,
+    planRef: string,
+    input?: PageInput & { status?: TaskStatus },
+  ): Promise<ApiPage<ApiTask>>;
+  addTask(
+    projectId: string,
+    input: Omit<AddTaskInput, "id">,
+  ): Promise<{ task: ApiTask; created: boolean }>;
+  claimTask(
+    projectId: string,
+    input: Omit<ClaimTaskInput, "id">,
+  ): Promise<{ task: ApiTask; changed: boolean; stolenFromSessionId: string | null }>;
+  taskAction(
+    projectId: string,
+    action: TaskAction,
+    input: { taskId: string; sessionId: string },
+  ): Promise<{ task: ApiTask; changed: boolean }>;
+  blockTask(
+    projectId: string,
+    input: Omit<BlockTaskInput, "id">,
+  ): Promise<{ task: ApiTask; changed: boolean }>;
+  listSessions(
+    projectId: string,
+    input?: PageInput & { status?: SessionListFilter },
+  ): Promise<ApiPage<ApiSession>>;
+  startSession(
+    projectId: string,
+    input: Omit<StartSessionInput, "id">,
+  ): Promise<{ session: ApiSession; created: boolean }>;
+  getSession(projectId: string, sessionId: string): Promise<ApiSession>;
+  updateSession(
+    projectId: string,
+    input: Omit<UpdateSessionInput, "id">,
+  ): Promise<{ session: ApiSession; changed: boolean }>;
+  attachSession(
+    projectId: string,
+    input: Omit<AttachSessionInput, "id">,
+  ): Promise<{ session: ApiSession; changed: boolean }>;
+  heartbeatSession(
+    projectId: string,
+    input: Omit<HeartbeatSessionInput, "id">,
+  ): Promise<ApiHeartbeat>;
+  endSession(
+    projectId: string,
+    input: Omit<EndSessionInput, "id">,
+  ): Promise<z.infer<typeof endedSession>>;
+  listSessionClaims(
+    projectId: string,
+    sessionId: string,
+    input?: PageInput,
+  ): Promise<ApiPage<ApiTask>>;
+  listSessionEvents(
+    projectId: string,
+    sessionId: string,
+    input?: PageInput,
+  ): Promise<ApiPage<ApiEvent>>;
+  listSessionScopes(
+    projectId: string,
+    sessionId: string,
+    input?: PageInput,
+  ): Promise<ApiPage<ApiScope>>;
+  addSessionScope(
+    projectId: string,
+    input: Omit<AddSessionScopeInput, "id">,
+  ): Promise<{ scope: ApiScope; created: boolean }>;
+  removeSessionScope(
+    projectId: string,
+    input: Omit<RemoveSessionScopeInput, "id">,
+  ): Promise<{ id: string; sessionId: string; removed: boolean }>;
+  checkSessionOverlaps(
+    projectId: string,
+    sessionId: string,
+    input?: PageInput,
+  ): Promise<ApiOverlapPage>;
+  registerCollectionManifest(
+    projectId: string,
+    input: Omit<RegisterCollectionManifestInput, "id">,
+  ): Promise<{ collection: ApiCollectionState; changed: boolean }>;
+  uploadCollectionBatch(
+    projectId: string,
+    input: Omit<UploadCollectionBatchInput, "id">,
+  ): Promise<z.infer<typeof collectionBatch>>;
+  finalizeCollection(
+    projectId: string,
+    input: Omit<FinalizeCollectionInput, "id">,
+  ): Promise<{ collection: ApiCollectionState; changed: boolean }>;
+  getProjectStatus(projectId: string, sessionId?: string): Promise<ApiProjectStatus>;
   /** The raw typed oRPC client, for routes added after this file. Outputs are unvalidated. */
   readonly orpc: ContractRouterClient<ApiContract>;
 }
@@ -186,7 +521,7 @@ function fromOrpcError(
   if (code === "UNAUTHORIZED") hint = unauthorizedHint(context.source);
   if (code === "FORBIDDEN" && context.source === "env")
     hint =
-      "HIVEMIND_TOKEN does not allow this operation (a Project key can only read its own Project).";
+      "HIVEMIND_TOKEN does not allow this operation (a Project key works only in its own Project, and cannot manage Organizations, Projects or keys).";
   return new CliError(code, `${context.origin}: ${message}`, { hint, cause: error });
 }
 
@@ -433,6 +768,122 @@ export function createApiClient(options: ApiClientOptions): HivemindApi {
     revokeProjectKey: (projectId, keyId) =>
       call("projects.keys.revoke", revokedKey, () =>
         orpc.projects.keys.revoke({ id: projectId, keyId }),
+      ),
+    listPlans: (projectId, input = {}) =>
+      call("projects.plans.list", lenientSchemas.planPage, () =>
+        orpc.projects.plans.list({ id: projectId, ...input }),
+      ),
+    createPlan: (projectId, input) =>
+      call("projects.plans.create", createdPlan, () =>
+        orpc.projects.plans.create({ id: projectId, ...input }),
+      ),
+    getPlan: (projectId, planRef) =>
+      call("projects.plans.get", plan, () => orpc.projects.plans.get({ id: projectId, planRef })),
+    updatePlan: (projectId, input) =>
+      call("projects.plans.update", changedPlan, () =>
+        orpc.projects.plans.update({ id: projectId, ...input }),
+      ),
+    setPlanStatus: (projectId, input) =>
+      call("projects.plans.setStatus", planStatusChange, () =>
+        orpc.projects.plans.setStatus({ id: projectId, ...input }),
+      ),
+    listPlanLog: (projectId, planRef, input = {}) =>
+      call("projects.plans.log.list", lenientSchemas.eventPage, () =>
+        orpc.projects.plans.log.list({ id: projectId, planRef, ...input }),
+      ),
+    appendPlanLog: (projectId, input) =>
+      call("projects.plans.log.append", appendedLog, () =>
+        orpc.projects.plans.log.append({ id: projectId, ...input }),
+      ),
+    listPlanTasks: (projectId, planRef, input = {}) =>
+      call("projects.plans.tasks.list", lenientSchemas.taskPage, () =>
+        orpc.projects.plans.tasks.list({ id: projectId, planRef, ...input }),
+      ),
+    addTask: (projectId, input) =>
+      call("projects.plans.tasks.add", createdTask, () =>
+        orpc.projects.plans.tasks.add({ id: projectId, ...input }),
+      ),
+    claimTask: (projectId, input) =>
+      call("projects.tasks.claim", claimedTask, () =>
+        orpc.projects.tasks.claim({ id: projectId, ...input }),
+      ),
+    taskAction: (projectId, action, input) =>
+      call(`projects.tasks.${action}`, taskAction, () =>
+        orpc.projects.tasks[action]({ id: projectId, ...input }),
+      ),
+    blockTask: (projectId, input) =>
+      call("projects.tasks.block", taskAction, () =>
+        orpc.projects.tasks.block({ id: projectId, ...input }),
+      ),
+    listSessions: (projectId, input = {}) =>
+      call("projects.sessions.list", lenientSchemas.sessionPage, () =>
+        orpc.projects.sessions.list({ id: projectId, ...input }),
+      ),
+    startSession: (projectId, input) =>
+      call("projects.sessions.start", createdSession, () =>
+        orpc.projects.sessions.start({ id: projectId, ...input }),
+      ),
+    getSession: (projectId, sessionId) =>
+      call("projects.sessions.get", session, () =>
+        orpc.projects.sessions.get({ id: projectId, sessionId }),
+      ),
+    updateSession: (projectId, input) =>
+      call("projects.sessions.update", sessionChange, () =>
+        orpc.projects.sessions.update({ id: projectId, ...input }),
+      ),
+    attachSession: (projectId, input) =>
+      call("projects.sessions.attach", sessionChange, () =>
+        orpc.projects.sessions.attach({ id: projectId, ...input }),
+      ),
+    heartbeatSession: (projectId, input) =>
+      call("projects.sessions.heartbeat", heartbeat, () =>
+        orpc.projects.sessions.heartbeat({ id: projectId, ...input }),
+      ),
+    endSession: (projectId, input) =>
+      call("projects.sessions.end", endedSession, () =>
+        orpc.projects.sessions.end({ id: projectId, ...input }),
+      ),
+    listSessionClaims: (projectId, sessionId, input = {}) =>
+      call("projects.sessions.claims", lenientSchemas.taskPage, () =>
+        orpc.projects.sessions.claims({ id: projectId, sessionId, ...input }),
+      ),
+    listSessionEvents: (projectId, sessionId, input = {}) =>
+      call("projects.sessions.events", lenientSchemas.eventPage, () =>
+        orpc.projects.sessions.events({ id: projectId, sessionId, ...input }),
+      ),
+    listSessionScopes: (projectId, sessionId, input = {}) =>
+      call("projects.sessions.scopes.list", lenientSchemas.scopePage, () =>
+        orpc.projects.sessions.scopes.list({ id: projectId, sessionId, ...input }),
+      ),
+    addSessionScope: (projectId, input) =>
+      call("projects.sessions.scopes.add", createdScope, () =>
+        orpc.projects.sessions.scopes.add({ id: projectId, ...input }),
+      ),
+    removeSessionScope: (projectId, input) =>
+      call("projects.sessions.scopes.remove", removedScope, () =>
+        orpc.projects.sessions.scopes.remove({ id: projectId, ...input }),
+      ),
+    checkSessionOverlaps: (projectId, sessionId, input = {}) =>
+      call("projects.sessions.overlaps", overlapPage, () =>
+        orpc.projects.sessions.overlaps({ id: projectId, sessionId, ...input }),
+      ),
+    registerCollectionManifest: (projectId, input) =>
+      call("projects.sessions.collections.manifest", collectionChange, () =>
+        orpc.projects.sessions.collections.manifest({ id: projectId, ...input }),
+      ),
+    uploadCollectionBatch: (projectId, input) =>
+      call("projects.sessions.collections.batch", collectionBatch, () =>
+        orpc.projects.sessions.collections.batch({ id: projectId, ...input }),
+      ),
+    finalizeCollection: (projectId, input) =>
+      call("projects.sessions.collections.finalize", collectionChange, () =>
+        orpc.projects.sessions.collections.finalize({ id: projectId, ...input }),
+      ),
+    getProjectStatus: (projectId, sessionId) =>
+      call("projects.status", projectStatus, () =>
+        orpc.projects.status(
+          sessionId === undefined ? { id: projectId } : { id: projectId, sessionId },
+        ),
       ),
   };
 }

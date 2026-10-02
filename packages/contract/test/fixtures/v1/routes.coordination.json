@@ -1,0 +1,226 @@
+[
+  {
+    "procedure": "projects.plans.list",
+    "operationId": "listPlans",
+    "method": "GET",
+    "path": "/projects/{id}/plans",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.plans.create",
+    "operationId": "createPlan",
+    "method": "POST",
+    "path": "/projects/{id}/plans",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.plans.get",
+    "operationId": "getPlan",
+    "method": "GET",
+    "path": "/projects/{id}/plans/{planRef}",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.plans.update",
+    "operationId": "updatePlan",
+    "method": "PATCH",
+    "path": "/projects/{id}/plans/{planRef}",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.plans.setStatus",
+    "operationId": "setPlanStatus",
+    "method": "POST",
+    "path": "/projects/{id}/plans/{planRef}/status",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.plans.log.list",
+    "operationId": "listPlanLog",
+    "method": "GET",
+    "path": "/projects/{id}/plans/{planRef}/log",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.plans.log.append",
+    "operationId": "appendPlanLog",
+    "method": "POST",
+    "path": "/projects/{id}/plans/{planRef}/log",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.plans.tasks.list",
+    "operationId": "listPlanTasks",
+    "method": "GET",
+    "path": "/projects/{id}/plans/{planRef}/tasks",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.plans.tasks.add",
+    "operationId": "addTask",
+    "method": "POST",
+    "path": "/projects/{id}/plans/{planRef}/tasks",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.tasks.claim",
+    "operationId": "claimTask",
+    "method": "POST",
+    "path": "/projects/{id}/tasks/{taskId}/claim",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.tasks.release",
+    "operationId": "releaseTask",
+    "method": "POST",
+    "path": "/projects/{id}/tasks/{taskId}/release",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.tasks.start",
+    "operationId": "startTask",
+    "method": "POST",
+    "path": "/projects/{id}/tasks/{taskId}/start",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.tasks.block",
+    "operationId": "blockTask",
+    "method": "POST",
+    "path": "/projects/{id}/tasks/{taskId}/block",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.tasks.done",
+    "operationId": "completeTask",
+    "method": "POST",
+    "path": "/projects/{id}/tasks/{taskId}/done",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.list",
+    "operationId": "listSessions",
+    "method": "GET",
+    "path": "/projects/{id}/sessions",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.start",
+    "operationId": "startSession",
+    "method": "POST",
+    "path": "/projects/{id}/sessions",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.get",
+    "operationId": "getSession",
+    "method": "GET",
+    "path": "/projects/{id}/sessions/{sessionId}",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.update",
+    "operationId": "updateSession",
+    "method": "PATCH",
+    "path": "/projects/{id}/sessions/{sessionId}",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.heartbeat",
+    "operationId": "heartbeatSession",
+    "method": "POST",
+    "path": "/projects/{id}/sessions/{sessionId}/heartbeat",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.attach",
+    "operationId": "attachSession",
+    "method": "POST",
+    "path": "/projects/{id}/sessions/{sessionId}/attach",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.end",
+    "operationId": "endSession",
+    "method": "POST",
+    "path": "/projects/{id}/sessions/{sessionId}/end",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.claims",
+    "operationId": "listSessionClaims",
+    "method": "GET",
+    "path": "/projects/{id}/sessions/{sessionId}/claims",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.events",
+    "operationId": "listSessionEvents",
+    "method": "GET",
+    "path": "/projects/{id}/sessions/{sessionId}/events",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.overlaps",
+    "operationId": "checkSessionOverlaps",
+    "method": "GET",
+    "path": "/projects/{id}/sessions/{sessionId}/overlaps",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.scopes.list",
+    "operationId": "listSessionScopes",
+    "method": "GET",
+    "path": "/projects/{id}/sessions/{sessionId}/scopes",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.scopes.add",
+    "operationId": "addSessionScope",
+    "method": "POST",
+    "path": "/projects/{id}/sessions/{sessionId}/scopes",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.scopes.remove",
+    "operationId": "removeSessionScope",
+    "method": "DELETE",
+    "path": "/projects/{id}/sessions/{sessionId}/scopes/{scopeId}",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.collections.manifest",
+    "operationId": "registerCollectionManifest",
+    "method": "POST",
+    "path": "/projects/{id}/sessions/{sessionId}/collections/{collectionId}/manifest",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.collections.batch",
+    "operationId": "uploadCollectionBatch",
+    "method": "POST",
+    "path": "/projects/{id}/sessions/{sessionId}/collections/{collectionId}/batches",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.sessions.collections.finalize",
+    "operationId": "finalizeCollection",
+    "method": "POST",
+    "path": "/projects/{id}/sessions/{sessionId}/collections/{collectionId}/finalize",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.events.list",
+    "operationId": "listProjectEvents",
+    "method": "GET",
+    "path": "/projects/{id}/events",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.status",
+    "operationId": "getProjectStatus",
+    "method": "GET",
+    "path": "/projects/{id}/status",
+    "successStatus": 200
+  }
+]

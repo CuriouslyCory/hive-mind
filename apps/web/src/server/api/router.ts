@@ -4,16 +4,51 @@ import {
   apiContract,
   MAX_MANAGEMENT_BODY_BYTES,
 } from "@hivemind/contract";
+import { ProjectAccessLostError } from "@hivemind/db";
 import { OpenAPIGenerator } from "@orpc/openapi";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { ORPCError, onError } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { apiError } from "./authorize";
+import { accessLostError } from "./coordination-auth";
+import { listProjectEvents, listSessionEvents } from "./events";
 import { listOrganizations, me } from "./identity";
 import { api } from "./implementer";
 import { createProjectKey, listProjectKeys, revokeProjectKey } from "./keys";
+import {
+  addTask,
+  appendPlanLog,
+  createPlan,
+  getPlan,
+  listPlanLog,
+  listPlans,
+  listPlanTasks,
+  setPlanStatus,
+  updatePlan,
+} from "./plans";
 import { type ApiDeps, bearerToken, resolvePrincipal, withoutCredentials } from "./principal";
+import { getProjectStatus } from "./project-status";
 import { createProject, getProject, listProjects } from "./projects";
+import {
+  addSessionScope,
+  checkSessionOverlaps,
+  finalizeCollection,
+  listSessionScopes,
+  registerCollectionManifest,
+  removeSessionScope,
+  uploadCollectionBatch,
+} from "./scopes";
+import {
+  attachSession,
+  endSession,
+  getSession,
+  heartbeatSession,
+  listSessionClaims,
+  listSessions,
+  startSession,
+  updateSession,
+} from "./sessions";
+import { blockTask, claimTask, completeTask, releaseTask, startTask } from "./tasks";
 
 /** The `/api/v1` router: the contract, implemented. */
 export const router = api.router({
@@ -24,6 +59,42 @@ export const router = api.router({
     create: createProject,
     get: getProject,
     keys: { list: listProjectKeys, create: createProjectKey, revoke: revokeProjectKey },
+    plans: {
+      list: listPlans,
+      create: createPlan,
+      get: getPlan,
+      update: updatePlan,
+      setStatus: setPlanStatus,
+      log: { list: listPlanLog, append: appendPlanLog },
+      tasks: { list: listPlanTasks, add: addTask },
+    },
+    tasks: {
+      claim: claimTask,
+      release: releaseTask,
+      start: startTask,
+      block: blockTask,
+      done: completeTask,
+    },
+    sessions: {
+      list: listSessions,
+      start: startSession,
+      get: getSession,
+      update: updateSession,
+      heartbeat: heartbeatSession,
+      attach: attachSession,
+      end: endSession,
+      claims: listSessionClaims,
+      events: listSessionEvents,
+      overlaps: checkSessionOverlaps,
+      scopes: { list: listSessionScopes, add: addSessionScope, remove: removeSessionScope },
+      collections: {
+        manifest: registerCollectionManifest,
+        batch: uploadCollectionBatch,
+        finalize: finalizeCollection,
+      },
+    },
+    events: { list: listProjectEvents },
+    status: getProjectStatus,
   },
 });
 
@@ -57,6 +128,18 @@ export function generateOpenAPIDocument() {
 let openAPIDocument: ReturnType<typeof generateOpenAPIDocument> | undefined;
 
 const handler = new OpenAPIHandler(router, {
+  clientInterceptors: [
+    // A mutation whose caller lost Project access while it waited for the
+    // Project lock (ADR-0014) ends with this error; answer it as the
+    // request-start check now would.
+    async ({ next }) => {
+      try {
+        return await next();
+      } catch (error) {
+        throw error instanceof ProjectAccessLostError ? accessLostError(error) : error;
+      }
+    },
+  ],
   interceptors: [
     // oRPC answers 500 with a generic message for anything that is not an
     // ORPCError; log those, since the response says nothing about the cause.
@@ -104,6 +187,11 @@ export function createApiHandler(deps: () => ApiDeps): (request: Request) => Pro
       });
       if (!result.matched) return errorResponse("NOT_FOUND", "No such API route.");
       result.response.headers.set("cache-control", "no-store");
+      // A key revoked while its request waited for the Project lock is a
+      // 401 from inside a procedure; it carries the same challenge.
+      if (result.response.status === 401) {
+        result.response.headers.set("www-authenticate", "Bearer");
+      }
       return result.response;
     } catch (error) {
       console.error("/api/v1 request failed:", error);

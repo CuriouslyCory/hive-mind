@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { envSchema, parseEnv } from "../src/env";
+import { envSchema, parseEnv, readCronSecret } from "../src/env";
 
 const REQUIRED = {
   BETTER_AUTH_SECRET: "a".repeat(32),
@@ -73,6 +73,15 @@ describe("parseEnv", () => {
     expect(parseEnv(source)).toEqual(REQUIRED);
   });
 
+  // The Cron secret is validated by the Cron route alone (readCronSecret), so
+  // a malformed value cannot take down the database, sign-in or /api/v1.
+  it.each(["short", `${"a".repeat(16)} b`, `${"a".repeat(16)}\n`])(
+    "ignores an invalid CRON_SECRET %j",
+    (value) => {
+      expect(parseEnv({ ...REQUIRED, CRON_SECRET: value })).toEqual(REQUIRED);
+    },
+  );
+
   it("rejects an unknown VERCEL_ENV", () => {
     expect(() => parseEnv({ ...REQUIRED, VERCEL_ENV: "staging" })).toThrow(/VERCEL_ENV/);
   });
@@ -85,6 +94,37 @@ describe("env", () => {
     const { env } = await import("../src/env");
     expect(() => env.BETTER_AUTH_SECRET).toThrow(/BETTER_AUTH_SECRET/);
   });
+
+  it("stays readable when CRON_SECRET is invalid", async () => {
+    for (const [name, value] of Object.entries(REQUIRED)) vi.stubEnv(name, value);
+    vi.stubEnv("CRON_SECRET", "short");
+    vi.resetModules();
+    const { env } = await import("../src/env");
+    expect(env.DATABASE_URL).toBe(REQUIRED.DATABASE_URL);
+    expect(env.BETTER_AUTH_SECRET).toBe(REQUIRED.BETTER_AUTH_SECRET);
+    vi.unstubAllEnvs();
+  });
+});
+
+describe("readCronSecret", () => {
+  it("accepts 16 or more printable characters and treats empty or absent as unset", () => {
+    expect(readCronSecret({ CRON_SECRET: "a".repeat(16) })).toBe("a".repeat(16));
+    expect(readCronSecret({ CRON_SECRET: "" })).toBeUndefined();
+    expect(readCronSecret({})).toBeUndefined();
+  });
+
+  it.each(["short", `${"a".repeat(16)} b`, `${"a".repeat(16)}\n`])(
+    "treats CRON_SECRET %j as unset and logs only the variable name",
+    (value) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(readCronSecret({ CRON_SECRET: value })).toBeUndefined();
+      expect(error).toHaveBeenCalledOnce();
+      const logged = String(error.mock.calls[0]?.[0]);
+      expect(logged).toMatch(/CRON_SECRET/);
+      expect(logged).not.toContain(value.trim());
+      error.mockRestore();
+    },
+  );
 });
 
 describe(".env.example", () => {

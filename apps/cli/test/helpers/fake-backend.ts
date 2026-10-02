@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
+import { MAX_MANAGEMENT_BODY_BYTES, PROJECT_KEY_PERMISSIONS } from "@hivemind/contract";
 import {
   type FakeServer,
   type RecordedRequest,
@@ -7,6 +8,11 @@ import {
   sendOrpcError,
   startServer,
 } from "./api-server.ts";
+import {
+  createFakeCoordination,
+  type FakeCoordination,
+  type FakeOwner,
+} from "./fake-coordination.ts";
 
 /**
  * A small stateful stand-in for the web app's `/api/v1` and the better-auth
@@ -63,6 +69,8 @@ export interface FakeBackend extends FakeServer {
   /** Login tokens handed out by the device flow, for "never printed" checks. */
   issuedTokens: string[];
   addProject(organizationId: string, slug: string, name?: string): FakeProject;
+  /** Plans, Tasks, Sessions, Scopes and Events (fake-coordination.ts). */
+  coordination: FakeCoordination;
 }
 
 export const ORG_A: FakeOrganization = {
@@ -101,6 +109,7 @@ export async function startFakeBackend(
   ]);
   const projects = new Map<string, FakeProject>();
   const keys = new Map<string, FakeKey>();
+  const coordination = createFakeCoordination();
   const now = () => new Date().toISOString();
   let polls = 0;
 
@@ -120,7 +129,7 @@ export async function startFakeBackend(
 
   const publicKey = ({ secret: _secret, ...key }: FakeKey) => key;
 
-  const handle = (request: RecordedRequest, response: ServerResponse): void => {
+  const handle = (request: RecordedRequest, response: ServerResponse): void | Promise<void> => {
     const url = new URL(request.url, "http://fake");
     const token = request.authorization?.replace(/^Bearer /, "") ?? null;
     const user = token ? users.get(token) : undefined;
@@ -191,7 +200,7 @@ export async function startFakeBackend(
           keyId: key.id,
           organizationId: key.organizationId,
           projectId: key.projectId,
-          permissions: ["project:read"],
+          permissions: [...PROJECT_KEY_PERMISSIONS],
         });
       return;
     }
@@ -270,8 +279,29 @@ export async function startFakeBackend(
       return;
     }
     if (parts[2] !== "keys") {
-      notFound();
-      return;
+      if (!project || !readable || parts.length < 3) {
+        notFound();
+        return;
+      }
+      // The server's request cap, enforced before parsing.
+      if (Buffer.byteLength(request.body) > MAX_MANAGEMENT_BODY_BYTES) {
+        sendOrpcError(response, 413, "PAYLOAD_TOO_LARGE", "The request body is too large.");
+        return;
+      }
+      const owner: FakeOwner = user
+        ? { kind: "user", userId: user.user.id }
+        : { kind: "key", keyId: (key as FakeKey).id };
+      return coordination.handle(
+        {
+          method: request.method,
+          projectId: project.id,
+          parts: parts.slice(2),
+          query: url.searchParams,
+          body,
+          owner,
+        },
+        response,
+      );
     }
     if (!user) {
       forbidden();
@@ -328,6 +358,7 @@ export async function startFakeBackend(
     deviceOutcome: "approve",
     issuedTokens: [],
     addProject,
+    coordination,
   };
   return backend;
 }

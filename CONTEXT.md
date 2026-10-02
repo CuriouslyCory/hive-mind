@@ -10,14 +10,42 @@ hive-mind gives coding agents that work on the same codebase from different mach
 A codebase that agents coordinate on, owned by one Organization and identified within it by a slug. A repository is bound to one Project.
 _Avoid_: repo, workspace, Vercel project, Neon project
 
+**Plan**:
+A unit of intended work in a Project, with a markdown body, a status (`draft`, `active`, `paused`, `done` or `abandoned`), a log, and an ordered list of Tasks. Identified by a Project-local key such as `PLAN-3`, or by its UUID.
+_Avoid_: epic, ticket, issue (GitHub issues are a different thing)
+
+**Task**:
+One step of a Plan, with a status (`todo`, `in_progress`, `blocked` or `done`). A Session must hold the Task's claim to start, block or finish it.
+_Avoid_: subtask, todo item
+
 **Session**:
-One agent run, recorded from start to end: which agent, for which User, on which machine, branch and worktree, with its intent, heartbeat and end summary. Sessions are the central concept of hive-mind: every agent run leaves one as its record, linked to a plan when there is one.
+One agent run, recorded from start to end: which agent, owned by which User or Project key, on which machine, git branch and commit, with its intent, heartbeats and end summary. Sessions are the central concept of hive-mind: every agent run leaves one as its record. A Session can attach to a Plan and Task as its current focus; attaching is not claiming. See ADR-0014.
 _Avoid_: agent session, run, login session
+
+**Claim**:
+A Session's exclusive hold on a Task, with a lease that expires 5 minutes after it was last renewed. A Session can hold several claims. `--steal` moves a live claim to another Session and is recorded as an Event.
+_Avoid_: lock, assignment
+
+**Heartbeat**:
+A Session's periodic report that it is still running (recommended every 60 seconds). It renews the Session's unexpired claims and records touched Scopes.
+_Avoid_: ping, keepalive
+
+**Stale** / **abandoned**:
+A Session is stale once 5 minutes have passed since its last heartbeat, and abandoned once 30 minutes have. Both are computed from database time when read, whether or not the sweep has stored them. A stale Session loses its expired claims and can resume by heartbeating; an abandoned one cannot resume. A Session that ends normally is ended, not abandoned.
+_Avoid_: dead, timed out, idle (`idle` is a live Session status)
+
+**Scope**:
+A repository path area a Session reports: either declared (a restricted glob of where it intends to work) or touched (an exact path its working tree changed). Overlapping Scopes of live Sessions produce warnings, never blocks.
+_Avoid_: OAuth scope, area, lock
+
+**Event**:
+An immutable record of one change in a Project, written in the same transaction as the change, attributed to a User, a Project key or the system. Events are the Project's activity feed; a Plan's log entries are Events.
+_Avoid_: activity, audit log entry, log line
 
 ### Identity and access
 
 **User**:
-A person who signs in to hive-mind with GitHub. Agents act on behalf of a User, so every Session belongs to one.
+A person who signs in to hive-mind with GitHub. An agent that uses the User's CLI login acts as that User, and its Sessions belong to the User. A Session started with a Project key belongs to the key, not to any User (ADR-0014).
 _Avoid_: account (better-auth's `account` table holds the linked GitHub credentials), GitHub user
 
 **Login session**:
@@ -37,7 +65,7 @@ A User's membership in an Organization, with a role such as `owner`. A User can 
 _Avoid_: collaborator, seat
 
 **Project key**:
-A credential that an Organization issues for one of its Projects, for CI and headless agents. It acts as itself, never as a User, and only on that Project.
+A credential that an Organization issues for one of its Projects, for CI and headless agents. It acts as itself, never as a User, and only on that Project. It can own Sessions; they stay in the record after the key is revoked.
 _Avoid_: API token, service account, API key (bare)
 
 ### Decisions
@@ -45,8 +73,6 @@ _Avoid_: API token, service account, API key (bare)
 **ADR**:
 An architecture decision record: one numbered decision with a status (`proposed`, `accepted`, `superseded` or `deprecated`), stored as `docs/adr/NNNN-slug.md`. The repo file is the source of truth. An ADR can supersede earlier ADRs.
 _Avoid_: decision doc, design doc, RFC
-
-Plan, Task, Scope and Event will be added in M2.
 
 ## Naming rules
 

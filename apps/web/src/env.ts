@@ -55,6 +55,34 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   return result.data;
 }
 
+// Authenticates Vercel Cron's calls to /api/cron/coordination, which Vercel
+// sends as `Authorization: Bearer <CRON_SECRET>`: at least 16 printable ASCII
+// characters without spaces, the characters a bearer token may hold. It is
+// deliberately not part of `envSchema`. The secret is optional and concerns
+// one route, so a malformed value must disable only the Cron route, never the
+// whole server (docs/setup.md, H8). Empty counts as unset.
+const cronSecretSchema = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z
+    .string()
+    .regex(/^[\x21-\x7e]{16,}$/, "Must be at least 16 printable ASCII characters without spaces.")
+    .optional(),
+);
+
+/**
+ * The Cron secret from `source`, or undefined when it is unset, empty or
+ * invalid. An invalid value is logged by name only, never its content. Read
+ * per request by the Cron route, so builds need no secret.
+ */
+export function readCronSecret(
+  source: Record<string, string | undefined> = process.env,
+): string | undefined {
+  const result = cronSecretSchema.safeParse(source.CRON_SECRET);
+  if (result.success) return result.data;
+  console.error(`Invalid CRON_SECRET:\n${z.prettifyError(result.error)}`);
+  return undefined;
+}
+
 let parsed: Env | undefined;
 
 function load(): Env {

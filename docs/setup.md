@@ -1,6 +1,6 @@
 # Setup
 
-One-time setup of the Vercel project, the Neon project, the GitHub OAuth apps and the CLI releases. Only the repo owner can do these steps. Do them in order: each step needs the ones before it. H5 is optional and can be done at any time. H6 is the check to run after deploying. H7 sets up CLI releases and needs a production deployment that passed H6.
+One-time setup of the Vercel project, the Neon project, the GitHub OAuth apps, the CLI releases and the coordination sweep. Only the repo owner can do these steps. Do them in order: each step needs the ones before it. H5 is optional and can be done at any time. H6 is the check to run after deploying. H7 sets up CLI releases and needs a production deployment that passed H6. H8 sets up the coordination sweep's Cron job; set its secret before the first production deployment that includes M2.
 
 Values in this guide are the current ones for the `hive-mind-web` Vercel project in the `curiouslycorys-projects` team.
 
@@ -81,9 +81,10 @@ So Preview needs the production app's client ID and secret and the same `OAUTH_P
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | production OAuth app | production OAuth app | dev OAuth app |
 | `OAUTH_PROXY_SECRET` | shared value | **same** shared value | any 32+ characters |
 | `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | set by the Neon integration | set by the Neon integration, per git branch | set by the Neon integration |
+| `CRON_SECRET` | its own value (H8) | unset, or its own value to call the sweep by hand | unset, or any value to call the sweep by hand |
 | `VERCEL_*` system variables | set by Vercel | set by Vercel | not set; leave them out of `.env.local` |
 
-Both secrets must be at least 32 characters. Generate them with `openssl rand -base64 32`.
+Both secrets must be at least 32 characters. Generate them with `openssl rand -base64 32`. `CRON_SECRET` is set up in H8.
 
 Add the variables from the repo root, where the Vercel project is linked:
 
@@ -139,6 +140,8 @@ vercel env add GITHUB_CLIENT_SECRET development
 - [ ] In a scratch git repository, `hivemind init --name Scratch --slug scratch` writes `.hivemind.json`. Projects cannot be deleted yet, so use a name you don't mind keeping. `hivemind key create --name check` prints a secret, and `HIVEMIND_TOKEN=<secret> hivemind whoami` shows a Project key.
 - [ ] `hivemind key revoke <keyId>` (the id is in `hivemind key list`), then `hivemind logout`. After that, `hivemind whoami` exits 3.
 
+**Coordination sweep:** run the checks at the end of H8.
+
 ## H7. CLI releases
 
 The release workflow (`.github/workflows/release.yml`) builds the four CLI binaries, drafts a GitHub release with them, `SHA256SUMS` and `install.sh`, and publishes the draft and the npm packages after an approval. It needs these owner-only settings first.
@@ -156,3 +159,50 @@ The release workflow (`.github/workflows/release.yml`) builds the four CLI binar
 - [ ] Run `pnpm version-packages` on a branch, open a PR with the result (version `0.1.0` and the changelog) and merge it. The push to `main` starts the Release workflow, which drafts `v0.1.0`.
 - [ ] Approve the publish job. It publishes the GitHub release, then the npm packages.
 - [ ] On a clean machine, install with the curl command and with `npm install -g @curiouslycory/hivemind` from [docs/cli.md](cli.md), and check `hivemind --version` and `hivemind login`. Also check that `npx @curiouslycory/hivemind --version` prints the same version.
+
+## H8. Coordination sweep (Cron)
+
+`apps/web/vercel.json` schedules `GET /api/cron/coordination` every minute (`* * * * *`). Each run marks Sessions stale or abandoned and releases expired claims, writing the `system` Events for those changes (ADR-0014, "Sweep"). A minute schedule needs Vercel Pro or Enterprise; Hobby allows one run a day. The `curiouslycorys-projects` team is on Pro, checked with `vercel teams ls` on 2026-10-01.
+
+The route accepts a request only with `Authorization: Bearer <CRON_SECRET>`, which Vercel Cron sends when the variable is set. It reads the secret on each request, not at build time.
+
+| Request | Answer |
+|---|---|
+| `CRON_SECRET` unset, empty or not a valid value | 500 `{"error":"Cron is not configured."}`; nothing runs. Only this route is affected: the secret is validated apart from the rest of the server environment, so sign-in and `/api/v1` keep working. |
+| No `Authorization` header, or a wrong secret | 401 `{"error":"Unauthorized."}` |
+| The right secret | 200 with the run's counts: `{ projectsSwept, projectsSkipped, sessionsStale, sessionsAbandoned, claimsReleased, moreWork }` |
+
+Every answer is `cache-control: no-store`. Until the secret is set the route refuses every call, and expiry still works at request time (see "Cleanup timing").
+
+- [ ] Generate a secret and add it to Production only. It must be at least 16 printable ASCII characters with no spaces or newlines; `openssl rand -hex 32` gives 64 hex characters, and `tr` removes the newline it ends with:
+
+  ```bash
+  openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production --sensitive
+  ```
+
+- [ ] Redeploy Production, since variable changes apply only to new deployments.
+
+`CRON_SECRET` is a server-only variable. Only the route handler reads it, through `readCronSecret` in `apps/web/src/env.ts`; it has no `NEXT_PUBLIC_` prefix, so it never reaches a browser bundle. Never print it in logs or paste it into issues or transcripts.
+
+**Calling the sweep by hand.** Vercel runs Cron jobs only on Production deployments. Locally, add a value to `apps/web/.env.local`, start `pnpm dev` and call the route:
+
+```bash
+# apps/web/.env.local: CRON_SECRET=<value from openssl rand -hex 32>
+curl -sS -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/coordination
+```
+
+To try it on a preview, add a separate Preview value with `vercel env add CRON_SECRET preview --sensitive`, redeploy the preview and call `https://<preview-host>/api/cron/coordination` the same way. Previews are behind Vercel Authentication (H1), so the request also needs a Deployment Protection bypass, such as the `x-vercel-protection-bypass` header with the Vercel project's automation bypass secret.
+
+**Cleanup timing.**
+
+- Whether a Session is stale or abandoned, and whether a claim's lease has expired, is computed from database time on every request. A claim becomes claimable by others at the moment its lease expires or its holder goes stale, with or without the sweep.
+- The stored Session status and the `system` Events that record these changes are written later: by the next sweep, or earlier by a request that changes the same Session or Task (a heartbeat, claim or `session end`). Each such Event's `effectiveAt` is when the change took effect (the lease expiry, or the last heartbeat plus 5 or 30 minutes), not when it was written.
+- One run handles at most 50 Projects, at most 100 Session changes and claim releases per Project, and starts no new Project after 20 seconds. `moreWork: true` means the rest waits for the next minute. A Project whose lock is busy is skipped (`projectsSkipped`) and retried in a later run.
+- Skipped, late, repeated or overlapping runs are harmless: every change is conditional on the current state, so a second run finds nothing to do.
+
+**Verify after deploying** (after H6, on `https://hivemind.curiouslycory.com`):
+
+- [ ] In the Vercel dashboard, **Project Settings → Cron Jobs** lists `/api/cron/coordination` with schedule `* * * * *`.
+- [ ] `curl -sS -o /dev/null -w '%{http_code}\n' https://hivemind.curiouslycory.com/api/cron/coordination` prints `401`. A `500` means `CRON_SECRET` is not set for this deployment.
+- [ ] The deployment's logs show a `GET /api/cron/coordination` with status 200 each minute, and no `CRON_SECRET is not set` errors.
+- [ ] With a CLI built from `main` and logged in (`hivemind login`), in the scratch repository from H6: start a Session (`hivemind session start --agent check --intent 'Cron check'`), then send no heartbeat. Right after 5 minutes, `hivemind session list --status stale` lists it. Within a minute or two after that, `hivemind session show <id> --json` shows a `session.status_changed` Event to `stale` with actor kind `system`. That Event proves the sweep ran. End the Session with `hivemind session end --session <id> --summary 'Cron check'`.

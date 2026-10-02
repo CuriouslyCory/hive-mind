@@ -1,46 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { rmSync } from "node:fs";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../src/index.ts";
-import { migrationsFolder, runMigrations } from "../src/migrate.ts";
+import { runMigrations } from "../src/migrate.ts";
 import { createOrReuseProject, type ProjectInput } from "../src/project.ts";
 import { apikey, member, organization, user } from "../src/schema/auth.ts";
 import { project } from "../src/schema/project.ts";
 import { projectApiKey } from "../src/schema/project-api-key.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
+import { journal, migrateFrom, migrationsFolderWith } from "./support/migrations.ts";
 
 /** The migrations M0 shipped. Upgrades start from a database with exactly these. */
 const M0_MIGRATIONS = ["0000_auth", "0001_account_provider_unique"];
-
-interface JournalEntry {
-  tag: string;
-}
-
-const journal = JSON.parse(
-  readFileSync(path.join(migrationsFolder, "meta", "_journal.json"), "utf8"),
-) as { entries: JournalEntry[] };
-
-/**
- * A copy of the migrations folder whose journal lists only `tags`, so Drizzle
- * applies just those. Remove it with `rmSync(folder, { recursive: true })`.
- */
-function migrationsFolderWith(tags: string[]): string {
-  const folder = mkdtempSync(path.join(tmpdir(), "hivemind-migrations-"));
-  cpSync(migrationsFolder, folder, { recursive: true });
-  const entries = journal.entries.filter((entry) => tags.includes(entry.tag));
-  expect(entries.map((entry) => entry.tag)).toEqual(tags);
-  writeFileSync(
-    path.join(folder, "meta", "_journal.json"),
-    JSON.stringify({ ...journal, entries }, null, 2),
-  );
-  return folder;
-}
 
 async function insertOrganization(db: Db, slug = `org-${randomUUID().slice(0, 8)}`) {
   const [row] = await db.insert(organization).values({ name: slug, slug }).returning();
@@ -80,13 +53,7 @@ describeDb("migrations for Project and API keys", () => {
     const testDb = await createTestDatabase({ migrate: false });
     const m0Folder = migrationsFolderWith(M0_MIGRATIONS);
     try {
-      const client = new pg.Client({ connectionString: testDb.url });
-      await client.connect();
-      try {
-        await migrate(drizzle({ client, casing: "snake_case" }), { migrationsFolder: m0Folder });
-      } finally {
-        await client.end();
-      }
+      await migrateFrom(testDb.url, m0Folder);
       expect(await tableNames(testDb.pool)).not.toContain("project");
 
       // M0 data: a user with their personal organization.

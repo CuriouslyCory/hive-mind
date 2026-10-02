@@ -1,14 +1,19 @@
 import { readFile } from "node:fs/promises";
-import { API_BASE_PATH, API_ERRORS } from "@hivemind/contract";
+import { API_BASE_PATH, API_ERRORS, touchedPathsContentHash } from "@hivemind/contract";
+import { agentSession } from "@hivemind/db/schema";
 import { describeDb } from "@hivemind/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateOpenAPIDocument, OPENAPI_DOCUMENT_PATH } from "../src/server/api/router";
 import { type ApiHarness, createApiHarness, ORIGIN, type SignedInUser } from "./support/api";
 
 // The OpenAPI document is generated from the contract the server implements.
-// These tests pin it to the contract's golden route table and check that the
-// running handler answers each documented operation with its documented
-// success status.
+// These tests pin it to the contract's golden route tables (the M1 routes and
+// the coordination routes of #12) and check that the running handler answers
+// each documented operation with its documented success status.
+
+const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json"];
+
+type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
 interface Operation {
   method: string;
@@ -22,7 +27,7 @@ async function documentedOperations(): Promise<Operation[]> {
   const document = await generateOpenAPIDocument();
   const operations: Operation[] = [];
   for (const [path, item] of Object.entries(document.paths ?? {})) {
-    for (const method of ["get", "post", "delete"] as const) {
+    for (const method of ["get", "post", "patch", "put", "delete"] as const) {
       const operation = item?.[method];
       if (!operation) continue;
       const statuses = Object.keys(operation.responses ?? {}).map(Number);
@@ -41,13 +46,19 @@ async function documentedOperations(): Promise<Operation[]> {
 }
 
 describe("the OpenAPI document", () => {
-  it("matches the contract's golden route table", async () => {
-    const fixture = JSON.parse(
-      await readFile(
-        new URL("../../../packages/contract/test/fixtures/v1/routes.json", import.meta.url),
-        "utf8",
-      ),
-    ) as { operationId: string; method: string; path: string; successStatus: number }[];
+  it("matches the contract's golden route tables", async () => {
+    const fixture: { operationId: string; method: string; path: string; successStatus: number }[] =
+      [];
+    for (const name of ROUTE_FIXTURES) {
+      fixture.push(
+        ...JSON.parse(
+          await readFile(
+            new URL(`../../../packages/contract/test/fixtures/v1/${name}`, import.meta.url),
+            "utf8",
+          ),
+        ),
+      );
+    }
     const operations = await documentedOperations();
     const key = (op: {
       operationId: string;
@@ -102,17 +113,133 @@ describeDb("the served API", () => {
 
   it("answers each documented operation with its documented statuses", async () => {
     const key = await api.createKey(owner, projectId);
+    const call = async (path: string, body?: unknown) => {
+      const response = await api.request(`/projects/${projectId}${path}`, {
+        token: owner.token,
+        body,
+      });
+      expect([path, response.status]).toEqual([path, 200]);
+      return (await response.json()) as Record<string, unknown>;
+    };
+    // PLAN-1, which the Plan routes below address; active, so its Tasks can be claimed.
+    await call("/plans", { planId: crypto.randomUUID(), title: "Addressed", status: "active" });
+    // A Session whose history the Session event route reads.
+    const [readSession] = await api.testDb.db
+      .insert(agentSession)
+      .values({
+        projectId,
+        ownerKind: "user",
+        userId: owner.id,
+        agent: "openapi",
+        intent: "Read",
+        creationFingerprint: "0".repeat(64),
+      })
+      .returning();
+    if (!readSession) throw new Error("Session insert returned no row.");
+
+    const startBody = { agent: "openapi", intent: "Check the OpenAPI document" };
+    const newSession = async () => {
+      const sessionId = crypto.randomUUID();
+      await call("/sessions", { sessionId, ...startBody });
+      return sessionId;
+    };
+    const newTask = async () => {
+      const taskId = crypto.randomUUID();
+      await call("/plans/PLAN-1/tasks", { taskId, title: "OpenAPI" });
+      return taskId;
+    };
+    // A Task claimed by a new Session, for the actions that need a claim.
+    const claimed = async () => {
+      const sessionId = await newSession();
+      const taskId = await newTask();
+      await call(`/tasks/${taskId}/claim`, { sessionId });
+      return { ids: { "{taskId}": taskId }, body: { sessionId } };
+    };
+    // A new Session's current collection, optionally with a registered manifest.
+    const collection = async (paths?: string[]) => {
+      const sessionId = await newSession();
+      const { collectionId } = await call(`/sessions/${sessionId}/heartbeat`, {});
+      if (paths) {
+        await call(`/sessions/${sessionId}/collections/${collectionId}/manifest`, {
+          pathCount: paths.length,
+          batchCount: Math.ceil(paths.length / 16),
+          omittedPathCount: 0,
+          contentHash: await touchedPathsContentHash(paths),
+        });
+      }
+      return { "{sessionId}": sessionId, "{collectionId}": String(collectionId) };
+    };
+
+    // The shared Session most Session routes address; the startSession
+    // operation below replays its start (`created: false`).
+    const sessionId = crypto.randomUUID();
+    await call("/sessions", { sessionId, ...startBody });
+
     // A valid request for each operation, as the owner.
     const bodies: Record<string, unknown> = {
       createProject: { organizationId: owner.organizationId, slug: "openapi", name: "OpenAPI" },
       createProjectKey: { name: "openapi" },
+      createPlan: { planId: crypto.randomUUID(), title: "OpenAPI" },
+      updatePlan: { title: "OpenAPI" },
+      setPlanStatus: { status: "active" },
+      appendPlanLog: { eventId: crypto.randomUUID(), message: "Progress." },
+      addTask: { taskId: crypto.randomUUID(), title: "OpenAPI" },
+      startSession: { sessionId, ...startBody },
+      updateSession: { status: "idle" },
+      heartbeatSession: {},
+      attachSession: { planRef: "PLAN-1" },
+      addSessionScope: { pattern: "apps/web/**" },
+      registerCollectionManifest: {
+        pathCount: 0,
+        batchCount: 0,
+        omittedPathCount: 0,
+        contentHash: await touchedPathsContentHash([]),
+      },
+      uploadCollectionBatch: { batchIndex: 0, paths: ["README.md"] },
+      finalizeCollection: {},
+    };
+    // Operations that change what they address get records of their own, so
+    // the document's operation order does not matter.
+    const prepare: Record<string, () => Promise<{ ids?: Record<string, string>; body?: unknown }>> =
+      {
+        listSessionEvents: async () => ({ ids: { "{sessionId}": readSession.id } }),
+        claimTask: async () => ({
+          ids: { "{taskId}": await newTask() },
+          body: { sessionId: await newSession() },
+        }),
+        releaseTask: claimed,
+        startTask: claimed,
+        blockTask: async () => {
+          const prepared = await claimed();
+          return { ...prepared, body: { ...prepared.body, reason: "Waiting for review." } };
+        },
+        completeTask: claimed,
+        endSession: async () => ({
+          ids: { "{sessionId}": await newSession() },
+          body: { summary: "Checked." },
+        }),
+        registerCollectionManifest: async () => ({ ids: await collection() }),
+        uploadCollectionBatch: async () => ({ ids: await collection(["README.md"]) }),
+        finalizeCollection: async () => ({ ids: await collection([]) }),
+      };
+    const nestedIds: Record<string, string> = {
+      "{planRef}": "PLAN-1",
+      "{sessionId}": sessionId,
+      "{scopeId}": crypto.randomUUID(),
     };
     for (const operation of await documentedOperations()) {
-      const path = operation.path.replace("{id}", projectId).replace("{keyId}", key.id);
+      const prepared = await prepare[operation.operationId]?.();
+      const body = prepared?.body ?? bodies[operation.operationId];
+      let path = operation.path.replace("{id}", projectId).replace("{keyId}", key.id);
+      const ids = { ...nestedIds, ...prepared?.ids };
+      for (const [parameter, value] of Object.entries(ids)) {
+        path = path.replace(parameter, value);
+      }
+      expect(path).not.toContain("{");
       const response = await api.request(path, {
-        method: operation.method as "GET" | "POST" | "DELETE",
+        method: operation.method as Method,
         token: owner.token,
-        body: bodies[operation.operationId],
+        body,
       });
       expect([operation.operationId, response.status]).toEqual([
         operation.operationId,
@@ -120,8 +247,8 @@ describeDb("the served API", () => {
       ]);
 
       const anonymous = await api.request(path, {
-        method: operation.method as "GET" | "POST" | "DELETE",
-        body: bodies[operation.operationId],
+        method: operation.method as Method,
+        body,
       });
       expect(anonymous.status).toBe(401);
       expect(operation.errorStatuses).toContain(anonymous.status);

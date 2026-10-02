@@ -409,6 +409,48 @@ export async function runCli(
   }
 }
 
+/**
+ * All of `stream`, or null once it exceeds `maxBytes` (the rest is left
+ * unread). Rejects with CANCELLED when `signal` aborts, so an explicit `-`
+ * on a terminal or a stalled pipe can still be interrupted.
+ */
+async function readStream(
+  stream: NodeJS.ReadableStream,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<Uint8Array | null> {
+  const cancelled = () => new CliError(CLI_ERROR_CODES.cancelled, "Cancelled.");
+  if (signal.aborted) throw cancelled();
+  const chunks: Buffer[] = [];
+  let size = 0;
+  const iterator = stream[Symbol.asyncIterator]();
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(cancelled());
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  let done = false;
+  try {
+    for (;;) {
+      const next = await Promise.race([iterator.next(), aborted]);
+      if (next.done) {
+        done = true;
+        break;
+      }
+      const chunk = typeof next.value === "string" ? Buffer.from(next.value) : next.value;
+      size += chunk.byteLength;
+      if (size > maxBytes) return null;
+      chunks.push(chunk);
+    }
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+    // Stopped early (too large, cancelled): close stdin, or a writer that
+    // keeps the pipe open would keep the process alive after the error.
+    if (!done) iterator.return?.().catch(() => undefined);
+  }
+  return Buffer.concat(chunks);
+}
+
 function createContext(
   runtime: CliRuntime,
   parsed: {
@@ -437,6 +479,7 @@ function createContext(
     signal,
     report: createReporter(runtime.stderr),
     prompt: createPrompter({ stdin: runtime.stdin, stderr: runtime.stderr, interactive, signal }),
+    readStdin: (maxBytes) => readStream(runtime.stdin, maxBytes, signal),
     origin() {
       origin ??= resolveOrigin({ flag: parsed.server, env: runtime.env });
       return origin;

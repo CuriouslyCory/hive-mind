@@ -6,13 +6,14 @@ import {
 } from "@hivemind/contract";
 import type { ApiProjectKey } from "../client.ts";
 import type { CommandDefinition, OptionSpec } from "../command.ts";
-import { CliError, isCliError, UNCERTAIN_OUTCOME_CODES, usageError } from "../errors.ts";
+import { CliError, isCliError, isUncertainOutcome, usageError } from "../errors.ts";
 import { resolveProjectId } from "../project-resolution.ts";
 
 /**
  * Project key management. Keys are minted by the server for one Project and
- * carry only that Project's read permission; only organization owners manage
- * them. `key create` is the one command that prints a secret.
+ * carry the coordination permissions within that Project only (ADR-0014);
+ * only organization owners manage them. `key create` is the one command that
+ * prints a secret.
  */
 
 const PROJECT_OPTION = {
@@ -32,9 +33,10 @@ export const keyCreate: CommandDefinition = {
   name: "key create",
   summary: "Create a Project key and print its secret once",
   description: [
-    "Creates a Project key: a credential for CI and agents that can only read",
-    "and link its own Project. Requires a user login that owns the Project's",
-    "organization.",
+    "Creates a Project key: a credential for CI and agents that works only in",
+    "its own Project. It can read and link the Project and coordinate in it",
+    "(Plans, Tasks, Sessions, Scopes); it cannot manage Organizations, Projects",
+    "or keys. Requires a user login that owns the Project's organization.",
     "",
     "The secret is printed exactly once, on stdout (as data.secret with --json),",
     "and cannot be shown again. Store it right away, for example as HIVEMIND_TOKEN",
@@ -88,7 +90,7 @@ export const keyCreate: CommandDefinition = {
     } catch (error) {
       // The request may have reached the server: point at the safe follow-up
       // instead of encouraging a blind rerun that could mint a second key.
-      if (isCliError(error) && UNCERTAIN_OUTCOME_CODES.has(error.code)) {
+      if (isCliError(error) && isUncertainOutcome(error)) {
         throw new CliError(error.code, error.message, {
           hint: `The key may have been created anyway. Check 'hivemind key list --project ${projectId}' and revoke any key you did not receive.`,
           cause: error,
