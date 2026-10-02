@@ -275,7 +275,7 @@ describe("createProjectLiveRegistry", () => {
     expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
   });
 
-  it("keeps lost access while hidden and shown again, until a fresh navigation", () => {
+  it("keeps lost access while hidden and shown again, until a fresh navigation's check passes", () => {
     const { registry, streams, current } = setup();
     registry.navigated("/projects/p");
     registry.attach();
@@ -303,16 +303,68 @@ describe("createProjectLiveRegistry", () => {
     expect(streams).toHaveLength(1);
     expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
 
-    // A fresh navigation does.
+    // A fresh navigation starts a check from the last page shown; the
+    // content stays hidden until the server accepts it.
     registry.unregister("overview");
     registry.navigated("/projects/p/plans/P-1");
-    registry.register("plan", planPage(130));
     expect(streams).toHaveLength(2);
-    expect(current().request.initialCursor).toBe(cursorAt(130, 0));
-    expect(registry.getSnapshot()?.status.kind).toBe("connecting");
+    expect(current().request.initialCursor).toBe(cursorAt(120, 0));
+    expect(current().invalidations).toBe(0);
+    expect(registry.getSnapshot()).toBe(lostSnapshot);
+    current().setStatus({ kind: "live" });
+    expect(registry.getSnapshot()?.status.kind).toBe("live");
+
+    // The page shown once access is back is refreshed, since it may predate the loss.
+    registry.register("plan", planPage(90));
+    expect(streams).toHaveLength(2);
+    expect(current().invalidations).toBe(1);
+    registry.register("plan", planPage(130));
+    expect(current().invalidations).toBe(1);
   });
 
-  it("ends lost access kept while hidden when the layout is shown at another pathname", () => {
+  it("keeps a page kept from before the loss hidden until the check after Back is live", () => {
+    const { registry, streams, current } = setup();
+    registry.navigated("/projects/p");
+    registry.attach();
+    registry.register("overview", overview(100));
+    registry.unregister("overview");
+    registry.navigated("/projects/p/plans/P-1");
+    registry.register("plan", planPage(110));
+    current().setStatus({ kind: "access-lost", code: "NOT_FOUND" });
+    const lostSnapshot = registry.getSnapshot();
+    registry.unregister("plan");
+
+    // Back to the overview, which Next shows from a hidden Activity without
+    // a server render: it stays hidden while the check connects, retries or
+    // is offline.
+    registry.navigated("/projects/p");
+    expect(streams).toHaveLength(2);
+    const check = current();
+    expect(check.request.initialCursor).toBe(cursorAt(110, 0));
+    for (const status of [
+      { kind: "connecting" },
+      { kind: "reconnecting", attempt: 1, nextAttemptAt: null },
+      { kind: "offline" },
+    ] satisfies ProjectEventStreamStatus[]) {
+      check.setStatus(status);
+      expect(registry.getSnapshot()).toBe(lostSnapshot);
+    }
+
+    // The check finds access still lost: lost again here, so only another
+    // fresh navigation checks again.
+    check.setStatus({ kind: "access-lost", code: "UNAUTHORIZED" });
+    expect(registry.getSnapshot()?.status).toEqual({ kind: "access-lost", code: "UNAUTHORIZED" });
+    registry.navigated("/projects/p");
+    registry.detach();
+    registry.attach();
+    expect(streams).toHaveLength(2);
+    registry.navigated("/projects/p/sessions/s");
+    expect(check.closed).toBe(true);
+    expect(streams).toHaveLength(3);
+    expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
+  });
+
+  it("checks lost access from the last page shown when the layout is shown at another pathname", () => {
     const { registry, streams, current } = setup();
     registry.navigated("/projects/p");
     registry.attach();
@@ -322,29 +374,17 @@ describe("createProjectLiveRegistry", () => {
     registry.detach();
 
     registry.navigated("/projects/p/plans/PLAN-1");
-    expect(registry.getSnapshot()).toBeNull();
+    expect(streams).toHaveLength(1);
+    expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
     registry.attach();
+    expect(streams).toHaveLength(2);
+    expect(current().request.initialCursor).toBe(cursorAt(100, 0));
+    // A check is not a reconciliation: nothing is refreshed while hidden.
+    expect(current().invalidations).toBe(0);
+    expect(registry.getSnapshot()?.status.kind).toBe("access-lost");
+    current().setStatus({ kind: "live" });
     registry.register("plan", planPage(130));
-    expect(streams).toHaveLength(2);
-    expect(current().request.initialCursor).toBe(cursorAt(130, 0));
-  });
-
-  it("clears the stream when access was lost and no page is registered, then waits for one", () => {
-    const { registry, streams, notified } = setup();
-    registry.navigated("/projects/p");
-    registry.attach();
-    registry.register("overview", overview(100));
-    streams[0]?.setStatus({ kind: "access-lost", code: "UNAUTHORIZED" });
-    // The provider hides the protected content, unmounting the page.
-    registry.unregister("overview");
-    notified.mockClear();
-
-    registry.navigated("/projects/p/sessions/s");
-    expect(notified).toHaveBeenCalled();
-    expect(registry.getSnapshot()).toBeNull();
-    registry.register("session", sessionPage(110));
-    expect(streams).toHaveLength(2);
-    expect(streams[1]?.request.initialCursor).toBe(cursorAt(110, 0));
+    expect(current().invalidations).toBe(1);
   });
 
   it("restarts a stream stopped by an error only from a different render's fence", () => {

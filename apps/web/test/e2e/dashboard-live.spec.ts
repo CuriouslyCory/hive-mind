@@ -260,6 +260,58 @@ test("revoking the viewer's login session hides the open Project", async ({ brow
   await expect(page).toHaveURL(`/sign-in?${new URLSearchParams({ returnTo: path })}`);
 });
 
+test("Back after losing access does not show a page rendered before the loss", async ({
+  browser,
+}) => {
+  const { context, page, project, plan } = await livePlan(browser, "kept-agent");
+  await openLive(page, `/projects/${project.id}`);
+  await expect(page.getByTestId("project-overview")).toContainText("kept-agent");
+  await page.locator(`a[href="/projects/${project.id}/plans/${plan.key}"]`).first().click();
+  await expect(page.getByTestId("plan-detail")).toBeVisible();
+  await expectLive(page);
+
+  await revokeLoginSession(pool, await loginSessionToken(context));
+  await expect(page.getByTestId("project-access-lost")).toContainText(
+    "Your sign-in has ended",
+    LIVE,
+  );
+
+  // Back shows the overview Next kept from before the loss, without a server
+  // render. Record whether it is ever put back in the document.
+  await page.evaluate(() => {
+    const state = window as unknown as { __overviewShown?: boolean };
+    state.__overviewShown = false;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (
+            node instanceof Element &&
+            (node.matches('[data-testid="project-overview"]') ||
+              node.querySelector('[data-testid="project-overview"]'))
+          ) {
+            state.__overviewShown = true;
+          }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  const recheck = page.waitForResponse(
+    (response) => response.url().includes("/events/stream") && response.status() === 401,
+    LIVE,
+  );
+  await page.goBack();
+  await expect(page).toHaveURL(`/projects/${project.id}`);
+  await recheck;
+
+  await expect(page.getByTestId("project-access-lost")).toContainText("Your sign-in has ended");
+  await expect(page.getByTestId("live-status")).toHaveAttribute("data-state", "access-lost");
+  await expect(page.getByTestId("project-overview")).toHaveCount(0);
+  expect(
+    await page.evaluate(() => (window as unknown as { __overviewShown?: boolean }).__overviewShown),
+  ).toBe(false);
+  await expectNotReloaded(page);
+});
+
 test("hostile text that arrives live stays inert, then and after a reload", async ({ browser }) => {
   const { page, api, project, sessionId, plan } = await livePlan(browser, "hostile-live-agent");
   const dialogs = watchDialogs(page);

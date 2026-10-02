@@ -40,8 +40,13 @@ import type {
 // started after a detach refreshes the restored page at once, since it may
 // be any age.
 //
-// Lost access ends only on a fresh navigation (a new pathname). A newer
-// fence does not end it: a `router.refresh()` that started before the loss
+// Lost access ends only when the server accepts a stream started after a
+// fresh navigation (a new pathname). Until that stream is live the content
+// stays hidden, because Back or Forward can show a page kept in a hidden
+// Activity, rendered before the loss, with no server render. The hidden
+// content registers no page, so the check runs from the last page shown;
+// once it passes, the page that registers next is refreshed. A newer fence
+// does not start a check: a `router.refresh()` that started before the loss
 // can commit after it, with a fence later than the lost page's, yet its
 // render was authorized against the pre-loss state.
 
@@ -74,7 +79,7 @@ export interface ProjectLiveRegistry {
   /**
    * The current pathname. After lost access, no stream runs until the
    * pathname changes (a fresh navigation); then the page on screen starts a
-   * new stream from its own fence.
+   * new stream from its own fence, and lost access ends once it is live.
    */
   navigated(pathname: string): void;
   /** The stream's state, the lost-access state, or null when no stream runs. */
@@ -94,11 +99,14 @@ export function streamIsPastFence(
   return compareFeedPositions(stream.position, page.position) > 0;
 }
 
-/** Where access was lost; kept until a fresh navigation. */
+/** Where access was lost; kept until a stream started after a fresh navigation is live. */
 interface LostAccess {
+  /** Where access was lost, or where the last check found it still lost. */
   pathname: string;
-  /** The stream's access-lost snapshot. */
+  /** The stream's access-lost snapshot, shown until access is back. */
   snapshot: ProjectEventStreamSnapshot;
+  /** A stream started after a fresh navigation is checking whether access is back. */
+  checking: boolean;
 }
 
 export function createProjectLiveRegistry(options: {
@@ -120,6 +128,10 @@ export function createProjectLiveRegistry(options: {
   let lost: LostAccess | null = null;
   // Set by detach(): the next stream's page may have been hidden for a while.
   let restored = false;
+  // The page on screen when last seen; a check of lost access starts from it.
+  let lastPage: LivePage | null = null;
+  // Set when a check finds access back: the page shown next is refreshed.
+  let revealed = false;
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -144,16 +156,16 @@ export function createProjectLiveRegistry(options: {
     notify();
   };
 
-  const clearLost = () => {
-    lost = null;
-    closeStream();
-    notify();
-  };
-
   const onStreamChange = () => {
     const snapshot = stream?.getSnapshot();
-    if (snapshot?.status.kind === "access-lost" && lost === null) {
-      lost = { pathname: pathname ?? "", snapshot };
+    const kind = snapshot?.status.kind;
+    if (snapshot && kind === "access-lost" && (lost === null || lost.checking)) {
+      lost = { pathname: pathname ?? "", snapshot, checking: false };
+    } else if (lost?.checking && kind === "live") {
+      // The server checked the login session and Project access before
+      // accepting this stream, which started after the navigation.
+      lost = null;
+      revealed = true;
     }
     notify();
   };
@@ -163,8 +175,12 @@ export function createProjectLiveRegistry(options: {
     filterKey = liveUpdateScopeKey(page.scope);
     streamProjectId = page.projectId;
     streamStartCursor = page.cursor;
-    const reconcile = restored;
+    // A page shown again from a hidden layout, or after lost access, may be
+    // any age, and lease and liveness displays change with time alone. A
+    // check of lost access refreshes once it passes, not while hidden.
+    const reconcile = (restored || revealed) && lost === null;
     restored = false;
+    revealed = false;
     const created = options.createStream({
       projectId: page.projectId,
       initialCursor: page.cursor,
@@ -174,19 +190,19 @@ export function createProjectLiveRegistry(options: {
     stream = created;
     stopListening = created.subscribe(onStreamChange);
     created.start();
-    // A page shown again from a hidden layout may be any age, and lease and
-    // liveness displays change with time alone.
     if (reconcile) created.invalidate();
     notify();
   };
 
   const sync = () => {
     if (!attached) return;
-    const page = activePage();
+    const shown = activePage();
+    if (shown) lastPage = shown;
     // Between pages (a loading page) the stream keeps its last filter.
+    const page = shown ?? (lost?.checking ? lastPage : null);
     if (!page) return;
-    // Only a fresh navigation ends lost access (see `navigated`).
-    if (lost) return;
+    // Only a fresh navigation starts a stream after lost access (see `navigated`).
+    if (lost && !lost.checking) return;
     if (stream && streamProjectId !== page.projectId) closeStream();
     if (stream) {
       const status = stream.getSnapshot().status.kind;
@@ -206,6 +222,12 @@ export function createProjectLiveRegistry(options: {
     if (stream.adoptFence(page.cursor)) streamStartCursor = page.cursor;
     const key = liveUpdateScopeKey(page.scope);
     filterScope = page.scope;
+    if (revealed && shown) {
+      revealed = false;
+      filterKey = key;
+      stream.invalidate();
+      return;
+    }
     if (key === filterKey) return;
     filterKey = key;
     if (streamIsPastFence(stream.getSnapshot().cursor, page.cursor, page.projectId)) {
@@ -233,8 +255,9 @@ export function createProjectLiveRegistry(options: {
     },
     navigated(next) {
       pathname = next;
-      if (lost !== null && next !== lost.pathname) {
-        clearLost();
+      if (lost !== null && !lost.checking && next !== lost.pathname) {
+        lost = { ...lost, checking: true };
+        closeStream();
         sync();
       }
     },

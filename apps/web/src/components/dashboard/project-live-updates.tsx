@@ -176,8 +176,9 @@ export function ProjectLivePage({
 /**
  * The Project's protected content. When the stream reports lost access
  * (an `access_lost` frame, or HTTP 401 or 404 when connecting), it is
- * replaced by a message until the User navigates elsewhere. The message
- * stays while the layout is hidden and when Back shows it again.
+ * replaced by a message until the User navigates elsewhere and the server
+ * accepts a new stream. The message stays while the layout is hidden and
+ * when Back shows it again.
  */
 export function ProjectLiveContent({ children }: { children: ReactNode }) {
   const snapshot = useProjectLiveSnapshot();
