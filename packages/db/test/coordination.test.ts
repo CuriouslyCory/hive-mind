@@ -7,6 +7,7 @@ import {
   type Transaction,
   tryWithCoordinationLock,
   withCoordinationLock,
+  withCoordinationRead,
 } from "../src/coordination.ts";
 import { type CreationRequest, createOnce } from "../src/creation.ts";
 import { insertEvent } from "../src/event.ts";
@@ -101,6 +102,33 @@ async function createPlan(tx: Transaction, now: Date, projectId: string, princip
   });
   return row;
 }
+
+describeDb("withCoordinationRead", () => {
+  it("reads one snapshot, taken with its now, and refuses writes", async () => {
+    const { project: target } = await insertProject(testDb.db);
+    const plans = async (tx: Transaction) =>
+      (await tx.select({ n: count() }).from(plan).where(eq(plan.projectId, target.id)))[0]?.n;
+    const read = await withCoordinationRead(db(0), async ({ tx, now }) => {
+      const before = await plans(tx);
+      // Committed by another connection between two statements of the read.
+      const added = await insertPlan(testDb.db, target.id, {
+        kind: "user",
+        userId: (await insertUser(testDb.db)).id,
+      });
+      return { now, before, after: await plans(tx), added };
+    });
+    expect([read.before, read.after]).toEqual([0, 0]);
+    // The snapshot predates the Plan, as `now` does.
+    expect(read.now.getTime()).toBeLessThanOrEqual(read.added.createdAt.getTime());
+    const refused = await withCoordinationRead(db(0), ({ tx }) =>
+      tx.update(project).set({ name: "Renamed" }).where(eq(project.id, target.id)),
+    ).catch((error: unknown) => error);
+    // Drizzle wraps the driver's error in `cause`.
+    expect(String((refused as { cause?: unknown }).cause)).toMatch(/read-only transaction/);
+    const [stored] = await testDb.db.select().from(project).where(eq(project.id, target.id));
+    expect(stored?.name).toBe(target.name);
+  });
+});
 
 describeDb("withCoordinationLock", () => {
   it("serializes transactions on the same Project but not on different Projects", async () => {

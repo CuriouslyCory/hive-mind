@@ -10,7 +10,11 @@ import { z } from "zod";
 //   material out of key metadata. Clients must not parse responses with these
 //   strict schemas, or a field added later would break installed CLIs.
 
-export const idSchema = z.uuid();
+// Lowercased once on parse. Postgres compares uuids case-insensitively, but
+// code that compares ids as strings (creation replay, a Project key's bound
+// Project, a Session's collection) would otherwise treat the same record
+// sent in uppercase as a different one. The JSON Schema is unchanged.
+export const idSchema = z.uuid().toLowerCase();
 
 export const timestampSchema = z.iso.datetime({ offset: true });
 

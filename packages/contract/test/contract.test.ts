@@ -24,6 +24,7 @@ import {
   getProjectInputSchema,
   hivemindConfigSchema,
   httpStatusForErrorCode,
+  idSchema,
   listProjectKeysInputSchema,
   listProjectsInputSchema,
   MAX_CONFIG_BYTES,
@@ -281,6 +282,13 @@ describe("Project schemas", () => {
     expect(accepts(createProjectInputSchema, { name: "x", slug: "x" })).toBe(false);
     expect(accepts(getProjectInputSchema, { id: "1" })).toBe(false);
     expect(accepts(getProjectInputSchema, { id: PROJECT_ID, extra: true })).toBe(false);
+  });
+});
+
+describe("ids", () => {
+  it("lowercases a UUID on parse, so string comparisons match Postgres", () => {
+    const id = "0F8FAD5B-D9CB-469F-A165-70867728950E";
+    expect(idSchema.parse(id)).toBe(id.toLowerCase());
   });
 });
 

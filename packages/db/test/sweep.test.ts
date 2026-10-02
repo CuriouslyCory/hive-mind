@@ -1,6 +1,11 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { heartbeatSession, type SweepOptions, sweepCoordination } from "../src/index.ts";
+import {
+  heartbeatSession,
+  type SweepOptions,
+  sweepCoordination,
+  updateSession,
+} from "../src/index.ts";
 import { agentSession } from "../src/schema/coordination.ts";
 import { event } from "../src/schema/event.ts";
 import { project as projectTable } from "../src/schema/project.ts";
@@ -107,6 +112,66 @@ describeDb("sweepCoordination", () => {
         collectionId: uuid(),
       }),
     ).toMatchObject({ status: "conflict" });
+  });
+
+  it("records a stale crossing once, however the owner tries to change the status", async () => {
+    const { project, principal } = await setupProject(testDb.db);
+    const session = await sessionAged(testDb.db, project.id, principal, 10 * MINUTE);
+    const staleEvents = async () =>
+      (await eventsOf(testDb.db, project.id)).filter(
+        (e) => e.type === "session.status_changed" && (e.payload as { to?: string }).to === "stale",
+      );
+    expect(await sweepCoordination(testDb.db, options())).toMatchObject({ sessionsStale: 1 });
+    // A status change is not a heartbeat; on a stale Session it is refused,
+    // so the stored status stays stale and the next sweep has nothing to do.
+    expect(
+      await updateSession(testDb.db, {
+        projectId: project.id,
+        sessionId: session.id,
+        principal,
+        changes: { status: "idle" },
+      }),
+    ).toMatchObject({ status: "conflict", message: expect.stringContaining("heartbeat") });
+    expect(await sweepCoordination(testDb.db, options())).toMatchObject({ sessionsStale: 0 });
+    expect(await staleEvents()).toHaveLength(1);
+    expect((await sessionRow(testDb.db, session.id)).status).toBe("stale");
+    // Other metadata can still change.
+    expect(
+      await updateSession(testDb.db, {
+        projectId: project.id,
+        sessionId: session.id,
+        principal,
+        changes: { intent: "Still here" },
+      }),
+    ).toMatchObject({ status: "ok", changed: true });
+  });
+
+  it("releases at most sessionBatch claims per Project transaction in total", async () => {
+    const { project, principal, plan, task } = await setupProject(testDb.db);
+    const taskIds = [task.id];
+    for (let index = 1; index < 9; index++) {
+      taskIds.push((await insertTask(testDb.db, project.id, plan.id, principal)).id);
+    }
+    // Three abandoned Sessions holding three expired claims each.
+    for (let index = 0; index < 3; index++) {
+      const session = await sessionAged(testDb.db, project.id, principal, 31 * MINUTE);
+      for (const taskId of taskIds.slice(index * 3, index * 3 + 3)) {
+        await setClaim(testDb.db, taskId, session.id, -MINUTE);
+      }
+    }
+    const runs = [];
+    for (let run = 0; run < 5; run++) {
+      const result = await sweepCoordination(testDb.db, options({ sessionBatch: 4 }));
+      runs.push(result.claimsReleased);
+      expect(result.claimsReleased).toBeLessThanOrEqual(4);
+      if (!result.moreWork) break;
+    }
+    expect(runs.reduce((sum, count) => sum + count, 0)).toBe(9);
+    for (const id of taskIds) expect((await taskRow(testDb.db, id)).claimedBySessionId).toBeNull();
+    const released = (await eventsOf(testDb.db, project.id)).filter(
+      (e) => e.type === "task.released",
+    );
+    expect(released).toHaveLength(9);
   });
 
   it("leaves live Sessions and unexpired claims alone", async () => {

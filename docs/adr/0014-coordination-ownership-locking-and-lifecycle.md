@@ -47,7 +47,7 @@ Every new endpoint resolves Project access first, then nested resources, then ca
 ### Per-Project transaction lock
 
 - Every coordination mutation runs through one `@hivemind/db` transaction helper. It first takes a transaction-level advisory lock for the Project: the two-key form `pg_advisory_xact_lock(<namespace>, hashtext(project_id::text))`, where `<namespace>` is the fixed 32-bit constant `0x484d3243` (`COORDINATION_LOCK_NAMESPACE` in `packages/db/src/coordination.ts`), which must never change.
-- After the lock it reads `clock_timestamp()` once and uses that value as "now" for every eligibility check and timestamp in the transaction. It then rechecks access and ownership, updates state, inserts Events and commits.
+- After the lock it reads `clock_timestamp()` once and uses that value as "now" for every eligibility check and timestamp in the transaction. It then rechecks access and ownership, updates state, inserts Events and commits. The access recheck uses database reads only: a User's current Membership of the Project's Organization, or a Project key that still exists, is enabled, has not expired and is bound to the Project. A caller that lost access while waiting gets what the request-start check would now answer: 401 for the key, 404 for the User.
 - No network, git, embedding or auth-plugin call happens while the lock is held. Request hashing and validation happen before the lock is taken.
 - A claim is a single conditional `UPDATE … RETURNING` whose `WHERE` clause repeats the eligibility rules. It is never a read followed by an unconditional write.
 - Plan keys (`PLAN-N`) come from a Project-local counter, `next_plan_number` (default 1), incremented under the same lock.

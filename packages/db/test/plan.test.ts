@@ -21,7 +21,7 @@ import type { Principal } from "../src/principal.ts";
 import { task } from "../src/schema/coordination.ts";
 import { event } from "../src/schema/event.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
-import { insertProject, insertSession } from "./support/fixtures.ts";
+import { insertProject, insertProjectKey, insertSession } from "./support/fixtures.ts";
 
 let testDb: TestDatabase;
 let pools: pg.Pool[];
@@ -89,7 +89,7 @@ describeDb("Plan helpers", () => {
     expect(
       await createPlan(testDb.db, {
         ...input,
-        principal: { kind: "project_key", keyId: randomUUID() },
+        principal: await insertProjectKey(testDb.db, project.id),
       }),
     ).toEqual({ status: "conflict" });
     expect(
@@ -362,6 +362,15 @@ describeDb("Plan helpers", () => {
       beforeSeq: all.items[1]?.seq,
     });
     expect(older).toMatchObject({ hasMore: false });
+    // Past the bigint range: refused before the query, never a cast error.
+    await expect(
+      listEvents(testDb.db, {
+        projectId: project.id,
+        filter: { kind: "project" },
+        limit: 2,
+        beforeSeq: "9223372036854775808",
+      }),
+    ).rejects.toThrow("beforeSeq must be a decimal bigint.");
     expect(older.items.map((row) => row.planId)).toEqual([first.id]);
     const ofPlan = await listEvents(testDb.db, {
       projectId: project.id,

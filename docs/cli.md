@@ -264,7 +264,7 @@ Your Sessions are the ones started by the same principal: the same User (through
 - `plan status <plan> <status>` takes `active`, `paused`, `done` or `abandoned`. The current status is a no-op (`changed: false`); a move not in the table is `CONFLICT`. `done` needs every Task done and no claims left. `abandoned` releases the remaining claims and reports how many in `releasedClaimCount`.
 - Tasks can be claimed and started only in an `active` Plan. In a `paused` Plan the current holders can still heartbeat, block, finish and release.
 - In a `done` or `abandoned` Plan, `plan log --message` still works; `plan edit` and `task add` are `CONFLICT`.
-- `plan log <plan>` without `--message` lists the Plan's Events, log entries included, newest first.
+- `plan log <plan>` without `--message` lists the Plan's Events, log entries included, newest first. A Session attached to the Plan when it ends adds its `session end` summary there too.
 
 ### Tasks
 
@@ -296,14 +296,14 @@ A Session is `active` or `idle` while live, `stale` after 5 minutes without a he
 | Since the last heartbeat | Status | What it can do |
 |---|---|---|
 | under 5 minutes | `active` or `idle` | everything; its Scopes take part in overlap checks |
-| 5 to 30 minutes | `stale` | heartbeat, `session update`, `session attach`, `session end`. It cannot claim, work on Tasks or change Scopes, its Scopes leave overlap checks, and other Sessions can claim its Tasks |
+| 5 to 30 minutes | `stale` | heartbeat, `session update` (except `--status`), `session attach`, `session end`. It cannot claim, work on Tasks or change Scopes, its Scopes leave overlap checks, and other Sessions can claim its Tasks |
 | 30 minutes or more | `abandoned` | only `session end`, to record its first summary; it stays `abandoned` |
 
 - **Claim leases** last 5 minutes from the claim or its last renewal. A heartbeat renews the Session's unexpired claims. An expired lease is never renewed: a heartbeat releases it, and any Session can claim the Task. A stale Session that heartbeats loses its expired claims, becomes `active` again and must claim those Tasks again.
 - **Database time decides.** Every request computes these statuses and lease expiries from the database clock, whatever the stored status says. The minute sweep only writes the stored status and its Events later (`docs/setup.md`, H8).
 - Heartbeat every 60 seconds. A few missed heartbeats then do not make the Session stale or let its leases expire.
 - `session start --agent <name> --intent <text>` records the agent (up to 120 characters), the intent (one line, up to 2,048 characters), the hostname and, inside a git worktree, the branch and commit. Outside git, on a detached HEAD or before the first commit, the branch or commit is left empty.
-- `session update` changes `--agent`, `--intent`, `--status active|idle`, or with `--git` rereads the branch and commit (and clears them outside git).
+- `session update` changes `--agent`, `--intent`, `--status active|idle`, or with `--git` rereads the branch and commit (and clears them outside git). A status change is not a heartbeat: on a stale Session `--status` is `CONFLICT` (exit 2), so heartbeat first, or pass `--status` to `session heartbeat`.
 - `session attach --plan <plan> [--task <taskId>]` sets the Session's focus; `--detach` clears it. Attaching neither claims nor releases a Task.
 - `session end --summary <markdown>` records the summary, ends the Session and releases its claims. Task statuses are kept. The same summary again is a no-op; a different one is `CONFLICT`.
 

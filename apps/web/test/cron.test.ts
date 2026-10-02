@@ -4,6 +4,7 @@ import { schema } from "@hivemind/db";
 import { createTestDatabase, describeDb, type TestDatabase } from "@hivemind/db/testing";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { readCronSecret } from "../src/env";
 import { createCronHandler } from "../src/server/cron";
 
 const SECRET = "cron-secret-0123456789abcdef";
@@ -30,6 +31,21 @@ describe("cron route authentication", () => {
     expect(await response.json()).toEqual({ error: "Cron is not configured." });
     error.mockRestore();
   });
+
+  it.each(["short", `${SECRET} x`])(
+    "fails closed with 500 when CRON_SECRET is the invalid %j",
+    async (secret) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const handle = createCronHandler({
+        cronSecret: () => readCronSecret({ CRON_SECRET: secret }),
+        db: untouchedDb,
+      });
+      const response = await handle(get(`Bearer ${secret}`));
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Cron is not configured." });
+      error.mockRestore();
+    },
+  );
 
   it.each([
     undefined,

@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
-import { withCoordinationLock, withCoordinationRead } from "./coordination.ts";
+import { withAuthorizedCoordinationLock, withCoordinationRead } from "./coordination.ts";
 import { createOnce } from "./creation.ts";
 import { insertEvent, type SessionUpdateField } from "./event.ts";
 import { creationFingerprint, sha256Hex } from "./fingerprint.ts";
@@ -81,7 +81,7 @@ export async function startSession(db: Db, input: StartSessionInput): Promise<St
     gitCommit: input.gitCommit,
     worktreePath: input.worktreePath,
   });
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const outcome = await createOnce(
       tx,
       {
@@ -161,13 +161,15 @@ export interface UpdateSessionInput extends OwnedSessionRef {
  * Changes the supplied metadata or the active/idle status of the caller's
  * Session. Equal values are a no-op (`changed: false`, no Event). An ended or
  * effectively abandoned Session is a conflict. Changing the status does not
- * count as a heartbeat, so a stale Session stays effectively stale.
+ * count as a heartbeat, so a stale Session stays effectively stale, and a
+ * status change on one is a conflict: storing active or idle over a swept
+ * `stale` would make the next sweep record the same crossing again.
  */
 export async function updateSession(
   db: Db,
   input: UpdateSessionInput,
 ): Promise<SessionResult<{ session: SessionState; changed: boolean }>> {
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const loaded = await loadOwnedSession(
       tx,
       input.projectId,
@@ -179,6 +181,11 @@ export async function updateSession(
     const { session } = loaded;
     const terminal = terminalSessionConflict(session);
     if (terminal) return terminal;
+    if (input.changes.status !== undefined && session.effectiveStatus === "stale") {
+      return conflict(
+        `Session ${session.id} is stale: it sent no heartbeat for 5 minutes. Heartbeat it, then change its status.`,
+      );
+    }
 
     const changes: Partial<Pick<AgentSession, keyof UpdateSessionInput["changes"]>> = {};
     const fields: SessionUpdateField[] = [];
@@ -238,7 +245,7 @@ export async function attachSession(
   db: Db,
   input: AttachSessionInput,
 ): Promise<SessionResult<{ session: SessionState; changed: boolean }>> {
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const loaded = await loadOwnedSession(
       tx,
       input.projectId,
@@ -393,7 +400,7 @@ export async function heartbeatSession(
   db: Db,
   input: HeartbeatSessionInput,
 ): Promise<SessionResult<HeartbeatResult>> {
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const loaded = await loadOwnedSession(
       tx,
       input.projectId,
@@ -503,7 +510,7 @@ export async function endSession(
   input: EndSessionInput,
 ): Promise<SessionResult<{ session: SessionState; changed: boolean; releasedTaskIds: string[] }>> {
   const fingerprint = sha256Hex(input.summary);
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const loaded = await loadOwnedSession(
       tx,
       input.projectId,
@@ -553,6 +560,11 @@ export async function endSession(
       type: "session.ended",
       payload: { from: session.effectiveStatus, summary: input.summary },
       actor,
+      // The attached Plan and Task are affected records, so the final
+      // summary appears in the Plan's log (`plan log PLAN-N`) as well as in
+      // the Session's history.
+      planId: session.attachedPlanId,
+      taskId: session.attachedTaskId,
       sessionId: session.id,
       now,
     });

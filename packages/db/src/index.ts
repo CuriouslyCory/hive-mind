@@ -22,9 +22,12 @@ export {
   allocatePlanNumber,
   COORDINATION_LOCK_NAMESPACE,
   type CoordinationContext,
+  ProjectAccessLostError,
+  recheckProjectAccess,
   type Transaction,
   type TryCoordinationLockResult,
   tryWithCoordinationLock,
+  withAuthorizedCoordinationLock,
   withCoordinationLock,
   withCoordinationRead,
 } from "./coordination.ts";

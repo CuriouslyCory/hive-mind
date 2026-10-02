@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, ne, or, type SQL, sql } from "d
 import {
   allocatePlanNumber,
   type Transaction,
-  withCoordinationLock,
+  withAuthorizedCoordinationLock,
   withCoordinationRead,
 } from "./coordination.ts";
 import { createOnce } from "./creation.ts";
@@ -273,7 +273,7 @@ export async function createPlan(
     sessionId: input.sessionId ?? null,
   });
   return returningOutcome(() =>
-    withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+    withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
       const foreign = await checkActorSession(tx, input, now, { open: false });
       if (foreign) return foreign;
       const outcome = await createOnce(
@@ -386,7 +386,7 @@ export async function updatePlan(
   input: PlanWriter & { ref: string; title?: string; body?: string | null },
 ): Promise<UpdatePlanOutcome> {
   assertStorableText({ title: input.title, body: input.body });
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const row = await resolvePlan(tx, input.projectId, input.ref);
     if (!row) return { status: "plan_not_found" } as const;
     const session = await checkActorSession(tx, input, now, { open: true });
@@ -440,7 +440,7 @@ export async function setPlanStatus(
   db: Db,
   input: PlanWriter & { ref: string; status: TargetPlanStatus },
 ): Promise<SetPlanStatusOutcome> {
-  return withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+  return withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
     const row = await resolvePlan(tx, input.projectId, input.ref);
     if (!row) return { status: "plan_not_found" } as const;
     const session = await checkActorSession(tx, input, now, { open: true });
@@ -540,7 +540,7 @@ export async function appendPlanLog(
 ): Promise<AppendPlanLogOutcome> {
   assertStorableText({ message: input.message });
   return returningOutcome(() =>
-    withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+    withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
       const row = await resolvePlan(tx, input.projectId, input.ref);
       if (!row) return { status: "plan_not_found" } as const;
       const foreign = await checkActorSession(tx, input, now, { open: false });
@@ -670,7 +670,7 @@ export async function addTask(
 ): Promise<AddTaskOutcome> {
   assertStorableText({ title: input.title });
   return returningOutcome(() =>
-    withCoordinationLock(db, input.projectId, async ({ tx, now }) => {
+    withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
       const row = await resolvePlan(tx, input.projectId, input.ref);
       if (!row) return { status: "plan_not_found" } as const;
       const foreign = await checkActorSession(tx, input, now, { open: false });

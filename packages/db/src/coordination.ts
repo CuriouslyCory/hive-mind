@@ -1,5 +1,9 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "./index.ts";
+import type { Principal } from "./principal.ts";
+import { apikey, member } from "./schema/auth.ts";
+import { project } from "./schema/project.ts";
+import { projectApiKey } from "./schema/project-api-key.ts";
 
 // The transaction every M2 coordination mutation runs in (issue #12,
 // "Transaction, identity and Event invariants"; ADR-0014).
@@ -83,17 +87,113 @@ export async function withCoordinationLock<T>(
 }
 
 /**
+ * Thrown inside a coordination transaction when the caller lost access to the
+ * Project between its request-start authorization and the lock (ADR-0014,
+ * "Project lock"). Nothing the transaction wrote is kept. The web layer maps
+ * it to the answer the request-start check would now give.
+ */
+export class ProjectAccessLostError extends Error {
+  constructor(
+    /**
+     * `key_unusable`: the Project key was deleted, disabled or has expired
+     * (401 at request start). `no_access`: the User is no longer a Member of
+     * the Project's Organization, or the key is bound to another Project (404).
+     */
+    readonly reason: "key_unusable" | "no_access",
+  ) {
+    super(`The caller lost access to the Project (${reason}).`);
+    this.name = "ProjectAccessLostError";
+  }
+}
+
+/**
+ * Throws `ProjectAccessLostError` unless `principal` may still use the
+ * Project at `now`: a User through a current Membership of the Project's
+ * Organization, a Project key while it exists, is enabled, has not expired
+ * and is bound to this Project. Database reads only, so it is safe under the
+ * lock; the request-start check (better-auth key verification included)
+ * stays the full authorization, and this repeats the parts a concurrent
+ * revocation can change.
+ */
+export async function recheckProjectAccess(
+  tx: Transaction,
+  projectId: string,
+  principal: Principal,
+  now: Date,
+): Promise<void> {
+  if (principal.kind === "user") {
+    const [row] = await tx
+      .select({ id: member.id })
+      .from(project)
+      .innerJoin(
+        member,
+        and(eq(member.organizationId, project.organizationId), eq(member.userId, principal.userId)),
+      )
+      .where(eq(project.id, projectId))
+      .limit(1);
+    if (!row) throw new ProjectAccessLostError("no_access");
+    return;
+  }
+  const [key] = await tx
+    .select({
+      enabled: apikey.enabled,
+      expiresAt: apikey.expiresAt,
+      projectId: projectApiKey.projectId,
+    })
+    .from(apikey)
+    .innerJoin(
+      projectApiKey,
+      and(eq(projectApiKey.keyId, apikey.id), eq(projectApiKey.organizationId, apikey.referenceId)),
+    )
+    .where(eq(apikey.id, principal.keyId))
+    .limit(1);
+  if (!key?.enabled || (key.expiresAt !== null && key.expiresAt <= now)) {
+    throw new ProjectAccessLostError("key_unusable");
+  }
+  if (key.projectId !== projectId) throw new ProjectAccessLostError("no_access");
+}
+
+/**
+ * `withCoordinationLock` for a change made by `access.principal` in
+ * `access.projectId` (a mutation's input carries both): once the lock is
+ * held, rechecks that the principal still has access to the Project
+ * (`recheckProjectAccess`) before `fn` reads or writes anything. Every M2
+ * mutation made on behalf of a caller runs through it; only the sweep, which
+ * acts as `system`, takes the lock without a principal.
+ */
+export async function withAuthorizedCoordinationLock<T>(
+  db: Db,
+  access: { projectId: string; principal: Principal },
+  fn: (context: CoordinationContext) => Promise<T>,
+): Promise<T> {
+  const { projectId, principal } = access;
+  return withCoordinationLock(db, projectId, async (context) => {
+    await recheckProjectAccess(context.tx, projectId, principal, context.now);
+    return fn(context);
+  });
+}
+
+/**
  * Runs `fn` in a short transaction without the coordination lock, with one
  * database `now` for the whole read. Status, list and show reads use it so
  * effective liveness and usable claims are computed from a single timestamp
- * and never depend on the sweep having materialized them. Reads must not
- * write: expired state is reconciled only by mutations and the sweep.
+ * and never depend on the sweep having materialized them.
+ *
+ * The transaction is REPEATABLE READ, so every statement in `fn` reads the
+ * same snapshot: a claim or end committed between two statements of a status
+ * or overlap read cannot mix states. The snapshot is taken by the first
+ * statement, which reads `now`, so the data and `now` agree. It is also READ
+ * ONLY: reads must not write, since expired state is reconciled only by
+ * mutations and the sweep, and Postgres refuses any write attempted here.
  */
 export async function withCoordinationRead<T>(
   db: Db,
   fn: (context: CoordinationContext) => Promise<T>,
 ): Promise<T> {
-  return db.transaction(async (tx) => fn({ tx, now: await readNow(tx) }));
+  return db.transaction(async (tx) => fn({ tx, now: await readNow(tx) }), {
+    isolationLevel: "repeatable read",
+    accessMode: "read only",
+  });
 }
 
 export type TryCoordinationLockResult<T> =

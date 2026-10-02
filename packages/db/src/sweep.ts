@@ -35,8 +35,9 @@ export interface SweepOptions {
   /** Most candidate Projects one invocation visits (swept or skipped as busy). */
   projectBatch: number;
   /**
-   * Most Sessions one Project transaction transitions, and most expired
-   * claims it releases. Remaining work waits for a later invocation.
+   * Most Sessions one Project transaction transitions, and most claims it
+   * releases in total (abandoned Sessions' and expired leases together).
+   * Remaining work waits for a later invocation.
    */
   sessionBatch: number;
   /** No further Project is started after this time (application clock). */
@@ -111,8 +112,15 @@ async function sweepProject(
 
   let sessionsStale = 0;
   let sessionsAbandoned = 0;
-  let claimsReleased = 0;
+  // One budget for every claim this transaction releases, so its size and
+  // lock hold stay bounded by `limit` however many claims each Session held.
+  let claimBudget = limit;
+  let visited = 0;
   for (const session of due.slice(0, limit)) {
+    // Stop before a Session whose claims could not be released now; it is
+    // still due, so a later invocation handles it with its reasons intact.
+    if (claimBudget === 0) break;
+    visited++;
     const steps = await materializeSessionStatus(tx, now, session);
     if (steps.includes("stale")) sessionsStale++;
     if (steps.includes("abandoned")) {
@@ -127,29 +135,32 @@ async function sweepProject(
         reason: "session_abandoned",
         actor: { kind: "system" },
         effectiveAt: abandonedAt(session),
-        limit,
+        limit: claimBudget,
       });
-      claimsReleased += released.length;
+      claimBudget -= released.length;
     }
   }
 
-  const expired = await releaseClaims(tx, {
-    projectId,
-    now,
-    where: leaseExpired(now),
-    reason: "lease_expired",
-    actor: { kind: "system" },
-    limit,
-  });
-  claimsReleased += expired.length;
+  if (claimBudget > 0) {
+    const expired = await releaseClaims(tx, {
+      projectId,
+      now,
+      where: leaseExpired(now),
+      reason: "lease_expired",
+      actor: { kind: "system" },
+      limit: claimBudget,
+    });
+    claimBudget -= expired.length;
+  }
 
   // Raw SQL, so project.updated_at (shown in the Project DTO) stays as is.
   await tx.execute(sql`update project set coordination_swept_at = ${now} where id = ${projectId}`);
   return {
     sessionsStale,
     sessionsAbandoned,
-    claimsReleased,
-    moreWork: due.length > limit || expired.length === limit,
+    claimsReleased: limit - claimBudget,
+    // A spent budget may have left claims behind.
+    moreWork: due.length > visited || claimBudget === 0,
   };
 }
 

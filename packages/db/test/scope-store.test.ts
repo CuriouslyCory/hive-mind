@@ -24,7 +24,12 @@ import {
   uploadCollectionBatch,
 } from "../src/scope-store.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
-import { insertProject, insertSession, insertUser } from "./support/fixtures.ts";
+import {
+  insertProject,
+  insertProjectKey,
+  insertProjectMember,
+  insertSession,
+} from "./support/fixtures.ts";
 
 const EMPTY_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -217,7 +222,7 @@ describeDb("declared Scopes", () => {
     const a = await setup();
     const b = await setup();
     const foreign = await b.start();
-    const other = await insertUser(db);
+    const other = await insertProjectMember(db, a.projectId);
     const mine = await a.start();
 
     expect(
@@ -240,7 +245,7 @@ describeDb("declared Scopes", () => {
       await addDeclaredScope(db, {
         projectId: a.projectId,
         sessionId: mine.id,
-        principal: { kind: "project_key", keyId: randomUUID() },
+        principal: await insertProjectKey(db, a.projectId),
         pattern: "a",
       }),
     ).toEqual({ status: "forbidden" });
@@ -733,7 +738,7 @@ describeDb("touched-path collections", () => {
     const base = await setup();
     const session = await base.start();
     const collectionId = await openCollection(session.id);
-    const other = await insertUser(db);
+    const other = await insertProjectMember(db, base.projectId);
     const input = { ...base, sessionId: session.id, collectionId, principal: asUser(other.id) };
     expect(await finalizeCollection(db, input)).toEqual({ status: "forbidden" });
 

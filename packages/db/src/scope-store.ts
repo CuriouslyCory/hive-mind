@@ -2,7 +2,7 @@ import { and, asc, count, eq, gt, inArray, ne, or, type SQL } from "drizzle-orm"
 import {
   type CoordinationContext,
   type Transaction,
-  withCoordinationLock,
+  withAuthorizedCoordinationLock,
   withCoordinationRead,
 } from "./coordination.ts";
 import { type EventPayloads, insertEvent } from "./event.ts";
@@ -218,7 +218,7 @@ export async function addDeclaredScope(
   }
   const value = normalized.pattern;
 
-  return withCoordinationLock(db, input.projectId, async (context) => {
+  return withAuthorizedCoordinationLock(db, input, async (context) => {
     const access = await ownLiveSession(context, input);
     if (access.status !== "ok") return access;
     const { tx, now } = context;
@@ -283,7 +283,7 @@ export async function removeScope(
   db: Db,
   input: RemoveScopeInput,
 ): Promise<ScopeStoreOutcome<{ removed: boolean; scope: Scope | null }>> {
-  return withCoordinationLock(db, input.projectId, async (context) => {
+  return withAuthorizedCoordinationLock(db, input, async (context) => {
     const access = await ownLiveSession(context, input);
     if (access.status !== "ok") return access;
     const { tx, now } = context;
@@ -520,7 +520,7 @@ export async function recordCollectionManifest(
   if (problem) return { status: "invalid", reason: "invalid_manifest", message: problem };
   const omitted = input.omittedPathCount ?? 0;
 
-  return withCoordinationLock(db, input.projectId, async (context) => {
+  return withAuthorizedCoordinationLock(db, input, async (context) => {
     const access = await currentCollection(context, input);
     if (access.status !== "ok") return access;
     const { session } = access;
@@ -641,7 +641,7 @@ export async function uploadCollectionBatch(
   // canonical order, so this is the batch's own manifest hash.
   const fingerprint = unrepresentable === 0 ? touchedPathsContentHash(paths) : null;
 
-  return withCoordinationLock(db, input.projectId, async (context) => {
+  return withAuthorizedCoordinationLock(db, input, async (context) => {
     const access = await currentCollection(context, input);
     if (access.status !== "ok") return access;
     const { session } = access;
@@ -781,7 +781,7 @@ export async function finalizeCollection(
   db: Db,
   input: CollectionInput,
 ): Promise<ScopeStoreOutcome<{ collection: CollectionState; changed: boolean }>> {
-  return withCoordinationLock(db, input.projectId, async (context) => {
+  return withAuthorizedCoordinationLock(db, input, async (context) => {
     const access = await currentCollection(context, input);
     if (access.status !== "ok") return access;
     const { session } = access;

@@ -11,7 +11,7 @@ import {
 } from "../src/index.ts";
 import { plan as planTable } from "../src/schema/coordination.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
-import { insertTask, insertUser } from "./support/fixtures.ts";
+import { insertProjectMember, insertTask } from "./support/fixtures.ts";
 import {
   eventsOf,
   MINUTE,
@@ -183,7 +183,7 @@ describeDb("claimTask", () => {
       status: "conflict",
       message: expect.stringContaining("stale"),
     });
-    const stranger = await insertUser(testDb.db);
+    const stranger = await insertProjectMember(testDb.db, project.id);
     expect(await claimTask(testDb.db, { ...as(a.id), principal: otherUser(stranger.id) })).toEqual({
       status: "forbidden",
     });

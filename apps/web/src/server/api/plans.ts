@@ -13,15 +13,13 @@ import { authorizeProject, coordinationError, planNotFound } from "./coordinatio
 import { toEventDto, toPlanDto, toPlanSummaryDto, toTaskDto } from "./coordination-dto";
 import { listEventPage } from "./events";
 import { api } from "./implementer";
-import { decodeKeysetCursor, encodeKeysetCursor, UUID_POSITION } from "./keyset";
+import { decodeKeysetCursor, encodeKeysetCursor, INT4_POSITION, UUID_POSITION } from "./keyset";
 import { pageLimit } from "./pagination";
 
 // Plans, their Tasks (add and list) and their log (issue #12 step 5). Each
 // handler authorizes the Project and the route's permissions first
 // (`coordination-auth.ts`), then calls `@hivemind/db`, which resolves the Plan
 // within that Project and maps nothing to HTTP itself.
-
-const PLAN_NUMBER_POSITION = /^[1-9][0-9]{0,9}$/;
 
 /** `GET /projects/{id}/plans`: newest Plan first, optionally one status. */
 export const listPlans = api.projects.plans.list.handler(
@@ -30,7 +28,7 @@ export const listPlans = api.projects.plans.list.handler(
     const limit = pageLimit(input.limit);
     const scope = ["plans", input.id, input.status];
     const beforeNumber = input.cursor
-      ? Number(decodeKeysetCursor(scope, input.cursor, [PLAN_NUMBER_POSITION])[0])
+      ? Number(decodeKeysetCursor(scope, input.cursor, [INT4_POSITION])[0])
       : undefined;
     const page = await listPlanRecords(db, {
       projectId: input.id,
@@ -154,7 +152,7 @@ export const listPlanTasks = api.projects.plans.tasks.list.handler(
     let after: { position: number; id: string } | undefined;
     if (input.cursor) {
       const [position = "", id = ""] = decodeKeysetCursor(scope, input.cursor, [
-        PLAN_NUMBER_POSITION,
+        INT4_POSITION,
         UUID_POSITION,
       ]);
       after = { position: Number(position), id };
