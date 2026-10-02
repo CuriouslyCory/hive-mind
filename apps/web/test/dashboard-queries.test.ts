@@ -1,6 +1,9 @@
 import { decodeFeedCursor } from "@hivemind/contract";
 import { describeDb } from "@hivemind/db/testing";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AttributionText } from "../src/app/(app)/_components/format";
 import {
   DASHBOARD_PAGE_SIZE,
   loadPlanDetail,
@@ -320,6 +323,13 @@ describeDb("dashboard queries", () => {
         revoked: false,
       });
       expect(JSON.stringify(data.session.owner)).not.toContain(owner.id);
+      // Members see the key's name and id prefix, never the start of its secret.
+      expect(data.session.owner).not.toHaveProperty("start");
+      const shown = renderToStaticMarkup(
+        createElement(AttributionText, { value: data.session.owner }),
+      );
+      expect(shown).toContain(`Project key ci (id ${keyA.id.slice(0, 8)})`);
+      expect(shown).not.toContain(keyA.secret.slice(0, 6));
       expect(data.session.summary).toBeNull();
       expect(data.scopes.items.map((scope) => [scope.source, scope.value])).toEqual([
         ["declared", "apps/**"],
@@ -355,7 +365,6 @@ describeDb("dashboard queries", () => {
         kind: "project_key",
         keyId: key.id,
         name: null,
-        start: null,
         revoked: true,
       });
     });

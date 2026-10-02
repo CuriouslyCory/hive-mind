@@ -90,9 +90,11 @@ export type Attribution =
   | {
       kind: "project_key";
       keyId: string;
-      /** The key's name and display prefix, or null once it is revoked. */
+      /**
+       * The key's name, or null once it is revoked. Never the key's secret
+       * prefix (`apikey.start`): every Member sees attributions.
+       */
       name: string | null;
-      start: string | null;
       revoked: boolean;
     }
   | { kind: "system" };
@@ -350,7 +352,7 @@ async function loadAttributions(
     keyIds.length === 0
       ? []
       : await tx
-          .select({ id: apikey.id, name: apikey.name, start: apikey.start })
+          .select({ id: apikey.id, name: apikey.name })
           .from(projectApiKey)
           .innerJoin(apikey, eq(apikey.id, projectApiKey.keyId))
           .where(and(eq(projectApiKey.projectId, projectId), inArray(projectApiKey.keyId, keyIds)));
@@ -364,7 +366,6 @@ async function loadAttributions(
         kind: "project_key",
         keyId,
         name: row?.name ?? null,
-        start: row?.start ?? null,
         revoked: row === undefined,
       };
     },

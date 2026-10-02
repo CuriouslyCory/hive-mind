@@ -19,8 +19,7 @@ export function AttributionText({ value }: { value: Attribution }) {
       }
       return (
         <span className="attribution">
-          Project key {value.name ?? "unnamed"}
-          {value.start ? ` (${value.start}…)` : ""}
+          Project key {value.name ?? "unnamed"} (id {value.keyId.slice(0, 8)})
         </span>
       );
     case "system":
