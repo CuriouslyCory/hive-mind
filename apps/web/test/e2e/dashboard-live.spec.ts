@@ -1,13 +1,18 @@
 import { randomUUID } from "node:crypto";
+import { EVENT_STREAM_ROTATE_AFTER_MS } from "@hivemind/contract";
 import { expect, type Page, type Request, test } from "@playwright/test";
 import type { TestHelpers } from "better-auth/plugins";
 import pg from "pg";
 import { e2eDatabaseUrl } from "./e2e-env";
 import {
   addMember,
+  canary,
+  captureEventStreams,
   coordinationApi,
+  eventStreamText,
   expectInert,
   HOSTILE,
+  insertFutureEvent,
   loginSessionToken,
   personalOrganizationId,
   removeMember,
@@ -15,12 +20,14 @@ import {
   signedInPage,
   testUsers,
   watchDialogs,
+  watchRscRequests,
 } from "./support";
 
 // Live updates on the dashboard (issue #11, step 7): real M2 mutations through
 // `/api/v1` change open pages without a reload, through the real cookie Event
 // stream. Transport faults come from routing the stream in the browser; access
 // loss from removing a membership or a login session while a page is open.
+// Events written by a newer deployment arrive as unavailable (issue #15).
 
 /** Long enough for a 1-second poll, the refresh and a reconnect backoff or two. */
 const LIVE = { timeout: 20_000 };
@@ -57,6 +64,28 @@ async function expectNotReloaded(page: Page) {
   expect(
     await page.evaluate(() => (window as unknown as { __notReloaded?: boolean }).__notReloaded),
   ).toBe(true);
+}
+
+/** When each of the page's Event stream connections was opened (epoch ms). */
+function watchStreamConnections(page: Page): number[] {
+  const opened: number[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/events/stream")) opened.push(Date.now());
+  });
+  return opened;
+}
+
+/**
+ * The connections opened after the first `settled` ones each replaced the
+ * previous one at the server's rotation, never sooner: a stream that fails
+ * on an Event and retries it would reconnect within seconds.
+ */
+function expectNoReconnectSince(opened: number[], settled: number) {
+  for (let index = Math.max(settled, 1); index < opened.length; index++) {
+    expect((opened[index] ?? 0) - (opened[index - 1] ?? 0)).toBeGreaterThanOrEqual(
+      EVENT_STREAM_ROTATE_AFTER_MS - 1_000,
+    );
+  }
 }
 
 /** A User with a Project, a Session attached to an active Plan, and a Task. */
@@ -338,4 +367,125 @@ test("hostile text that arrives live stays inert, then and after a reload", asyn
   );
   await expectInert(detail);
   expect(dialogs).toEqual([]);
+});
+
+test("an Event from a newer deployment arrives as unavailable without its details, and later Events still arrive", async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { user, context, page, api, project, sessionId, plan } = await livePlan(
+    browser,
+    "future-live-agent",
+  );
+  await captureEventStreams(context);
+  const rsc = watchRscRequests(page);
+  const connections = watchStreamConnections(page);
+  const path = `/projects/${project.id}/plans/${plan.key}`;
+  await openLive(page, path);
+  const settled = connections.length;
+  const readsBefore = rsc.readsOf(path);
+  const items = page.getByTestId("plan-detail").getByTestId("timeline-item");
+
+  // A Plan log entry at a payload version this build does not know.
+  const secret = canary();
+  const future = await insertFutureEvent(pool, {
+    projectId: project.id,
+    type: "plan.log_appended",
+    payloadVersion: 2,
+    payload: { message: secret },
+    actorUserId: user.id,
+    actorSessionId: sessionId,
+    planId: plan.id,
+  });
+
+  await test.step("it arrives as unavailable and refreshes the page", async () => {
+    await expect.poll(() => eventStreamText(page), LIVE).toContain(future.id);
+    await expect(items.first()).toHaveAttribute("data-event-type", "event.unavailable", LIVE);
+    await expect(items.first()).toContainText(`${user.name}: Event details unavailable`);
+    expect(rsc.readsOf(path)).toBeGreaterThan(readsBefore);
+  });
+
+  await test.step("a later Event arrives after it", async () => {
+    await api.appendLog(project.id, plan.key, "Known entry after the newer one", sessionId);
+    await expect(items.first()).toHaveAttribute("data-event-type", "plan.log_appended", LIVE);
+    await expect(items.first()).toContainText("Known entry after the newer one");
+    await expect(items.nth(1)).toHaveAttribute("data-event-type", "event.unavailable");
+    expect(await eventStreamText(page)).toContain("Known entry after the newer one");
+  });
+
+  // Still live on the same connection, and access is untouched: an
+  // unavailable Event is an ordinary Event frame, not an access change.
+  await expect(page.getByTestId("live-status")).toHaveAttribute("data-state", "live");
+  await expect(page.getByTestId("project-access-lost")).toHaveCount(0);
+  expectNoReconnectSince(connections, settled);
+  await expectNotReloaded(page);
+
+  // The details reached neither the stream, the refreshes nor the page.
+  const sse = await eventStreamText(page);
+  expect(sse).toContain("event.unavailable");
+  expect(sse).not.toContain(secret);
+  for (const body of await rsc.bodies()) expect(body).not.toContain(secret);
+  await expect(page.locator("body")).not.toContainText(secret);
+  expect(await page.content()).not.toContain(secret);
+});
+
+test("a newer deployment's Event moving a Session off the open Plan refreshes that Plan", async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { user, context, page } = await signedInPage(browser, users);
+  const api = await coordinationApi(users, user.id);
+  const project = await api.createProject(
+    await personalOrganizationId(pool, user.id),
+    `Former ${randomUUID().slice(0, 6)}`,
+  );
+  const former = await api.createPlan(project.id, { title: "Former plan" });
+  const next = await api.createPlan(project.id, { title: "Next plan" });
+  const leaving = await api.startSession(project.id, { agent: "leaving-agent", intent: "Move on" });
+  await api.attach(project.id, leaving, former.key);
+  // A full first page of newer attached Sessions (DASHBOARD_PAGE_SIZE in
+  // src/server/dashboard/queries.ts) keeps the leaving Session off the Plan
+  // page, so the Event names no Plan, Task or Session the page shows. Only
+  // the Plan it left, in a payload this build cannot read, ties it to the
+  // page, and an unavailable Event refreshes every page.
+  for (let index = 1; index <= 20; index++) {
+    const filler = await api.startSession(project.id, {
+      agent: `filler-agent-${index}`,
+      intent: "Stay",
+    });
+    await api.attach(project.id, filler, former.key);
+  }
+
+  await captureEventStreams(context);
+  const rsc = watchRscRequests(page);
+  const path = `/projects/${project.id}/plans/${former.key}`;
+  await openLive(page, path);
+  const attached = page
+    .getByTestId("plan-detail")
+    .getByRole("table", { name: /Sessions attached to this Plan/ });
+  await expect(attached).toContainText("filler-agent-20");
+  await expect(attached).not.toContainText("leaving-agent");
+  const readsBefore = rsc.readsOf(path);
+
+  // session.attached at a payload version this build does not know, whose
+  // `previousPlanId` it therefore cannot read.
+  const secret = canary();
+  const moved = await insertFutureEvent(pool, {
+    projectId: project.id,
+    type: "session.attached",
+    payloadVersion: 2,
+    payload: { previousPlanId: former.id, previousTaskId: null, handoff: secret },
+    actorUserId: user.id,
+    actorSessionId: leaving,
+    planId: next.id,
+    sessionId: leaving,
+  });
+  await expect.poll(() => eventStreamText(page), LIVE).toContain(moved.id);
+  await expect.poll(() => rsc.readsOf(path), LIVE).toBeGreaterThan(readsBefore);
+  await expectLive(page);
+  await expectNotReloaded(page);
+
+  expect(await eventStreamText(page)).not.toContain(secret);
+  for (const body of await rsc.bodies()) expect(body).not.toContain(secret);
+  await expect(page.locator("body")).not.toContainText(secret);
 });

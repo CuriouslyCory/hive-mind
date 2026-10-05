@@ -17,7 +17,8 @@ import { E2E_AUTH_ENV, E2E_BASE_URL, E2E_SERVES_BUILD } from "./e2e-env";
 // with the app server's secret), never through GitHub. Projects and
 // coordination data (Plans, Tasks, claims, Sessions, Scopes) are written only
 // through the app's `/api/v1` with a bearer token, so every change writes the
-// same M2 Events a CLI would.
+// same M2 Events a CLI would. The one exception is `insertFutureEvent`, which
+// stands in for a newer deployment (issue #15).
 
 /** better-auth's test helpers on the e2e database, configured like the app server. */
 export async function testUsers(pool: pg.Pool): Promise<TestHelpers> {
@@ -280,4 +281,147 @@ export async function expectInert(container: Locator) {
     };
   }, PWNED_GLOBAL);
   expect(report).toEqual({ active: 0, handlers: [], unsafeLinks: [], ran: null });
+}
+
+/**
+ * A unique marker to put in an Event's details that must never reach the
+ * browser. Letters, digits and `_` only, so no JSON or HTML escaping can hide
+ * it from a substring search.
+ */
+export function canary(): string {
+  return `FUTURE_SECRET_${randomUUID().replaceAll("-", "")}`;
+}
+
+/** An Event as a newer deployment would store it: a type, version or payload this build may not know. */
+export interface FutureEvent {
+  projectId: string;
+  type: string;
+  payloadVersion: number;
+  payload: unknown;
+  /** The User the Event is attributed to. */
+  actorUserId: string;
+  actorSessionId?: string | null;
+  planId?: string | null;
+  taskId?: string | null;
+  sessionId?: string | null;
+}
+
+/**
+ * Inserts an Event row written as a newer deployment would write it, which
+ * the API cannot do (issue #15): it accepts only this build's vocabulary.
+ * This is the one direct coordination write in the browser tests; everything
+ * else goes through `/api/v1`. The row is committed on its own, so the
+ * database orders it (seq, writer transaction) like any other write, and its
+ * affected records must exist in the Project (the foreign keys check them).
+ */
+export async function insertFutureEvent(
+  pool: pg.Pool,
+  event: FutureEvent,
+): Promise<{ id: string; seq: string }> {
+  const { rows } = await pool.query<{ id: string; seq: string }>(
+    `insert into event (project_id, type, payload_version, payload, actor_kind, actor_user_id,
+       actor_session_id, plan_id, task_id, session_id, effective_at)
+     values ($1, $2, $3, $4::jsonb, 'user', $5, $6, $7, $8, $9, now())
+     returning id, seq::text`,
+    [
+      event.projectId,
+      event.type,
+      event.payloadVersion,
+      JSON.stringify(event.payload),
+      event.actorUserId,
+      event.actorSessionId ?? null,
+      event.planId ?? null,
+      event.taskId ?? null,
+      event.sessionId ?? null,
+    ],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("The future Event was not inserted.");
+  return row;
+}
+
+/** Where `captureEventStreams` keeps what the page's Event streams sent. */
+const SSE_GLOBAL = "__hmSse";
+
+/**
+ * Records the bytes every Event stream of the context's pages receives, as
+ * text, for `eventStreamText`. It wraps `fetch` before the app's scripts run
+ * and tees each stream's body: the page reads one branch as usual, the other
+ * is decoded into a window global. (Playwright's `response.body()` would wait
+ * for the stream to end at its rotation.) Call before opening the pages.
+ */
+export async function captureEventStreams(context: BrowserContext) {
+  await context.addInitScript((global) => {
+    const chunks: string[] = [];
+    (window as unknown as Record<string, string[]>)[global] = chunks;
+    const original = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const response = await original(input, init);
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (!url.includes("/events/stream") || !response.body) return response;
+      const [forPage, forTest] = response.body.tee();
+      void (async () => {
+        const reader = forTest.getReader();
+        const decoder = new TextDecoder();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) return;
+            chunks.push(decoder.decode(value, { stream: true }));
+          }
+        } catch {
+          // The page closed its connection; what arrived is recorded.
+        }
+      })();
+      return new Response(forPage, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    };
+  }, SSE_GLOBAL);
+}
+
+/** Everything the page's Event streams have received so far (`captureEventStreams`). */
+export async function eventStreamText(page: Page): Promise<string> {
+  return page.evaluate(
+    (global) =>
+      ((window as unknown as Record<string, string[] | undefined>)[global] ?? []).join(""),
+    SSE_GLOBAL,
+  );
+}
+
+/**
+ * Records the page's React Server Component requests (a navigation's or a
+ * `router.refresh()`'s server read, and prefetches) and their response bodies.
+ * Next marks them with an `RSC: 1` header and an `_rsc` search param.
+ */
+export function watchRscRequests(page: Page) {
+  const requests: { url: URL; prefetch: boolean }[] = [];
+  const bodies: Promise<string>[] = [];
+  page.on("request", (request) => {
+    const headers = request.headers();
+    const url = new URL(request.url());
+    if (headers.rsc !== "1" && !url.searchParams.has("_rsc")) return;
+    requests.push({
+      url,
+      prefetch: "next-router-prefetch" in headers || "next-router-segment-prefetch" in headers,
+    });
+    bodies.push(
+      request
+        .response()
+        .then((response) => response?.text() ?? "")
+        .catch(() => ""),
+    );
+  });
+  return {
+    /** Server reads of the page at `pathname` that were not prefetches: navigations and refreshes. */
+    readsOf(pathname: string): number {
+      return requests.filter((r) => !r.prefetch && r.url.pathname === pathname).length;
+    },
+    /** The bodies of every RSC response so far, once each has been received. */
+    bodies(): Promise<string[]> {
+      return Promise.all(bodies);
+    },
+  };
 }
