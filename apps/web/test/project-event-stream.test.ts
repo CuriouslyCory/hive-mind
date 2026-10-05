@@ -925,4 +925,29 @@ describe("live update filters", () => {
     ).toBe(false);
     expect(affectsSession(asStream({ type: "brand.new" }), scope)).toBe(true);
   });
+
+  it("refreshes every page for event.unavailable, including the Plan a Session left", () => {
+    // A newer session.attached as this build reads it: the Session and the
+    // Plan it joined, without the payload that named the Plan it left.
+    const unavailable = asStream({
+      type: UNAVAILABLE_EVENT_TYPE,
+      payload: {},
+      planId: randomUUID(),
+      sessionId: randomUUID(),
+    });
+    expect(isKnownEventType(UNAVAILABLE_EVENT_TYPE)).toBe(false);
+    expect(shouldRefreshFor({ kind: "project" }, unavailable)).toBe(true);
+    for (const scope of [
+      { kind: "plan", planId },
+      { kind: "plan", planId, taskIds: [taskId], sessionIds: [sessionId] },
+      { kind: "session", sessionId },
+      { kind: "session", sessionId, taskId },
+    ] as const) {
+      expect(shouldRefreshFor(scope, unavailable)).toBe(true);
+    }
+    // Why the type cannot stay session.attached with its payload withheld:
+    // the Plan the Session left would not refresh.
+    const withheld = { ...unavailable, type: "session.attached" };
+    expect(shouldRefreshFor({ kind: "plan", planId }, withheld)).toBe(false);
+  });
 });

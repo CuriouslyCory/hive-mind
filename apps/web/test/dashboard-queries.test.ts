@@ -534,7 +534,10 @@ describeDb("dashboard queries", () => {
       expect(first.data.activity.items.at(-2)?.text).toBe('Added Task 1 "Read old Events"');
       expect(first.data.activity.items.at(-1)?.text).toBe(`Created Plan ${plan.key} "Rollback"`);
       expectWithheld(first.data.activity.items);
-      expect(JSON.stringify(first.data)).not.toContain(secret);
+      for (const data of [JSON.stringify(first.data), JSON.stringify(first)]) {
+        expect(data).not.toContain(secret);
+        expect(data).not.toContain(shapes["unknown type"].type);
+      }
       expectRenderedWithheld(rendered(first.data.activity.items, first.data.asOf));
 
       // A refresh reads the same stored rows again and still withholds them.
@@ -555,7 +558,10 @@ describeDb("dashboard queries", () => {
         "session.started",
       ]);
       expectWithheld(first.data.events.items);
-      expect(JSON.stringify(first.data)).not.toContain(secret);
+      for (const data of [JSON.stringify(first.data), JSON.stringify(first)]) {
+        expect(data).not.toContain(secret);
+        expect(data).not.toContain(shapes["unknown type"].type);
+      }
       expectRenderedWithheld(rendered(first.data.events.items, first.data.asOf));
 
       const again = await loadSessionDetail(db(), owner.id, project, session);
