@@ -16,6 +16,7 @@
     "@better-auth/drizzle-adapter": "1.7.6",
     "@hivemind/contract": "workspace:*",
     "@hivemind/db": "workspace:*",
+    "@hivemind/tracker": "workspace:*",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
     "@orpc/standard-server": "catalog:",

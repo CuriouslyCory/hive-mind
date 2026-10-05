@@ -30,6 +30,7 @@
     "format": "biome check --write .",
     "db:generate": "turbo run db:generate",
     "db:migrate": "turbo run db:migrate",
+    "tracker": "node --env-file-if-exists=apps/web/.env.local packages/tracker/src/cli.ts",
     "test:install": "sh scripts/test-install.sh",
     "changeset": "changeset",
     "version-packages": "changeset version"
