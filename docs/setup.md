@@ -209,9 +209,9 @@ To try it on a preview, add a separate Preview value with `vercel env add CRON_S
 
 ## H9. Rolling back production
 
-Events are never changed after they are written, so a rollback leaves in the database the Events that the newer deployment wrote, possibly with types, payload versions or enum values the older build does not know. A build that contains commit `81efa367d9a7d93823cd6a46c9b259241679856b` ("Read Events through one projection that withholds unreadable details") returns such an Event as `event.unavailable`, without its details. An older build fails every read that includes one: Project Events, Plan logs and Session logs answer 500, the dashboard's timelines fail to load, and the Event stream ends with a server error. ADR-0015 records the rule.
+Events are never changed after they are written, so a rollback leaves in the database the Events that the newer deployment wrote, possibly with types, payload versions or enum values the older build does not know. A build that contains the compatibility reader, `apps/web/src/server/event-projection.ts` (added by commit `81efa367d9a7d93823cd6a46c9b259241679856b`), returns such an Event as `event.unavailable`, without its details. An older build fails API and stream reads that include one: Project Events, Plan logs and Session logs answer 500, and the Event stream ends with a server error. Its dashboard timelines still load but show the stored type and recognized payload fields without validating them, so a newer Event's details, such as the message of a newer `plan.log_appended` version, are shown as written. ADR-0015 records the rule.
 
-- [ ] Deploy a production build that contains that commit before merging any change that adds an Event type, a payload version or an enum value in a payload, such as M4's Events ([#19](https://github.com/CuriouslyCory/hive-mind/issues/19)). That deployment is the earliest safe rollback target from then on.
+- [ ] Deploy a production build that contains the reader before merging any change that adds an Event type, a payload version or an enum value in a payload, such as M4's Events ([#19](https://github.com/CuriouslyCory/hive-mind/issues/19)). That deployment is the earliest safe rollback target from then on.
 
 **Before each rollback:**
 
@@ -220,12 +220,12 @@ Events are never changed after they are written, so a rollback leaves in the dat
 
    ```bash
    git fetch origin
-   git merge-base --is-ancestor 81efa367d9a7d93823cd6a46c9b259241679856b <target-commit> && echo "has the reader"
+   git cat-file -e <target-commit>:apps/web/src/server/event-projection.ts && echo "has the reader"
    ```
 
-   Exit status 0 means it does; 1 means it does not.
+   Exit status 0 means it does; any other status means it does not.
 3. If the target has the reader, roll back to it with Vercel's Instant Rollback or by promoting it.
-4. If it does not, do not promote it. Create a branch from the target commit, apply the reader to it (for example by cherry-picking `81efa367d9a7d93823cd6a46c9b259241679856b` and resolving conflicts), and deploy that build to production instead. This applies to every deployment from before the reader, including those that already write #14's `stolen` reason.
+4. If it does not, do not promote it. Create a branch from the target commit, apply the reader to it (for example by cherry-picking the commit on `main` that added `event-projection.ts`, found with `git log --diff-filter=A --format=%H origin/main -- apps/web/src/server/event-projection.ts`, and resolving conflicts), and deploy that build to production instead. This applies to every deployment from before the reader, including those that already write #14's `stolen` reason.
 5. After the rollback, open a Plan page with recent activity and run `hivemind plan log <plan>`. An Event the build cannot read shows as "Event details unavailable" on the page and as `event.unavailable` in the CLI; neither returns an error.
 
 Never delete, edit or backfill Events to make an older build read them. This check covers Event reads only: the target must also run on the current database schema, which is why every schema change is expand/contract (`AGENTS.md`, "Schema changes").
