@@ -121,7 +121,7 @@ vercel env add GITHUB_CLIENT_SECRET development
 **Production** (`https://hivemind.curiouslycory.com`):
 
 - [ ] The production build log shows `using pnpm v12.8.1` and `migrations applied`. A `SECURITY WARNING` from `pg` about SSL modes being treated as `verify-full` is expected with Neon's `sslmode=require` URLs.
-- [ ] Opening `/` while signed out redirects to `/sign-in`.
+- [ ] Opening `/` while signed out shows the landing page with the URL still `/`, and opening `/device` while signed out redirects to `/sign-in`.
 - [ ] Sign in with GitHub. The home page shows your GitHub name and your active organization: a personal organization whose slug is your GitHub login in lowercase.
 - [ ] Reload. You are still signed in: the login session survives.
 - [ ] Sign out. You are back at `/sign-in`.

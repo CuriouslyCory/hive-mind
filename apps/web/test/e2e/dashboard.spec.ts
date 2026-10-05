@@ -256,9 +256,18 @@ test("another User's Project, another Project's Plan and Session, and bogus ids 
   }
 });
 
-test("a signed-out visitor is sent to sign in, with the page to come back to", async ({ page }) => {
+test("a signed-out visitor sees the landing page at /, and is sent to sign in from other pages", async ({
+  page,
+}) => {
+  // The proxy rewrites `/` to the landing page, so the URL stays `/`.
   await page.goto("/");
-  await expect(page).toHaveURL(/^[^?]*\/sign-in(\?returnTo=%2F)?$/);
+  await expect(page).toHaveURL("/");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects" })).toHaveCount(0);
+
+  // A link to a page of the Projects list is a signed-in page like any other.
+  await page.goto("/?cursor=abc");
+  await expect(page).toHaveURL(`/sign-in?${new URLSearchParams({ returnTo: "/?cursor=abc" })}`);
   await expect(page.getByRole("button", { name: "Sign in with GitHub" })).toBeVisible();
 
   const path = `/projects/${randomUUID()}/plans/PLAN-1`;

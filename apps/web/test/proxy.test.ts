@@ -1,4 +1,9 @@
-import { getRedirectUrl, unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
+import {
+  getRedirectUrl,
+  getRewrittenUrl,
+  isRewrite,
+  unstable_doesMiddlewareMatch,
+} from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { config, proxy } from "../src/proxy";
@@ -10,10 +15,33 @@ function matches(url: string) {
 }
 
 describe("proxy", () => {
-  it("redirects a request without a login session cookie to /sign-in", () => {
+  it("shows the landing page at / without a login session cookie", () => {
     const response = proxy(new NextRequest("https://hive-mind.example/"));
+    expect(isRewrite(response)).toBe(true);
+    expect(getRewrittenUrl(response)).toBe("https://hive-mind.example/welcome");
+    expect(getRedirectUrl(response)).toBeNull();
+  });
+
+  it("keeps a query that is not a Projects page on the landing page", () => {
+    const response = proxy(new NextRequest("https://hive-mind.example/?utm_source=example"));
+    expect(getRewrittenUrl(response)).toBe("https://hive-mind.example/welcome?utm_source=example");
+    expect(getRedirectUrl(response)).toBeNull();
+  });
+
+  it("sends a signed-out link to a Projects page to /sign-in, returning to it", () => {
+    const response = proxy(new NextRequest("https://hive-mind.example/?cursor=abc"));
+    expect(isRewrite(response)).toBe(false);
     expect(response.status).toBe(307);
-    expect(getRedirectUrl(response)).toBe("https://hive-mind.example/sign-in");
+    expect(getRedirectUrl(response)).toBe(
+      "https://hive-mind.example/sign-in?returnTo=%2F%3Fcursor%3Dabc",
+    );
+  });
+
+  it("redirects any other page without a login session cookie to /sign-in", () => {
+    const response = proxy(new NextRequest("https://hive-mind.example/settings"));
+    expect(isRewrite(response)).toBe(false);
+    expect(response.status).toBe(307);
+    expect(getRedirectUrl(response)).toBe("https://hive-mind.example/sign-in?returnTo=%2Fsettings");
   });
 
   it("carries the requested page to /sign-in as a return path", () => {
@@ -43,24 +71,32 @@ describe("proxy", () => {
       const response = proxy(request);
       expect(response.headers.get("x-middleware-next")).toBe("1");
       expect(getRedirectUrl(response)).toBeNull();
+      expect(isRewrite(response)).toBe(false);
     },
   );
 
   it("ignores another prefix's login session cookie", () => {
-    const request = new NextRequest("https://hive-mind.example/", {
+    const request = new NextRequest("https://hive-mind.example/settings", {
       headers: { cookie: "better-auth.session_token=token-value" },
     });
-    expect(getRedirectUrl(proxy(request))).toBe("https://hive-mind.example/sign-in");
+    expect(getRedirectUrl(proxy(request))).toBe(
+      "https://hive-mind.example/sign-in?returnTo=%2Fsettings",
+    );
   });
 });
 
 describe("proxy matcher", () => {
-  it.each(["/", "/device", "/settings", "/projects/abc", "/apiary", "/sign-in-help"])(
-    "matches %s",
-    (url) => {
-      expect(matches(url)).toBe(true);
-    },
-  );
+  it.each([
+    "/",
+    "/device",
+    "/settings",
+    "/projects/abc",
+    "/apiary",
+    "/sign-in-help",
+    "/welcome-back",
+  ])("matches %s", (url) => {
+    expect(matches(url)).toBe(true);
+  });
 
   it.each([
     "/api",
@@ -71,6 +107,7 @@ describe("proxy matcher", () => {
     "/favicon.ico",
     "/robots.txt",
     "/sign-in",
+    "/welcome",
   ])("does not match %s", (url) => {
     expect(matches(url)).toBe(false);
   });

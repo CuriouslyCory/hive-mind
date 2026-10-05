@@ -8,7 +8,7 @@ The design is in [#11](https://github.com/CuriouslyCory/hive-mind/issues/11) and
 
 | Route | Shows |
 |---|---|
-| `/` | The Projects of every Organization the User is a Member of, oldest first, 20 per page, each with its Organization's name and its slug. A User with no Projects sees how to create one with `hivemind init` ([docs/cli.md](cli.md)). |
+| `/` | Signed out: the public landing page (`/welcome`), which `apps/web/src/proxy.ts` serves at `/` by a rewrite. Signed in: the Projects of every Organization the User is a Member of, oldest first, 20 per page, each with its Organization's name and its slug. A User with no Projects sees how to create one with `hivemind init` ([docs/cli.md](cli.md)). |
 | `/projects/[projectId]` | Active Plans with Task progress (20 per page); overlap warnings (advisory, up to 20); live Sessions (up to 20) with agent, status, owner, machine and branch, focus (Plan or Task), last heartbeat and declared Scope; recent ended or abandoned Sessions (20 per page). |
 | `/projects/[projectId]/plans/[planKey]` | The Plan's status, progress, creator and owner; its body as sanitized markdown; its Tasks in order with their claim holders (20 per page); the Sessions attached to it; its activity (Events, 50 per page). `planKey` is the Plan's key, such as `PLAN-3`. |
 | `/projects/[projectId]/sessions/[sessionId]` | The Session's agent, intent, status, owner, machine, branch and commit, focus, start, last heartbeat and end; its end summary as sanitized markdown; its declared and touched Scope; its Event timeline (newest first, 50 per page). |
