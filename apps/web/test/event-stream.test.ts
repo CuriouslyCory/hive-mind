@@ -1184,11 +1184,15 @@ describeDb("Event stream", () => {
       if (!frames) return;
       expect((await frames.next()).value).toEqual({ type: "ready" });
       expect((await frames.next()).value).toMatchObject({ type: "event" });
-      // Paused at the yield of the first Event.
+      // Paused at the yield of the first Event. Polls before it may have come
+      // back empty while another test's transaction held the feed horizon
+      // back, each with its own check, so count from here.
+      const checksAtPause = checks;
+      expect(checksAtPause).toBeGreaterThanOrEqual(1);
       lifecycle.end("abort");
       expect(lifecycle.signal.aborted).toBe(true);
       expect(await frames.return(undefined)).toEqual({ done: true, value: undefined });
-      expect(checks).toBe(1);
+      expect(checks).toBe(checksAtPause);
       await expectPoolReleased();
     });
 
