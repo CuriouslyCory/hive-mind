@@ -3,6 +3,7 @@ import {
   addTaskOutputSchema,
   appendPlanLogOutputSchema,
   createPlanOutputSchema,
+  type Event as EventDto,
   eventPageSchema,
   MAX_EVENT_BYTES,
   MAX_MARKDOWN_BYTES,
@@ -11,15 +12,22 @@ import {
   planPageSchema,
   planSchema,
   setPlanStatusOutputSchema,
+  startSessionOutputSchema,
   taskPageSchema,
+  UNAVAILABLE_EVENT_TYPE,
   updatePlanOutputSchema,
 } from "@hivemind/contract";
-import { type Event as EventRow, encodedJsonBytes } from "@hivemind/db";
+import {
+  creationFingerprint,
+  type Event as EventRow,
+  encodedJsonBytes,
+  MAX_EVENT_PAYLOAD_BYTES,
+} from "@hivemind/db";
 import { agentSession, event, task } from "@hivemind/db/schema";
 import { describeDb } from "@hivemind/db/testing";
 import { ORPCError } from "@orpc/server";
-import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorizeProject } from "../src/server/api/coordination-auth";
 import { toEventDto } from "../src/server/api/coordination-dto";
 import type { ProjectKeyPrincipal } from "../src/server/api/principal";
@@ -30,6 +38,12 @@ import {
   type RequestOptions,
   type SignedInUser,
 } from "./support/api";
+import {
+  canary,
+  type FutureEventInput,
+  futureShapes,
+  insertFutureEvent,
+} from "./support/future-events";
 
 // The Plan, Task (add/list) and Event read routes of #12: the authorization
 // matrix, nested-id isolation, attribution, limits, pages, creation replay,
@@ -719,6 +733,218 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
         { body: logBody },
       );
       expect(foreignLog.status).toBe(404);
+    });
+  });
+
+  // Rows a newer deployment stored, read after a rollback (ADR-0015, issue
+  // #15). The rows come from support/future-events.ts with Postgres-assigned
+  // seq and writer_xid; everything else is written through the API.
+  describe("Events a newer deployment wrote", () => {
+    /** The fields of a stored Event every reader returns, built from its columns. */
+    function metadataOf(row: EventRow) {
+      return {
+        id: row.id,
+        projectId: row.projectId,
+        seq: row.seq,
+        writerXid: row.writerXid,
+        actor:
+          row.actorKind === "user"
+            ? { kind: "user", userId: row.actorUserId }
+            : row.actorKind === "project_key"
+              ? { kind: "project_key", keyId: row.actorKeyId }
+              : { kind: "system" },
+        actorSessionId: row.actorSessionId,
+        planId: row.planId,
+        taskId: row.taskId,
+        sessionId: row.sessionId,
+        effectiveAt: row.effectiveAt.toISOString(),
+        createdAt: row.createdAt.toISOString(),
+      };
+    }
+
+    function unavailableOf(row: EventRow) {
+      return {
+        ...metadataOf(row),
+        type: UNAVAILABLE_EVENT_TYPE,
+        payloadVersion: 1,
+        payload: {},
+      };
+    }
+
+    /** Every page of `path` at one Event per page, each answered 200. */
+    async function readEveryPage(path: string) {
+      const items: EventDto[] = [];
+      const bodies: string[] = [];
+      const cursors = new Set<string>();
+      let cursor: string | null = null;
+      do {
+        const query: string = cursor ? `&cursor=${cursor}` : "";
+        const response = await call(owner.token, `${path}?limit=1${query}`);
+        const body = await response.text();
+        expect([path, response.status, body]).toEqual([path, 200, expect.any(String)]);
+        const page = eventPageSchema.parse(JSON.parse(body));
+        expect(page.items).toHaveLength(1);
+        items.push(...page.items);
+        bodies.push(body);
+        cursor = page.nextCursor;
+        if (cursor) {
+          expect(cursors.has(cursor)).toBe(false);
+          cursors.add(cursor);
+        }
+      } while (cursor);
+      return { items, raw: bodies.join("\n") };
+    }
+
+    it("pages known and unavailable Events in stored order, withholding only the details", async () => {
+      const project = await api.createProject(owner);
+      const plan = await createPlan(owner.token, project);
+      const added = await addTask(owner.token, project, plan.key);
+      const { session } = startSessionOutputSchema.parse(
+        await (
+          await call(owner.token, `/projects/${project}/sessions`, {
+            body: { sessionId: uuid(), agent: "test", intent: "Testing" },
+          })
+        ).json(),
+      );
+      const secret = canary();
+      const shapes = futureShapes(secret);
+      const asOwner = { actorKind: "user", actorUserId: owner.id } as const;
+      const references: Record<keyof typeof shapes, Partial<FutureEventInput>> = {
+        "unknown type": { ...asOwner, actorSessionId: session.id, planId: plan.id },
+        "newer reason": { planId: plan.id, taskId: added.id, sessionId: session.id },
+        "unsupported version": { ...asOwner, planId: plan.id },
+        "extra field": {
+          ...asOwner,
+          actorSessionId: session.id,
+          planId: plan.id,
+          taskId: added.id,
+        },
+      };
+      // Two unavailable rows, then a known log entry, twice: cursors must
+      // chain across adjacent unavailable rows as well as single ones.
+      const future = new Set<string>();
+      for (const [index, name] of (Object.keys(shapes) as (keyof typeof shapes)[]).entries()) {
+        const row = await insertFutureEvent(api.testDb.db, {
+          projectId: project,
+          ...shapes[name],
+          ...references[name],
+        });
+        future.add(row.id);
+        if (index % 2 === 1) {
+          const logged = await call(owner.token, `/projects/${project}/plans/${plan.key}/log`, {
+            body: { eventId: uuid(), message: `After ${name}.` },
+          });
+          expect(logged.status).toBe(200);
+        }
+      }
+
+      const stored = (planId?: string) =>
+        api.testDb.db
+          .select()
+          .from(event)
+          .where(and(eq(event.projectId, project), planId ? eq(event.planId, planId) : undefined))
+          .orderBy(desc(event.seq));
+      const reads: [string, EventRow[]][] = [
+        [`/projects/${project}/events`, await stored()],
+        [`/projects/${project}/plans/${plan.key}/log`, await stored(plan.id)],
+      ];
+      for (const [path, rows] of reads) {
+        const { items, raw } = await readEveryPage(path);
+        expect(items.map((item) => item.id)).toEqual(rows.map((row) => row.id));
+        for (const [index, row] of rows.entries()) {
+          // Known Events keep their exact payload; unavailable ones keep only
+          // their metadata, with seq and writerXid as the stored text.
+          expect([path, items[index]]).toEqual([
+            path,
+            future.has(row.id)
+              ? unavailableOf(row)
+              : {
+                  ...metadataOf(row),
+                  type: row.type,
+                  payloadVersion: row.payloadVersion,
+                  payload: row.payload,
+                },
+          ]);
+        }
+        expect(items.filter((item) => item.type === UNAVAILABLE_EVENT_TYPE)).toHaveLength(4);
+        for (const withheld of [secret, shapes["unknown type"].type, "creationFingerprint"]) {
+          expect([path, raw.includes(withheld)]).toEqual([path, false]);
+        }
+      }
+    });
+
+    it("replays a log entry that a newer writer stored, as event.unavailable", async () => {
+      const project = await api.createProject(owner);
+      const plan = await createPlan(owner.token, project);
+      const secret = canary();
+      const eventId = uuid();
+      // The row `appendPlanLog` (packages/db/src/plan.ts) would store for this
+      // input, with its creation fingerprint, at a payload version this build
+      // does not know.
+      const row = await insertFutureEvent(api.testDb.db, {
+        id: eventId,
+        projectId: project,
+        ...futureShapes(secret)["unsupported version"],
+        actorKind: "user",
+        actorUserId: owner.id,
+        planId: plan.id,
+        creationFingerprint: creationFingerprint({
+          planId: plan.id,
+          message: secret,
+          sessionId: null,
+        }),
+      });
+      const before = (await eventsOf(project)).length;
+      const logPath = `/projects/${project}/plans/${plan.key}/log`;
+
+      const response = await call(owner.token, logPath, { body: { eventId, message: secret } });
+      const body = await response.text();
+      expect([response.status, body]).toEqual([200, expect.any(String)]);
+      expect(body).not.toContain(secret);
+      expect(appendPlanLogOutputSchema.parse(JSON.parse(body))).toEqual({
+        event: unavailableOf(row),
+        created: false,
+      });
+      expect(await eventsOf(project)).toHaveLength(before);
+      // Other input under the same id is still a conflict, not a replay.
+      const changed = await call(owner.token, logPath, { body: { eventId, message: "Other." } });
+      expect(changed.status).toBe(409);
+    });
+
+    it("answers a corrupt row with a generic 500 and logs only its id and failure", async () => {
+      const project = await api.createProject(owner);
+      const plan = await createPlan(owner.token, project);
+      const secret = canary();
+      // Over the writer's payload limit, which no newer writer may exceed.
+      const row = await insertFutureEvent(api.testDb.db, {
+        projectId: project,
+        type: "plan.log_appended",
+        payloadVersion: 1,
+        payload: { message: secret.repeat(Math.ceil(MAX_EVENT_PAYLOAD_BYTES / secret.length)) },
+        planId: plan.id,
+      });
+      expect(encodedJsonBytes(row.payload)).toBeGreaterThan(MAX_EVENT_PAYLOAD_BYTES);
+
+      const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        for (const path of [
+          `/projects/${project}/events`,
+          `/projects/${project}/plans/${plan.key}/log`,
+        ]) {
+          errors.mockClear();
+          const response = await call(owner.token, path);
+          const body = await response.clone().text();
+          expect([path, response.status]).toEqual([path, 500]);
+          expect(await errorCode(response)).toBe("INTERNAL_SERVER_ERROR");
+          expect(body).not.toContain(secret);
+          const logged = errors.mock.calls.flat().map(String).join("\n");
+          expect(logged).toContain("payload_too_large");
+          expect(logged).toContain(row.id);
+          expect(logged).not.toContain(secret);
+        }
+      } finally {
+        errors.mockRestore();
+      }
     });
   });
 

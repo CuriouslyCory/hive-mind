@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { EVENT_TYPES } from "@hivemind/contract";
+import {
+  EVENT_PAYLOAD_VERSION,
+  EVENT_TYPES,
+  knownEventSchema,
+  UNAVAILABLE_EVENT_TYPE,
+} from "@hivemind/contract";
 import {
   addDeclaredScope,
   addTask,
@@ -11,6 +16,7 @@ import {
   creatorColumns,
   doneTask,
   EVENT_PAYLOAD_VERSIONS,
+  type Event as EventRow,
   endSession,
   finalizeCollection,
   heartbeatSession,
@@ -31,13 +37,42 @@ import {
 import { createTestDatabase, describeDb, type TestDatabase } from "@hivemind/db/testing";
 import { asc, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { toEventDto } from "../src/server/api/coordination-dto";
+import { projectEvent } from "../src/server/event-projection";
 
 // The Event catalog of @hivemind/db (src/event.ts) and the contract's
-// `eventSchema` must name the same types with the same payloads: Event reads
-// return stored rows as they are, so a mismatch would make them fail with
-// 500. This produces one Event of every type through the db helpers and reads
-// each back through the API's DTO, which validates it against the contract.
+// `knownEventSchema` must name the same types, versions and payloads. Reads
+// are tolerant: a row the reader cannot decode is returned as
+// `event.unavailable` (ADR-0015), so a writer that drifted from the contract
+// would no longer fail a read, only hide its own details. This test therefore
+// checks writers strictly and on its own terms: it writes one Event of every
+// type through the db helpers, builds each DTO from the row's columns, and
+// requires the strict known schema to accept it unchanged and the projection
+// to return it as it is, never as unavailable.
+
+/** The DTO a reader must return for `row`, built from its columns alone. */
+function dtoOf(row: EventRow) {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    seq: row.seq,
+    writerXid: row.writerXid,
+    actor:
+      row.actorKind === "user"
+        ? { kind: "user", userId: row.actorUserId }
+        : row.actorKind === "project_key"
+          ? { kind: "project_key", keyId: row.actorKeyId }
+          : { kind: "system" },
+    actorSessionId: row.actorSessionId,
+    planId: row.planId,
+    taskId: row.taskId,
+    sessionId: row.sessionId,
+    effectiveAt: row.effectiveAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    type: row.type,
+    payloadVersion: row.payloadVersion,
+    payload: row.payload,
+  };
+}
 
 let testDb: TestDatabase;
 
@@ -50,11 +85,20 @@ describeDb("the Event catalog", () => {
     await testDb?.drop();
   });
 
-  it("has the contract's types, and every written Event matches eventSchema", async () => {
+  it("has the contract's writable types and version, and never the reserved one", () => {
     expect(Object.keys(EVENT_PAYLOAD_VERSIONS).sort()).toEqual([...EVENT_TYPES].sort());
+    for (const [type, version] of Object.entries(EVENT_PAYLOAD_VERSIONS)) {
+      expect([type, version]).toEqual([type, EVENT_PAYLOAD_VERSION]);
+    }
+    // `event.unavailable` is response-only; no writer may use its namespace.
+    expect(Object.keys(EVENT_PAYLOAD_VERSIONS).filter((type) => type.startsWith("event."))).toEqual(
+      [],
+    );
+    expect(EVENT_TYPES.filter((type) => type.startsWith("event."))).toEqual([]);
+    expect(UNAVAILABLE_EVENT_TYPE.startsWith("event.")).toBe(true);
   });
 
-  it("writes Events that match the contract's eventSchema, one of every type", async () => {
+  it("writes Events the strict known schema accepts unchanged, one of every type", async () => {
     const db = testDb.db;
     const slug = `org-${randomUUID().slice(0, 8)}`;
     const [org] = await db.insert(schema.organization).values({ name: slug, slug }).returning();
@@ -209,16 +253,26 @@ describeDb("the Event catalog", () => {
       .from(schema.event)
       .where(eq(schema.event.projectId, project.id))
       .orderBy(asc(schema.event.seq));
+    const versions = new Map<string, number>(Object.entries(EVENT_PAYLOAD_VERSIONS));
+    for (const row of rows) {
+      const dto = dtoOf(row);
+      // Strict: undeclared, missing or mistyped fields throw here.
+      expect(knownEventSchema.parse(dto)).toEqual(dto);
+      expect([row.type, row.payloadVersion]).toEqual([row.type, versions.get(row.type)]);
+      const projected = projectEvent(row);
+      expect(projected).toEqual(dto);
+      expect(projected.type).not.toBe(UNAVAILABLE_EVENT_TYPE);
+    }
     const release = rows
-      .map(toEventDto)
-      .find((row) => row.type === "task.released" && row.payload.reason === "stolen");
+      .map((row) => knownEventSchema.parse(dtoOf(row)))
+      .find((dto) => dto.type === "task.released" && dto.payload.reason === "stolen");
     if (!release) throw new Error("Expected a release Event");
     expect(release).toMatchObject({
       type: "task.released",
       payloadVersion: 1,
       payload: { reason: "stolen" },
     });
-    const types = rows.map((row) => toEventDto(row).type);
+    const types = rows.map((row) => row.type);
     expect([...new Set(types)].sort()).toEqual(Object.keys(EVENT_PAYLOAD_VERSIONS).sort());
     expect(rows.find((row) => row.type === "scope.coverage_lost")?.payload).toMatchObject({
       reason: "collection_superseded",

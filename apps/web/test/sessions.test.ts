@@ -4,6 +4,7 @@ import {
   claimTaskOutputSchema,
   collectionOutputSchema,
   createPlanOutputSchema,
+  type Event as EventDto,
   endSessionOutputSchema,
   eventPageSchema,
   heartbeatSessionOutputSchema,
@@ -20,12 +21,13 @@ import {
   taskClaimConflictMessage,
   taskPageSchema,
   touchedPathsContentHash,
+  UNAVAILABLE_EVENT_TYPE,
   uploadCollectionBatchOutputSchema,
 } from "@hivemind/contract";
-import { createDb, createPool, withCoordinationLock } from "@hivemind/db";
+import { createDb, createPool, type Event as EventRow, withCoordinationLock } from "@hivemind/db";
 import { agentSession, event } from "@hivemind/db/schema";
 import { describeDb } from "@hivemind/db/testing";
-import { eq, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeKeysetCursor } from "../src/server/api/keyset";
 import {
@@ -35,6 +37,7 @@ import {
   type RequestOptions,
   type SignedInUser,
 } from "./support/api";
+import { canary, futureShapes, insertFutureEvent } from "./support/future-events";
 
 // The Session, Task action, Scope, collection and status routes of #12
 // through the real handler and database: authorization (Project access,
@@ -529,6 +532,93 @@ describeDb("/api/v1 Sessions, Task actions, Scopes and status", () => {
       for (const [path, cursor] of inRange) {
         await ok(call(owner.token, `${path}?cursor=${cursor}`));
       }
+    });
+
+    // A Session's log after a rollback (ADR-0015, issue #15): rows a newer
+    // deployment stored, from support/future-events.ts, between known ones.
+    it("pages a Session's unavailable Events, acted through or affecting it", async () => {
+      const projectId = await api.createProject(owner);
+      const session = await startSession(owner.token, projectId);
+      const other = await startSession(owner.token, projectId);
+      const secret = canary();
+      const shapes = futureShapes(secret);
+      const affecting = await insertFutureEvent(api.testDb.db, {
+        projectId,
+        ...shapes["newer reason"],
+        sessionId: session.id,
+      });
+      await ok(heartbeat(owner.token, projectId, session.id));
+      // A system actor never acts through a Session (event_actor_check).
+      const actedThrough = await insertFutureEvent(api.testDb.db, {
+        projectId,
+        ...shapes["unknown type"],
+        actorKind: "user",
+        actorUserId: owner.id,
+        actorSessionId: session.id,
+      });
+      // Another Session's, which the log leaves out.
+      await insertFutureEvent(api.testDb.db, {
+        projectId,
+        ...shapes["extra field"],
+        sessionId: other.id,
+      });
+      await ok(heartbeat(owner.token, projectId, session.id));
+
+      const rows = await api.testDb.db
+        .select()
+        .from(event)
+        .where(
+          and(
+            eq(event.projectId, projectId),
+            or(eq(event.sessionId, session.id), eq(event.actorSessionId, session.id)),
+          ),
+        )
+        .orderBy(desc(event.seq));
+      const path = `/projects/${projectId}/sessions/${session.id}/events`;
+      const items: EventDto[] = [];
+      const bodies: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const query: string = cursor ? `&cursor=${cursor}` : "";
+        const response = await call(owner.token, `${path}?limit=1${query}`);
+        const body = await response.text();
+        expect([response.status, body]).toEqual([200, expect.any(String)]);
+        const page = eventPageSchema.parse(JSON.parse(body));
+        expect(page.items).toHaveLength(1);
+        items.push(...page.items);
+        bodies.push(body);
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(items.map((item) => item.id)).toEqual(rows.map((row) => row.id));
+
+      const unavailable = (row: EventRow) => ({
+        id: row.id,
+        projectId,
+        seq: row.seq,
+        writerXid: row.writerXid,
+        actor:
+          row.actorKind === "user" ? { kind: "user", userId: row.actorUserId } : { kind: "system" },
+        actorSessionId: row.actorSessionId,
+        planId: row.planId,
+        taskId: row.taskId,
+        sessionId: row.sessionId,
+        effectiveAt: row.effectiveAt.toISOString(),
+        createdAt: row.createdAt.toISOString(),
+        type: UNAVAILABLE_EVENT_TYPE,
+        payloadVersion: 1,
+        payload: {},
+      });
+      for (const row of [affecting, actedThrough]) {
+        expect(items.find((item) => item.id === row.id)).toEqual(unavailable(row));
+      }
+      expect(items.filter((item) => item.type === UNAVAILABLE_EVENT_TYPE)).toHaveLength(2);
+      for (const withheld of [secret, shapes["unknown type"].type, "creationFingerprint"]) {
+        expect(bodies.join("\n")).not.toContain(withheld);
+      }
+
+      // The same Session through another Project is still no Session there.
+      const elsewhere = call(owner.token, `/projects/${projectA}/sessions/${session.id}/events`);
+      expect(await expectError(elsewhere, 404)).toBe("NOT_FOUND");
     });
   });
 

@@ -4,14 +4,17 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AttributionText } from "../src/app/(app)/_components/format";
+import { EventList } from "../src/app/(app)/_components/lists";
 import {
   DASHBOARD_PAGE_SIZE,
+  type EventView,
   loadPlanDetail,
   loadProjectList,
   loadProjectOverview,
   loadSessionDetail,
 } from "../src/server/dashboard/queries";
 import { type ApiHarness, createApiHarness, type SignedInUser } from "./support/api";
+import { canary, futureShapes, insertFutureEvent } from "./support/future-events";
 
 // The dashboard's page reads (issue #11, step 5) against a real database,
 // with data written through the real `/api/v1` handler: membership
@@ -422,6 +425,151 @@ describeDb("dashboard queries", () => {
       ].map((item) => item.key);
       expect(new Set(keys).size).toBe(keys.length);
       expect(keys).toHaveLength(DASHBOARD_PAGE_SIZE + 2);
+    });
+  });
+  describe("Events a newer deployment wrote", () => {
+    // Rows a newer writer stored, read after a rollback (issue #15, ADR-0015):
+    // the dashboard shows them as unavailable, with their attribution and
+    // links, and never their stored type or payload.
+    const secret = canary();
+    const shapes = futureShapes(secret);
+    let project: string;
+    let plan: { id: string; key: string };
+    let task: { id: string };
+    let session: string;
+    /** Stored future Events by shape name, oldest first. */
+    let future: Map<string, { id: string; seq: string }>;
+
+    async function appendLog(message: string) {
+      await ok(owner.token, `/projects/${project}/plans/${plan.key}/log`, {
+        eventId: uuid(),
+        message,
+        sessionId: session,
+      });
+    }
+
+    beforeAll(async () => {
+      project = await api.createProject(owner);
+      plan = await createPlan(owner.token, project, { title: "Rollback" });
+      task = await addTask(owner.token, project, plan.key, "Read old Events");
+      session = await startSession(owner.token, project, { intent: "Read after rollback" });
+      await appendLog("Before the newer writer");
+      future = new Map();
+      for (const [name, shape] of Object.entries(shapes)) {
+        const row = await insertFutureEvent(db(), {
+          projectId: project,
+          ...shape,
+          actorKind: "user",
+          actorUserId: owner.id,
+          actorSessionId: session,
+          planId: plan.id,
+          taskId: task.id,
+          sessionId: session,
+        });
+        future.set(name, { id: row.id, seq: row.seq });
+      }
+      await appendLog("After the newer writer");
+    });
+
+    /** Checks every future row in `events` and that nothing stored leaks. */
+    function expectWithheld(events: readonly EventView[]) {
+      for (const [name, stored] of future) {
+        const item = events.find((event) => event.id === stored.id);
+        expect(item, name).toEqual({
+          id: stored.id,
+          seq: stored.seq,
+          type: "event.unavailable",
+          actor: { kind: "user", userId: owner.id, name: owner.name },
+          actorSessionId: session,
+          planKey: plan.key,
+          task: { id: task.id, title: "Read old Events", position: 1, planKey: plan.key },
+          sessionId: session,
+          effectiveAt: expect.any(Date),
+          text: "Event details unavailable",
+          markdown: null,
+        });
+      }
+      // A familiar `message` under an unsupported version is not a log entry.
+      const unsupported = future.get("unsupported version");
+      const entry = events.find((event) => event.id === unsupported?.id);
+      expect(entry?.text).not.toBe("Added a log entry");
+      const known = events.filter((event) => event.type === "plan.log_appended");
+      expect(known.map((event) => [event.text, event.markdown])).toEqual([
+        ["Added a log entry", "After the newer writer"],
+        ["Added a log entry", "Before the newer writer"],
+      ]);
+      const loaded = JSON.stringify(events);
+      expect(loaded).not.toContain(secret);
+      expect(loaded).not.toContain(shapes["unknown type"].type);
+      expect(loaded).not.toContain('"task.released"');
+      expect(loaded).not.toContain('"task.done"');
+    }
+
+    function rendered(events: EventView[], asOf: Date): string {
+      return renderToStaticMarkup(
+        createElement(EventList, { projectId: project, events, asOf, label: "Activity" }),
+      );
+    }
+
+    function expectRenderedWithheld(html: string) {
+      expect(html).not.toContain(secret);
+      expect(html).not.toContain(shapes["unknown type"].type);
+      expect(html.match(/data-event-type="event.unavailable"/g)).toHaveLength(future.size);
+      expect(html.match(/Event details unavailable/g)).toHaveLength(future.size);
+      expect(html).toContain("After the newer writer");
+      expect(html).toContain("Before the newer writer");
+    }
+
+    it("shows them as unavailable in the Plan's activity, on load and on refresh", async () => {
+      const first = await loadPlanDetail(db(), owner.id, project, plan.key);
+      if (!first.data) throw new Error("expected the Plan");
+      const unavailable = Array(future.size).fill("event.unavailable");
+      expect(first.data.activity.items.map((event) => event.type)).toEqual([
+        "plan.log_appended",
+        ...unavailable,
+        "plan.log_appended",
+        "task.added",
+        "plan.created",
+      ]);
+      expect(first.data.activity.items.at(-2)?.text).toBe('Added Task 1 "Read old Events"');
+      expect(first.data.activity.items.at(-1)?.text).toBe(`Created Plan ${plan.key} "Rollback"`);
+      expectWithheld(first.data.activity.items);
+      expect(JSON.stringify(first.data)).not.toContain(secret);
+      expectRenderedWithheld(rendered(first.data.activity.items, first.data.asOf));
+
+      // A refresh reads the same stored rows again and still withholds them.
+      const again = await loadPlanDetail(db(), owner.id, project, plan.key);
+      if (!again.data) throw new Error("expected the Plan");
+      expect(again.data.activity).toEqual(first.data.activity);
+      expectWithheld(again.data.activity.items);
+      expectRenderedWithheld(rendered(again.data.activity.items, again.data.asOf));
+    });
+
+    it("shows them as unavailable in the Session's timeline, on load and on refresh", async () => {
+      const first = await loadSessionDetail(db(), owner.id, project, session);
+      if (!first.data) throw new Error("expected the Session");
+      expect(first.data.events.items.map((event) => event.type)).toEqual([
+        "plan.log_appended",
+        ...Array(future.size).fill("event.unavailable"),
+        "plan.log_appended",
+        "session.started",
+      ]);
+      expectWithheld(first.data.events.items);
+      expect(JSON.stringify(first.data)).not.toContain(secret);
+      expectRenderedWithheld(rendered(first.data.events.items, first.data.asOf));
+
+      const again = await loadSessionDetail(db(), owner.id, project, session);
+      if (!again.data) throw new Error("expected the Session");
+      expect(again.data.events).toEqual(first.data.events);
+      expectWithheld(again.data.events.items);
+      expectRenderedWithheld(rendered(again.data.events.items, again.data.asOf));
+    });
+
+    it("keeps the Project overview readable", async () => {
+      // The overview lists no Events; it must still load beside them.
+      const { data } = await loadProjectOverview(db(), owner.id, project);
+      expect(data?.activePlans.items.map((item) => item.key)).toEqual([plan.key]);
+      expect(JSON.stringify(data)).not.toContain(secret);
     });
   });
 });

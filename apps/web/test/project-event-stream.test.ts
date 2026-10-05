@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { encodeFeedCursor, MAX_EVENT_STREAM_FRAME_BYTES } from "@hivemind/contract";
+import {
+  encodeFeedCursor,
+  MAX_EVENT_STREAM_FRAME_BYTES,
+  UNAVAILABLE_EVENT_TYPE,
+} from "@hivemind/contract";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { os, withEventMeta } from "@orpc/server";
 import { decodeEventMessage, encodeEventMessage } from "@orpc/standard-server";
@@ -490,6 +494,50 @@ describe("createProjectEventStream", () => {
     await flush();
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(stream.getSnapshot().cursor).toBe(cursorAt(101, 2));
+    stream.close();
+  });
+
+  it("advances past an event.unavailable Event, refreshing once and applying a redelivery once", async () => {
+    // A Plan page the Event does not name: only the unknown type refreshes it.
+    const planId = randomUUID();
+    const { server, refresh, finishRefresh, stream } = setup({
+      shouldRefresh: (event) => shouldRefreshFor({ kind: "plan", planId }, event),
+    });
+    stream.start();
+    await flush();
+    const unavailable = makeEvent(101, 1, {
+      type: UNAVAILABLE_EVENT_TYPE,
+      payload: {},
+      planId: randomUUID(),
+      sessionId: randomUUID(),
+    });
+    server.last.send(eventMessage(unavailable));
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(stream.getSnapshot().cursor).toBe(cursorAt(101, 1));
+    await finishRefresh();
+    server.last.send(eventMessage(unavailable));
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // At-least-once replay after a reconnect, which resumes past it.
+    server.last.fail();
+    await flush();
+    await advance(1000);
+    expect(server.last.lastEventId).toBe(cursorAt(101, 1));
+    // Going live again reconciles once; the replayed Event adds nothing.
+    server.last.send(heartbeat());
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    await finishRefresh();
+    server.last.send(eventMessage(unavailable));
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(stream.getSnapshot()).toMatchObject({
+      cursor: cursorAt(101, 1),
+      status: { kind: "live" },
+      refreshing: false,
+    });
     stream.close();
   });
 

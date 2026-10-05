@@ -3,17 +3,21 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import {
+  addTaskOutputSchema,
   createPlanOutputSchema,
   decodeFeedCursor,
   EVENT_STREAM_MAX_BUFFERED_BYTES,
+  type Event,
   type EventStreamFrame,
   encodeFeedCursor,
   eventStreamFrameSchema,
   FEED_ORIGIN,
   feedOriginCursor,
   MAX_EVENT_STREAM_FRAME_BYTES,
+  startSessionOutputSchema,
+  UNAVAILABLE_EVENT_TYPE,
 } from "@hivemind/contract";
-import type { Db } from "@hivemind/db";
+import { type Db, type Event as EventRow, MAX_EVENT_PAYLOAD_BYTES } from "@hivemind/db";
 import { describeDb } from "@hivemind/db/testing";
 import { type SQL, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -29,6 +33,7 @@ import {
   uncountedFrameBytes,
 } from "../src/server/realtime/event-stream";
 import { type ApiHarness, createApiHarness, ORIGIN, type SignedInUser } from "./support/api";
+import { canary, futureShapes, insertFutureEvent } from "./support/future-events";
 
 // The Event stream engine and its two adapters (issue #11, step 4; ADR-0010):
 // statuses before the stream opens, the ready frame, lossless replay and
@@ -172,6 +177,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 const isEvent = (frame: WireFrame) => frame.frame?.type === "event";
 const eventIds = (frames: WireFrame[]) =>
   frames.flatMap((frame) => (frame.frame?.type === "event" ? [frame.frame.event.id] : []));
+const eventsOf = (frames: WireFrame[]) =>
+  frames.flatMap((frame) => (frame.frame?.type === "event" ? [frame.frame.event] : []));
 
 /** `db` with its transactions counted, and failing once `failAfter` have started. */
 function instrumentedDb(db: Db, failAfter = Number.POSITIVE_INFINITY) {
@@ -604,6 +611,240 @@ describeDb("Event stream", () => {
       expect(Number.isNaN(Date.parse(frame.serverTime))).toBe(false);
       await reader.cancel();
     });
+  });
+
+  describe("Events a newer deployment wrote (issue #15)", () => {
+    // Both adapters deliver Events this build cannot read as
+    // `event.unavailable` at their own feed positions (ADR-0015), and stop at
+    // a corrupt row rather than skip it.
+
+    const adapters: {
+      name: string;
+      open: (projectId: string, options?: StreamRequest) => Promise<Response>;
+    }[] = [
+      {
+        name: "bearer /api/v1",
+        open: (projectId, options = {}) => v1Stream(projectId, { token: owner.token, ...options }),
+      },
+      {
+        name: "cookie dashboard",
+        open: async (projectId, options = {}) =>
+          dashboardStream(projectId, { ...(await cookieLogin(owner)), ...options }),
+      },
+    ];
+
+    async function post(path: string, body: Record<string, unknown>): Promise<unknown> {
+      const response = await api.request(path, { token: owner.token, body });
+      if (response.status !== 200) throw new Error(`${path}: ${await response.text()}`);
+      return response.json();
+    }
+
+    async function appendLog(projectId: string, planKey: string) {
+      await post(`/projects/${projectId}/plans/${planKey}/log`, {
+        eventId: crypto.randomUUID(),
+        message: "Known.",
+      });
+    }
+
+    /**
+     * A new Project whose feed is three known Events (a Plan, its Task, a
+     * Session), one row per `futureShapes` entry hiding `secret`, then one
+     * known Plan log entry.
+     */
+    async function mixedProject(secret: string) {
+      const projectId = await api.createProject(owner);
+      const plan = await createPlan(projectId);
+      const { task } = addTaskOutputSchema.parse(
+        await post(`/projects/${projectId}/plans/${plan.key}/tasks`, {
+          taskId: crypto.randomUUID(),
+          title: "Task",
+        }),
+      );
+      const { session } = startSessionOutputSchema.parse(
+        await post(`/projects/${projectId}/sessions`, {
+          sessionId: crypto.randomUUID(),
+          agent: "test",
+          intent: "Testing",
+        }),
+      );
+      const future: EventRow[] = [];
+      for (const shape of Object.values(futureShapes(secret))) {
+        future.push(
+          await insertFutureEvent(api.testDb.db, {
+            projectId,
+            ...shape,
+            actorKind: "user",
+            actorUserId: owner.id,
+            actorSessionId: session.id,
+            planId: plan.id,
+            taskId: task.id,
+            sessionId: session.id,
+          }),
+        );
+      }
+      await appendLog(projectId, plan.key);
+      const all = await feed(projectId);
+      expect(all.map((row) => row.id).slice(3, 7)).toEqual(future.map((row) => row.id));
+      expect(all).toHaveLength(8);
+      return { projectId, all, future };
+    }
+
+    /** What a reader gets for a stored row it cannot read: its metadata only. */
+    function unavailable(row: EventRow): Event {
+      return {
+        id: row.id,
+        projectId: row.projectId,
+        seq: row.seq,
+        writerXid: row.writerXid,
+        actor: { kind: "user", userId: owner.id },
+        actorSessionId: row.actorSessionId,
+        planId: row.planId,
+        taskId: row.taskId,
+        sessionId: row.sessionId,
+        effectiveAt: row.effectiveAt.toISOString(),
+        createdAt: row.createdAt.toISOString(),
+        type: UNAVAILABLE_EVENT_TYPE,
+        payloadVersion: 1,
+        payload: {},
+      };
+    }
+
+    /** Neither the stored details nor anything only they contain is on the wire. */
+    function expectWithheld(raw: string, secret: string) {
+      expect(raw).not.toContain(secret);
+      expect(raw).not.toContain("plan.archived");
+      expect(raw).not.toContain('"payloadVersion":2');
+    }
+
+    for (const { name, open } of adapters) {
+      it(`delivers each newer Event once as event.unavailable at its own cursor (${name})`, async () => {
+        const secret = canary();
+        const { projectId, all, future } = await mixedProject(secret);
+        await feedHorizonPassed(projectId);
+        const { db, counter } = instrumentedDb(api.testDb.db);
+        const reader = new SseReader(
+          (
+            await open(projectId, {
+              cursor: feedOriginCursor(projectId),
+              db,
+              // Batches of 3, and a day between polls that were not full.
+              settings: { pollIntervalMs: 86_400_000, batchMaxEvents: 3 },
+            })
+          ).body,
+        );
+        expect((await reader.next())?.frame).toEqual({ type: "ready" });
+        const frames = await reader.until((frame) => frame.id === all.at(-1)?.cursor);
+        expect(frames.every(isEvent)).toBe(true);
+        expect(
+          frames.map((frame) => [frame.frame?.type === "event" && frame.frame.event.id, frame.id]),
+        ).toEqual(all.map((row) => [row.id, row.cursor]));
+
+        const events = eventsOf(frames);
+        expect(events.slice(3, 7)).toEqual(future.map(unavailable));
+        expect([...events.slice(0, 3), ...events.slice(7)].map((event) => event.type)).toEqual([
+          "plan.created",
+          "task.added",
+          "session.started",
+          "plan.log_appended",
+        ]);
+        expectWithheld(reader.raw, secret);
+        for (const frame of frames) {
+          expect(Buffer.byteLength(frame.data ?? "")).toBeLessThanOrEqual(
+            MAX_EVENT_STREAM_FRAME_BYTES,
+          );
+        }
+        // The open, then batches of 3, 3 and 2: an unavailable Event counts
+        // toward the batch like any other.
+        expect(counter.transactions).toBe(4);
+        await reader.cancel();
+        await expectPoolReleased();
+      });
+
+      it(`resumes before and after an event.unavailable Event without a skip, repeat or loop (${name})`, async () => {
+        const secret = canary();
+        const { projectId, all, future } = await mixedProject(secret);
+        const [firstFuture] = future;
+        if (!firstFuture) throw new Error("expected newer rows");
+
+        // Dropped just before the first unavailable Event: it comes first.
+        const before = new SseReader((await open(projectId, { lastEventId: all[2]?.cursor })).body);
+        expect(await before.next()).toMatchObject({ id: all[2]?.cursor, frame: { type: "ready" } });
+        const replay = await before.until((frame) => frame.id === all.at(-1)?.cursor);
+        expect(replay.every(isEvent)).toBe(true);
+        expect(replay.map((frame) => frame.id)).toEqual(all.slice(3).map((row) => row.cursor));
+        expect(eventsOf(replay)[0]).toEqual(unavailable(firstFuture));
+        expectWithheld(before.raw, secret);
+        await before.cancel();
+
+        // Dropped on the last one: the known Event after it comes next, once,
+        // and the stream stays open with nothing more to send.
+        const after = new SseReader(
+          (
+            await open(projectId, {
+              lastEventId: all[6]?.cursor,
+              settings: { heartbeatIntervalMs: 50 },
+            })
+          ).body,
+        );
+        expect(await after.next()).toMatchObject({ id: all[6]?.cursor, frame: { type: "ready" } });
+        const next = await after.until((frame) => frame.id === all.at(-1)?.cursor);
+        expect(eventIds(next)).toEqual([all[7]?.id]);
+        expect(eventsOf(next)[0]?.type).toBe("plan.log_appended");
+        // Two heartbeats, so at least one poll ran after that Event.
+        const isHeartbeat = (frame: WireFrame) => frame.frame?.type === "heartbeat";
+        const quiet = [...(await after.until(isHeartbeat)), ...(await after.until(isHeartbeat))];
+        expect(quiet.every(isHeartbeat)).toBe(true);
+        expectWithheld(after.raw, secret);
+        await after.cancel();
+        await expectPoolReleased();
+      });
+
+      it(`stops at a stored payload over the writer's limit and never passes it (${name})`, async () => {
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+        const secret = canary();
+        const projectId = await api.createProject(owner);
+        const plan = await writeEvents(projectId, 1);
+        const corrupt = await insertFutureEvent(api.testDb.db, {
+          projectId,
+          type: "plan.log_appended",
+          payloadVersion: 1,
+          planId: plan.id,
+          payload: { message: `${secret} ${"x".repeat(MAX_EVENT_PAYLOAD_BYTES)}` },
+        });
+        await appendLog(projectId, plan.key);
+        const all = await feed(projectId);
+        expect(all.map((row) => row.id)[2]).toBe(corrupt.id);
+        expect(all).toHaveLength(4);
+        await feedHorizonPassed(projectId);
+        const blocked = new Set(all.slice(2).map((row) => row.cursor));
+
+        // From the origin, and again from the last Event it delivered.
+        for (const [start, delivered] of [
+          [{ cursor: feedOriginCursor(projectId) }, all.slice(0, 2)],
+          [{ lastEventId: all[1]?.cursor }, []],
+        ] as const) {
+          const reader = new SseReader((await open(projectId, start)).body);
+          expect((await reader.next())?.frame).toEqual({ type: "ready" });
+          const frames = await reader.rest();
+          expect(eventIds(frames)).toEqual(delivered.map((row) => row.id));
+          expect(frames.some((frame) => frame.id !== undefined && blocked.has(frame.id))).toBe(
+            false,
+          );
+          expect(frames.at(-1)?.event).toBe("error");
+          expect(JSON.parse(frames.at(-1)?.data ?? "{}")).toMatchObject({
+            code: "INTERNAL_SERVER_ERROR",
+            status: 500,
+          });
+          expect(reader.raw).not.toContain(secret);
+          await expectPoolReleased();
+        }
+
+        const logged = errors.mock.calls.flat().map(String).join("\n");
+        expect(logged).toContain(corrupt.id);
+        expect(logged).toContain("payload_too_large");
+        expect(logged).not.toContain(secret);
+      });
+    }
   });
 
   describe("access checked before every batch", () => {

@@ -1,8 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { eventPageSchema, unavailableEventSchema } from "@hivemind/contract";
 import { afterAll, describe, expect, it } from "vitest";
-import { createApiClient, createOriginFetch } from "../src/client.ts";
+import { createApiClient, createOriginFetch, lenientSchemas } from "../src/client.ts";
 import { createFileStore } from "../src/credentials/file.ts";
 import { CliError } from "../src/errors.ts";
 import {
@@ -248,6 +249,58 @@ describe("API client", () => {
     );
     expect(error.code).toBe("INVALID_RESPONSE");
     expect(error.message).toContain("larger than");
+  });
+});
+
+describe("Events the server cannot read", () => {
+  // After a rollback the server returns Events a newer deployment wrote as
+  // `event.unavailable` (ADR-0015, issue #15). The CLI reads them like any
+  // other Event, so a page mixing them with known Events still parses.
+  const SESSION_ID = "9d7c1f0a-2b3c-4d5e-8f60-718293a4b5c6";
+  const base = (seq: number) => ({
+    id: `00000000-0000-4000-8000-00000000000${seq}`,
+    projectId: PROJECT_ID,
+    seq: String(seq),
+    writerXid: String(1000 + seq),
+    actor: { kind: "user", userId: USER_PRINCIPAL.user.id },
+    actorSessionId: SESSION_ID,
+    planId: null,
+    taskId: null,
+    sessionId: SESSION_ID,
+    effectiveAt: "2026-10-05T12:00:00.000Z",
+    createdAt: "2026-10-05T12:00:00.000Z",
+  });
+  const mixedPage = {
+    items: [
+      {
+        ...base(3),
+        type: "session.ended",
+        payloadVersion: 1,
+        payload: { from: "active", summary: "Done" },
+      },
+      { ...base(2), type: "event.unavailable", payloadVersion: 1, payload: {} },
+      {
+        ...base(1),
+        type: "session.started",
+        payloadVersion: 1,
+        payload: { agent: "claude", intent: "Read" },
+      },
+    ],
+    nextCursor: "c2Vx",
+  };
+
+  it("parses a page mixing known and unavailable Events with the lenient schema", () => {
+    // The fixture is what the server's contract returns.
+    expect(eventPageSchema.parse(mixedPage)).toEqual(mixedPage);
+    expect(unavailableEventSchema.parse(mixedPage.items[1])).toEqual(mixedPage.items[1]);
+    expect(lenientSchemas.eventPage.parse(mixedPage)).toEqual(mixedPage);
+  });
+
+  it("returns the mixed page from the API unchanged", async () => {
+    const server = await serve((_request, response) => sendJson(response, 200, mixedPage));
+    const api = createApiClient({ origin: server.origin, credential: credential(server.origin) });
+    expect(await api.listSessionEvents(PROJECT_ID, SESSION_ID)).toEqual(mixedPage);
+    expect(await api.listPlanLog(PROJECT_ID, "PLAN-1")).toEqual(mixedPage);
   });
 });
 

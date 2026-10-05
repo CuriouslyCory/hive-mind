@@ -8,6 +8,8 @@ import {
   compareTouchedPaths,
   exitCodeForEnvelope,
   touchedPathsContentHash,
+  UNAVAILABLE_EVENT_TYPE,
+  unavailableEventSchema,
 } from "@hivemind/contract";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCredentialManager } from "../src/credentials/manager.ts";
@@ -559,6 +561,46 @@ describe("session", () => {
     expect((await run(["session", "log", id])).stdout).toContain(`  Session ${id}`);
     expect((await json(["session", "log", id, "--cursor", "not a cursor!"])).code).toBe(1);
     expect((await json(["session", "log", id, "--session", id])).code).toBe(1);
+  });
+
+  it("reads an Event the server cannot read in session log, session show and plan log", async () => {
+    const id = await startSession();
+    const as = withSession(id);
+    for (const title of ["One", "Two"]) await json(["plan", "create", "--title", title], as);
+    // The middle Event as a server after a rollback returns one a newer
+    // deployment wrote: its type and payload withheld (ADR-0015, issue #15).
+    const stored = api.coordination.events.find((event) => event.type === "plan.created");
+    if (!stored) throw new Error("Expected the first plan.created Event.");
+    Object.assign(stored, { projectId: project.id, type: UNAVAILABLE_EVENT_TYPE, payload: {} });
+    const expected = unavailableEventSchema.parse(JSON.parse(JSON.stringify(stored)));
+    const line = `${stored.createdAt}  #${stored.seq}  event.unavailable  Session ${id}\n`;
+    const mixed = ["plan.created", UNAVAILABLE_EVENT_TYPE, "session.started"];
+
+    const log = await json(["session", "log", id]);
+    expect(log.code).toBe(0);
+    const items = at<{ type: string }[]>(log.data, "items");
+    expect(items.map((event) => event.type)).toEqual(mixed);
+    expect(items[1]).toEqual(expected);
+    const human = await run(["session", "log", id]);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain(line);
+    expect(human.stdout).toMatch(/ {2}#\d+ {2}plan\.created {2}Session /);
+    expect(human.stdout).toMatch(/ {2}#\d+ {2}session\.started {2}Session /);
+
+    const show = await json(["session", "show", id]);
+    expect(show.code).toBe(0);
+    const shown = at<{ type: string }[]>(show.data, "events.items");
+    expect(shown.map((event) => event.type)).toEqual(mixed);
+    expect(shown[1]).toEqual(expected);
+    const showHuman = await run(["session", "show", id]);
+    expect(showHuman.code).toBe(0);
+    expect(showHuman.stdout).toContain(`Events:\n`);
+    expect(showHuman.stdout).toContain(line);
+
+    const planLog = await json(["plan", "log", "PLAN-1"]);
+    expect(planLog.code).toBe(0);
+    expect(at<unknown[]>(planLog.data, "items")).toEqual([expected]);
+    expect((await run(["plan", "log", "PLAN-1"])).stdout).toBe(line);
   });
 });
 
