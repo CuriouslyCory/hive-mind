@@ -10,17 +10,21 @@ import { z } from "zod";
 // are strict: an unknown key (a misspelled field in an agent's JSON) is an
 // error, not silently dropped.
 
-const shortText = z.string().trim().min(1).max(250);
-const longText = z.string().trim().min(1).max(20_000);
+/** Text Postgres can store: it rejects NUL (U+0000) in a text column. */
+const text = () => z.string().refine((value) => !value.includes("\u0000"), "Must not contain NUL");
+const shortText = text().trim().min(1).max(250);
+const longText = text().trim().min(1).max(20_000);
 /** Optional prose: null, or trimmed text. An empty string is stored as null. */
-const optionalText = z
-  .string()
+const optionalText = text()
   .trim()
   .max(20_000)
   .nullable()
   .transform((value) => value || null);
+/** The largest value a Postgres `integer` column holds. */
+const MAX_INTEGER = 2_147_483_647;
+const githubNumber = z.number().int().positive().max(MAX_INTEGER);
 const prNumbers = z
-  .array(z.number().int().positive())
+  .array(githubNumber)
   .max(100)
   .transform((numbers) => [...new Set(numbers)]);
 const sortOrder = z.number().int().min(0).max(10_000);
@@ -29,7 +33,7 @@ const rowId = z.uuid();
 const updatedAt = z.iso.datetime({ offset: true });
 const dateOnly = z.iso.date();
 const dateTime = z.iso.datetime({ offset: true });
-const issueNumber = z.number().int().positive();
+const issueNumber = githubNumber;
 const publishedUrl = z
   .union([z.httpUrl(), z.literal("")])
   .nullable()
@@ -39,6 +43,13 @@ const commitSha = z
   .regex(/^[0-9a-f]{40}$/, "Expected a full 40-character lowercase commit SHA")
   .nullable();
 
+/** Refuses `updatedAt` on a create: it only conditions an update of an existing row. */
+function updatedAtNeedsId(input: { id?: string; updatedAt?: string }, ctx: z.RefinementCtx) {
+  if (input.id === undefined && input.updatedAt !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["updatedAt"], message: "Only allowed with id" });
+  }
+}
+
 const stepFields = {
   key: shortText,
   label: shortText,
@@ -46,15 +57,17 @@ const stepFields = {
   sortOrder,
 };
 
-export const saveChangelogEntryInput = z.strictObject({
-  id: rowId.optional(),
-  updatedAt: updatedAt.optional(),
-  date: dateOnly,
-  category: shortText,
-  title: shortText,
-  summary: longText,
-  prNumbers,
-});
+export const saveChangelogEntryInput = z
+  .strictObject({
+    id: rowId.optional(),
+    updatedAt: updatedAt.optional(),
+    date: dateOnly,
+    category: shortText,
+    title: shortText,
+    summary: longText,
+    prNumbers,
+  })
+  .superRefine(updatedAtNeedsId);
 
 export const deleteChangelogEntryInput = z.strictObject({
   id: rowId,
@@ -79,20 +92,23 @@ export const saveBlogIdeaInput = z
   .refine((input) => input.id === undefined || input.updatedAt !== undefined, {
     path: ["updatedAt"],
     message: "Required when id is given",
-  });
+  })
+  .superRefine(updatedAtNeedsId);
 
 export const deleteBlogIdeaInput = z.strictObject({
   id: rowId,
   updatedAt,
 });
 
-export const savePhaseInput = z.strictObject({
-  id: rowId.optional(),
-  updatedAt: updatedAt.optional(),
-  title: shortText,
-  description: optionalText,
-  sortOrder,
-});
+export const savePhaseInput = z
+  .strictObject({
+    id: rowId.optional(),
+    updatedAt: updatedAt.optional(),
+    title: shortText,
+    description: optionalText,
+    sortOrder,
+  })
+  .superRefine(updatedAtNeedsId);
 
 export const deletePhaseInput = z.strictObject({
   id: rowId,
@@ -139,12 +155,14 @@ export const deleteIssueInput = z.strictObject({
   updatedAt: updatedAt.optional(),
 });
 
-export const saveStepInput = z.strictObject({
-  id: rowId.optional(),
-  updatedAt: updatedAt.optional(),
-  issueNumber,
-  ...stepFields,
-});
+export const saveStepInput = z
+  .strictObject({
+    id: rowId.optional(),
+    updatedAt: updatedAt.optional(),
+    issueNumber,
+    ...stepFields,
+  })
+  .superRefine(updatedAtNeedsId);
 
 export const deleteStepInput = z.strictObject({
   id: rowId,

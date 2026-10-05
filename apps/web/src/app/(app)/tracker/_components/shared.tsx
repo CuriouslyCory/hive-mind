@@ -42,6 +42,13 @@ export function TimeText({ iso }: { iso: string }) {
   );
 }
 
+const dayFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
+
+/** A calendar date stored as `YYYY-MM-DD`, as "October 2, 2026". */
+export function DateText({ date }: { date: string }) {
+  return <time dateTime={date}>{dayFormat.format(new Date(`${date}T00:00:00Z`))}</time>;
+}
+
 export function PrLinks({ numbers }: { numbers: readonly number[] }) {
   if (numbers.length === 0) return null;
   return (
@@ -174,6 +181,8 @@ export function useEditor<T>() {
 /**
  * A button that asks once more in place, rather than in a dialog, before an
  * action that cannot be undone. `context` names the row, for screen readers.
+ * The confirm button is disabled while the action runs, so a double click
+ * sends it once; `aria-disabled` rather than `disabled` keeps it focused.
  */
 export function ConfirmButton({
   label,
@@ -190,6 +199,9 @@ export function ConfirmButton({
   onConfirm: () => Promise<boolean>;
 }) {
   const [armed, setArmed] = useState(false);
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const questionId = useId();
   const confirmRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasArmed = useRef(false);
@@ -210,15 +222,25 @@ export function ConfirmButton({
   }
   return (
     <span className="tracker-confirm">
-      <span>{confirmText}</span>{" "}
+      <span id={questionId}>{confirmText}</span>{" "}
       <button
         ref={confirmRef}
         type="button"
         className="tracker-danger"
+        aria-describedby={questionId}
+        aria-disabled={pending}
         onClick={() => {
-          void onConfirm().then((done) => {
-            if (!done) setArmed(false);
-          });
+          if (pendingRef.current) return;
+          pendingRef.current = true;
+          setPending(true);
+          void onConfirm()
+            .then((done) => {
+              if (!done) setArmed(false);
+            })
+            .finally(() => {
+              pendingRef.current = false;
+              setPending(false);
+            });
         }}
       >
         {confirmLabel}

@@ -24,9 +24,10 @@ import {
 
 const USAGE = `Usage: pnpm tracker <command>
 
-Reads and writes the dev tracker in the database DATABASE_URL names
-(apps/web/.env.local is loaded when it exists). Mutating commands read one
-JSON value from stdin. Output is JSON on stdout; errors are
+Reads and writes the dev tracker in the database DATABASE_URL names. The
+pnpm tracker script loads apps/web/.env.local when it exists; running cli.ts
+with node directly does not, so set DATABASE_URL yourself. Mutating commands
+read one JSON value from stdin. Output is JSON on stdout; errors are
 {"error": {"kind", "message"}} on stderr with exit 1 (2 for usage errors).
 
 Reads:
@@ -74,20 +75,27 @@ function writeError(kind: CliErrorKind, message: string): void {
   process.stderr.write(`${JSON.stringify({ error: { kind, message } })}\n`);
 }
 
+/** How many causes `describeFailure` follows: a batch wraps Drizzle's error, which wraps pg's. */
+const MAX_CAUSE_DEPTH = 3;
+
 /**
- * The message and code of an unexpected failure and of its cause (Drizzle
- * wraps pg's error), never the objects: pg errors can carry connection
- * parameters, password included.
+ * The message and code of an unexpected failure and of up to three levels of
+ * its causes (a batch wraps Drizzle's error, which wraps pg's), never the
+ * objects: pg errors can carry connection parameters, password included.
  */
-function describeFailure(error: unknown): string {
+export function describeFailure(error: unknown): string {
   if (!(error instanceof Error)) return "Unknown failure.";
   const describe = (e: Error) => {
     const code = "code" in e && typeof e.code === "string" ? ` (${e.code})` : "";
     return `${e.message}${code}`;
   };
-  return error.cause instanceof Error
-    ? `${describe(error)} Cause: ${describe(error.cause)}`
-    : describe(error);
+  const parts = [describe(error)];
+  let cause: unknown = error.cause;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && cause instanceof Error; depth++) {
+    parts.push(`Cause: ${describe(cause)}`);
+    cause = cause.cause;
+  }
+  return parts.join(" ");
 }
 
 async function readStdinJson(): Promise<unknown> {
@@ -151,7 +159,10 @@ async function main(argv: string[]): Promise<number> {
   }
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
-    writeError("usage", "DATABASE_URL is not set (it is read from apps/web/.env.local).");
+    writeError(
+      "usage",
+      "DATABASE_URL is not set (pnpm tracker reads it from apps/web/.env.local).",
+    );
     return 2;
   }
 

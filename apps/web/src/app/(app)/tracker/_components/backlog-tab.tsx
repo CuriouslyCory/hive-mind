@@ -8,7 +8,7 @@ import type {
   TrackerScanView,
 } from "@hivemind/tracker";
 import { issueUrl } from "@hivemind/tracker/constants";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IssueForm, PhaseForm, StepForm } from "./backlog-forms";
 import { useTracker } from "./runner";
 import { ScanCard } from "./scan-card";
@@ -19,6 +19,7 @@ import { DeleteButton, nextSortOrder, TimeText, useEditor } from "./shared";
 // complete.
 
 const ADD_PHASE_ID = "tracker-add-phase";
+const UP_NEXT_HEADING_ID = "tracker-up-next";
 
 type BacklogEdit =
   | { kind: "phase"; phase: BacklogPhaseView | null }
@@ -27,9 +28,10 @@ type BacklogEdit =
 
 type Editor = ReturnType<typeof useEditor<BacklogEdit>>;
 
-/** An issue with nothing left to do: closed, or every step complete. */
+/** An issue with nothing left to do: closed, or with steps that are all complete. */
 function isFinished(issue: BacklogIssueView): boolean {
-  return issue.state === "closed" || issue.steps.every((step) => step.completedAt !== null);
+  if (issue.state === "closed") return true;
+  return issue.steps.length > 0 && issue.steps.every((step) => step.completedAt !== null);
 }
 
 function addIssueId(phase: BacklogPhaseView): string {
@@ -53,9 +55,34 @@ export function BacklogTab({
   const [hideFinished, setHideFinished] = useState(false);
   const steps = phases.flatMap((phase) => phase.issues.flatMap((issue) => issue.steps));
   const done = steps.filter((step) => step.completedAt !== null).length;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const lastFocused = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement) lastFocused.current = event.target;
+    };
+    root.addEventListener("focusin", onFocusIn);
+    return () => root.removeEventListener("focusin", onFocusIn);
+  }, []);
+
+  // A refresh can remove the focused control: completing an issue's last step
+  // while completed issues are hidden removes its checkbox. Focus then moves
+  // to Up next, which names the step after it, instead of falling to <body>.
+  useEffect(() => {
+    const last = lastFocused.current;
+    if (last === null || last.isConnected) return;
+    lastFocused.current = null;
+    const active = document.activeElement;
+    if (active === null || active === document.body) {
+      document.getElementById(UP_NEXT_HEADING_ID)?.focus();
+    }
+  });
 
   return (
-    <>
+    <div ref={rootRef}>
       <div className="tracker-grid">
         <UpNext next={nextStep} />
         <ScanCard kind="backlog" scan={scan} />
@@ -99,15 +126,17 @@ export function BacklogTab({
           hideFinished={hideFinished}
         />
       ))}
-    </>
+    </div>
   );
 }
 
 function UpNext({ next }: { next: NextStepView | null }) {
   const { copyPrompt, setStepComplete } = useTracker();
   return (
-    <section className="tracker-card tracker-next" aria-labelledby="tracker-up-next">
-      <h2 id="tracker-up-next">Up next</h2>
+    <section className="tracker-card tracker-next" aria-labelledby={UP_NEXT_HEADING_ID}>
+      <h2 id={UP_NEXT_HEADING_ID} tabIndex={-1}>
+        Up next
+      </h2>
       {next ? (
         <>
           <p>

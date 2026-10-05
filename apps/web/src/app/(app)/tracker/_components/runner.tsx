@@ -2,7 +2,7 @@
 
 import type { BacklogStepView, TrackerCommandInput, TrackerCommandName } from "@hivemind/tracker";
 import { useRouter } from "next/navigation";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useRef, useState } from "react";
 import { runTrackerAction } from "../actions";
 
 // How the tracker's components write: every command goes through the page's
@@ -70,7 +70,24 @@ async function copyText(content: string): Promise<void> {
 /** The runner for the page, and the status line's current text. */
 export function useTrackerRunner(): [TrackerRunner, TrackerStatus | null] {
   const router = useRouter();
-  const [status, setStatus] = useState<TrackerStatus | null>(null);
+  const [status, setStatusText] = useState<TrackerStatus | null>(null);
+  const shown = useRef<TrackerStatus | null>(null);
+
+  // A live region announces a change of its text, so the same message twice
+  // in a row (copying one prompt again) is cleared first and set again a
+  // moment later, after the empty line has rendered.
+  function setStatus(next: TrackerStatus) {
+    const repeated = shown.current?.text === next.text;
+    shown.current = next;
+    if (!repeated) {
+      setStatusText(next);
+      return;
+    }
+    setStatusText(null);
+    setTimeout(() => {
+      if (shown.current === next) setStatusText(next);
+    }, 100);
+  }
 
   async function run<N extends TrackerCommandName>(
     command: N,

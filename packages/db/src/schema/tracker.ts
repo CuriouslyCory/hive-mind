@@ -73,8 +73,8 @@ export const trackerBlogIdea = pgTable(
     notes: text(),
     prNumbers: integer().array().notNull().default([]),
     status: text({ enum: TRACKER_BLOG_STATUSES }).notNull().default("idea"),
-    // Set exactly while published.
-    publishedAt: timestamptz(),
+    // The publication date (YYYY-MM-DD); set exactly while published.
+    publishedAt: date({ mode: "string" }),
     publishedUrl: text(),
     sortOrder: integer().notNull().default(0),
     createdAt: createdAt(),

@@ -1,9 +1,11 @@
 "use client";
 
 import type { BlogIdeaView, BlogStatus } from "@hivemind/tracker";
+import { useState } from "react";
 import { useTracker } from "./runner";
 import {
   ConfirmButton,
+  DateText,
   DeleteButton,
   EditorForm,
   Field,
@@ -12,13 +14,14 @@ import {
   nextSortOrder,
   PrLinks,
   parsePrNumbers,
-  TimeText,
   useEditor,
 } from "./shared";
 
 // The Blog tab (docs/tracker.md → Blog). A published idea is locked: its
 // form disables every field but the publication date, URL and order, and it
-// has no Delete button. `@hivemind/tracker` enforces the same rules.
+// has no Delete button. The publication date and URL are enabled only while
+// the status is Published, since the store discards them otherwise.
+// `@hivemind/tracker` enforces the same rules.
 
 const ADD_IDEA_ID = "tracker-add-idea";
 
@@ -95,7 +98,7 @@ function Idea({
             {idea.publishedAt ? (
               <>
                 {" "}
-                on <TimeText iso={idea.publishedAt} />
+                on <DateText date={idea.publishedAt} />
               </>
             ) : null}
             <span className="muted"> · order {idea.sortOrder}</span>
@@ -179,13 +182,14 @@ function IdeaForm({
 }) {
   const { run } = useTracker();
   const locked = idea?.status === "published" ? idea : null;
+  const [status, setStatus] = useState<BlogStatus>(idea?.status ?? "idea");
+  const publishing = status === "published";
   return (
     <EditorForm
       title={idea ? (locked ? "Edit publication details" : "Edit idea") : "New blog idea"}
       submitLabel="Save idea"
       onCancel={onClose}
       onSave={async (data) => {
-        const status = BLOG_STATUSES.find((value) => value === formText(data, "status")) ?? "idea";
         const saved = await run(
           "save-blog-idea",
           {
@@ -196,7 +200,7 @@ function IdeaForm({
             pitch: locked ? locked.pitch : formText(data, "pitch"),
             notes: locked ? locked.notes : formText(data, "notes"),
             prNumbers: locked ? locked.prNumbers : parsePrNumbers(formText(data, "prNumbers")),
-            status: locked ? "published" : status,
+            status,
             publishedAt: formText(data, "publishedAt") || null,
             publishedUrl: formText(data, "publishedUrl"),
             sortOrder: formNumber(data, "sortOrder"),
@@ -262,7 +266,12 @@ function IdeaForm({
             {...props}
             name="status"
             disabled={locked !== null}
-            defaultValue={idea?.status ?? "idea"}
+            value={status}
+            onChange={(event) =>
+              setStatus(
+                BLOG_STATUSES.find((value) => value === event.currentTarget.value) ?? "idea",
+              )
+            }
           >
             {BLOG_STATUSES.map((value) => (
               <option key={value} value={value}>
@@ -287,24 +296,26 @@ function IdeaForm({
       </Field>
       <Field
         label="Published date"
-        hint="Published ideas only; empty means today or the stored date."
+        hint="Status Published only; empty means today or the stored date."
       >
         {(props) => (
           <input
             {...props}
             name="publishedAt"
             type="date"
-            defaultValue={idea?.publishedAt?.slice(0, 10) ?? ""}
+            disabled={!publishing}
+            defaultValue={idea?.publishedAt ?? ""}
           />
         )}
       </Field>
-      <Field label="Published URL" hint="Published ideas only.">
+      <Field label="Published URL" hint="Status Published only.">
         {(props) => (
           <input
             {...props}
             name="publishedUrl"
             type="url"
             placeholder="https://"
+            disabled={!publishing}
             defaultValue={idea?.publishedUrl ?? ""}
           />
         )}

@@ -4,6 +4,7 @@ import type { ChangelogEntryView, TrackerScanView } from "@hivemind/tracker";
 import { useTracker } from "./runner";
 import { ScanCard } from "./scan-card";
 import {
+  DateText,
   DeleteButton,
   EditorForm,
   Field,
@@ -17,8 +18,6 @@ import {
 // merge date, newest first, as the snapshot orders them.
 
 const ADD_ENTRY_ID = "tracker-add-entry";
-
-const dayFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
 
 function groupByDate(entries: readonly ChangelogEntryView[]): [string, ChangelogEntryView[]][] {
   const groups = new Map<string, ChangelogEntryView[]>();
@@ -62,7 +61,7 @@ export function ChangelogTab({
       {groupByDate(entries).map(([date, dayEntries]) => (
         <section key={date} aria-labelledby={`tracker-day-${date}`}>
           <h2 id={`tracker-day-${date}`} className="tracker-day">
-            <time dateTime={date}>{dayFormat.format(new Date(`${date}T00:00:00Z`))}</time>
+            <DateText date={date} />
           </h2>
           {dayEntries.map((entry) => (
             <Entry

@@ -1,5 +1,6 @@
 import { getTrackerSnapshot } from "@hivemind/tracker";
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { getDb } from "../../../server/db";
 import { requireTrackerAccess } from "../../../server/tracker-access";
@@ -13,9 +14,12 @@ export const metadata: Metadata = {
 };
 
 // `/tracker`: the dev tracker (docs/tracker.md), a 404 outside local
-// `next dev`. The heading is the static shell; the access check, `?tab=` and
-// the snapshot are request-time reads, inside Suspense.
+// `next dev`. NODE_ENV is inlined at build time, so a production build
+// prerenders the 404 with its status; checking it inside Suspense would stream
+// a 200 first. The heading is the static shell; the host and login session
+// checks, `?tab=` and the snapshot are request-time reads, inside Suspense.
 export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
+  if (process.env.NODE_ENV !== "development") notFound();
   return (
     <main className="tracker">
       <h1>Development tracker</h1>

@@ -43,7 +43,7 @@ CREATE TABLE "tracker_blog_idea" (
 	"notes" text,
 	"pr_numbers" integer[] DEFAULT '{}' NOT NULL,
 	"status" text DEFAULT 'idea' NOT NULL,
-	"published_at" timestamp with time zone,
+	"published_at" date,
 	"published_url" text,
 	"sort_order" integer DEFAULT 0 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,

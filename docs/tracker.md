@@ -12,7 +12,9 @@ The page and its server action respond only when all of these hold (`trackerPage
 - `VERCEL_ENV` is unset or `development`;
 - the request's host is `localhost`, `127.0.0.1` or `[::1]`, on any port.
 
-Everywhere else the route is a 404 for a signed-in User: production, preview deployments, `next start` (including the browser tests' `E2E_SERVER=start`), and `next dev` reached through any other host name. Without a login session cookie, the proxy (`apps/web/src/proxy.ts`) redirects to `/sign-in` first, as it does for every page. Any signed-in User can use it. Sign-in works only on `localhost:3000` (see `README.md` → Local development), so use that host. The page tells search engines not to index it.
+Outside `next dev`, a production build answers `/tracker` with HTTP 404: in production, in preview deployments and under `next start` (including the browser tests' `E2E_SERVER=start`). Under `next dev`, any other host name also gets a 404. In every case a visitor without a login session cookie is first redirected to `/sign-in` by the proxy (`apps/web/src/proxy.ts`), as on every page. Any signed-in User can use the page. Sign-in works only on `localhost:3000` (see `README.md` → Local development), so use that host. The page tells search engines not to index it.
+
+`next dev` listens on every interface, and the host check is not a network boundary: anyone on your network can reach the server and send `Host: localhost:3000`. The login session check still applies; to keep the server on loopback, run `pnpm dev -- --hostname 127.0.0.1`.
 
 ## Where the data lives
 
@@ -32,6 +34,7 @@ The page has three tabs. The selected tab is in the URL: `?tab=backlog` (the def
 Phases in order, each holding GitHub issues in order, each holding ordered steps. An issue shows its number (linked to GitHub), title, note and state (`open` or `closed`). A step shows its label, its prompt with a copy button, and when it was completed.
 
 - Each prompt is written to be pasted as the first message of a fresh Claude Code conversation. Copying a step's prompt marks the step complete.
+- **Hide completed issues** hides closed issues and open issues whose steps are all complete. An open issue with no steps is not completed, so it stays visible.
 - **Up next**, at the top of the tab, shows the first unfinished step of the first open issue, in phase order and then issue order, with its copy button.
 - A new issue gets two steps by default, `plan` and `implement` (`defaultBacklogSteps` in `packages/tracker/src/backlog-steps.ts`); `/tracker-backlog-review` rewrites them for the issue.
 - Deleting an issue deletes its steps. A phase can be deleted only when it has no issues.
@@ -45,13 +48,15 @@ User-facing changes grouped by UTC merge date, newest first. Each entry has a ca
 
 Ideas for announcement posts, ordered by `sortOrder`, each with a title, a pitch, optional notes, the PR numbers it announces, and a status: `idea`, `draft` or `published`.
 
-- An idea that becomes `published` without a date is given the current time as its publication date. Only a published idea has a publication date and URL.
+- The publication date is a `YYYY-MM-DD` date, in the snapshot and in `save-blog-idea` alike, so a snapshot row can be sent back unchanged. An idea that becomes `published` without a date is given today's UTC date. Only a published idea has a publication date and URL.
 - A published idea is locked: only its publication date, URL and order can change. It can never return to `idea` or `draft`, and it can never be deleted.
 - Changing or deleting a blog idea requires the `updatedAt` it was read at.
 
 ### Concurrent edits
 
-Every update and delete can carry the row's `updatedAt` as it was read; the page always sends it. If the row has changed since then, the write is refused with "changed since you read it; refresh", and nothing is written.
+Every save and delete of an existing row can carry the row's `updatedAt` as it was read; the page always sends it. If the row has changed since then, the write is refused with "changed since you read it; refresh", and nothing is written. A create cannot carry `updatedAt`.
+
+The exception is `set-step-complete`, which takes no `updatedAt`: the last write wins, and completing a step that is already complete keeps its first completion time.
 
 ### Scan cards
 
@@ -96,7 +101,7 @@ pnpm tracker save-phase <<'JSON'
 JSON
 ```
 
-Omit `id` to create a row; pass `id` to update it. `updatedAt` is optional except where noted; when given, a row that changed since then is refused. Each save takes the full row, and an unknown field is an `input` error rather than being ignored.
+Omit `id` to create a row; pass `id` to update it. `updatedAt` is allowed only with `id` (or `mode: update`) and is optional except where noted; when given, a row that changed since then is refused. Each save takes the full row, and an unknown field is an `input` error rather than being ignored.
 
 | Command | Input | Result |
 |---|---|---|
@@ -113,7 +118,7 @@ Omit `id` to create a row; pass `id` to update it. `updatedAt` is optional excep
 | `set-step-complete` | `{ id, complete }` | `{ id, completedAt }` |
 | `record-scan` | `{ kind, throughAt, throughSha, note }`; `kind` is `git_history` or `backlog` | `{ id }` |
 
-Input formats: ids are UUIDs; `updatedAt`, `throughAt` and `githubUpdatedAt` are ISO 8601 date-times with an offset or `Z`; `date` and `publishedAt` are `YYYY-MM-DD` (`publishedAt` is `null` while unpublished, and `null` on a published idea keeps its stored date); `prNumbers` are positive integers (at most 100, duplicates removed); `sortOrder` is 0 to 10000; `throughSha` is 40 lowercase hex characters or `null`; `publishedUrl` is an http(s) URL, or `null` or an empty string for none. Titles, categories, keys and labels are 1 to 250 characters; summaries and pitches 1 to 20,000; optional text (`notes`, `note`, `description`, `prompt`) is up to 20,000 characters or `null`, and an empty string is stored as `null`. Text is trimmed.
+Input formats: ids are UUIDs; `updatedAt`, `throughAt` and `githubUpdatedAt` are ISO 8601 date-times with an offset or `Z`; `date` and `publishedAt` are `YYYY-MM-DD` (`publishedAt` is `null` while unpublished, and `null` on a published idea keeps its stored date); `issueNumber` and each of `prNumbers` are positive integers up to 2147483647 (`prNumbers` at most 100, duplicates removed); `sortOrder` is 0 to 10000; `throughSha` is 40 lowercase hex characters or `null`; `publishedUrl` is an http(s) URL, or `null` or an empty string for none. Titles, categories, keys and labels are 1 to 250 characters; summaries and pitches 1 to 20,000; optional text (`notes`, `note`, `description`, `prompt`) is up to 20,000 characters or `null`, and an empty string is stored as `null`. Text is trimmed.
 
 ### Batch
 

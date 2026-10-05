@@ -35,6 +35,7 @@ export interface BlogIdeaView {
   notes: string | null;
   prNumbers: number[];
   status: BlogStatus;
+  /** The publication date, `YYYY-MM-DD`; null unless published. */
   publishedAt: string | null;
   publishedUrl: string | null;
   sortOrder: number;

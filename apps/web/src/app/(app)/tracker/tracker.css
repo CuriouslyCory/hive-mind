@@ -34,6 +34,12 @@
   color: #a51d2d;
 }
 
+/* A confirm button whose action is running (aria-disabled keeps its focus). */
+.tracker button[aria-disabled="true"] {
+  cursor: progress;
+  opacity: 0.7;
+}
+
 .tracker input:not([type="checkbox"]),
 .tracker textarea,
 .tracker select {

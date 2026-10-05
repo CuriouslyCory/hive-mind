@@ -131,9 +131,19 @@ function changedError(what: string): TrackerConflictError {
   return new TrackerConflictError(`${what} changed since you read it; refresh and try again.`);
 }
 
-/** A UTC midnight timestamp for a `YYYY-MM-DD` date. */
-function utcDate(date: string): Date {
-  return new Date(`${date}T00:00:00.000Z`);
+/** Today's UTC date as `YYYY-MM-DD`. */
+const todayUtc = () => new Date().toISOString().slice(0, 10);
+
+/** Whether `error`, or the driver error Drizzle wraps in its `cause`, violated the unique `constraint`. */
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+  const candidates = [error, (error as { cause?: unknown } | null)?.cause];
+  return candidates.some(
+    (candidate) =>
+      typeof candidate === "object" &&
+      candidate !== null &&
+      (candidate as { code?: unknown }).code === "23505" &&
+      (candidate as { constraint?: unknown }).constraint === constraint,
+  );
 }
 
 const iso = (value: Date) => value.toISOString();
@@ -269,7 +279,7 @@ export async function getTrackerSnapshot(db: Db): Promise<TrackerSnapshot> {
           notes: idea.notes,
           prNumbers: idea.prNumbers,
           status: idea.status,
-          publishedAt: isoOrNull(idea.publishedAt),
+          publishedAt: idea.publishedAt,
           publishedUrl: idea.publishedUrl,
           sortOrder: idea.sortOrder,
           updatedAt: iso(idea.updatedAt),
@@ -395,12 +405,8 @@ export async function saveBlogIdea(tx: Transaction, raw: unknown): Promise<{ id:
     notes: input.notes,
     prNumbers: input.prNumbers,
     status: input.status,
-    // Becoming published without a date means published now.
-    publishedAt: published
-      ? input.publishedAt
-        ? utcDate(input.publishedAt)
-        : (previous?.publishedAt ?? new Date())
-      : null,
+    // Becoming published without a date means published today (UTC).
+    publishedAt: published ? (input.publishedAt ?? previous?.publishedAt ?? todayUtc()) : null,
     publishedUrl: published ? input.publishedUrl : null,
     sortOrder: input.sortOrder,
   };
@@ -633,6 +639,8 @@ export async function saveStep(tx: Transaction, raw: unknown): Promise<{ id: str
     }
     assertUnchanged(step.updatedAt, input.updatedAt, "The step");
   }
+  const duplicateKey = () =>
+    new TrackerRuleError(`Issue #${input.issueNumber} already has a step with key "${input.key}".`);
   const [sameKey] = await tx
     .select({ id: trackerBacklogStep.id })
     .from(trackerBacklogStep)
@@ -643,11 +651,7 @@ export async function saveStep(tx: Transaction, raw: unknown): Promise<{ id: str
         input.id === undefined ? undefined : ne(trackerBacklogStep.id, input.id),
       ),
     );
-  if (sameKey) {
-    throw new TrackerRuleError(
-      `Issue #${input.issueNumber} already has a step with key "${input.key}".`,
-    );
-  }
+  if (sameKey) throw duplicateKey();
 
   const values = {
     key: input.key,
@@ -655,25 +659,36 @@ export async function saveStep(tx: Transaction, raw: unknown): Promise<{ id: str
     prompt: input.prompt,
     sortOrder: input.sortOrder,
   };
+  // A step with the same key committed after the check above is refused like
+  // one found by it: the insert skips it, and the update fails the constraint.
   if (input.id === undefined) {
     const [row] = await tx
       .insert(trackerBacklogStep)
       .values({ ...values, issueId: issue.id, updatedAt: nowMs() })
+      .onConflictDoNothing({ target: [trackerBacklogStep.issueId, trackerBacklogStep.key] })
       .returning({ id: trackerBacklogStep.id });
-    return { id: insertedId(row) };
+    if (!row) throw duplicateKey();
+    return { id: row.id };
   }
+  const id = input.id;
   const [row] = await tx
     .update(trackerBacklogStep)
     .set({ ...values, updatedAt: nextUpdatedAt(trackerBacklogStep.updatedAt) })
     .where(
       and(
-        eq(trackerBacklogStep.id, input.id),
+        eq(trackerBacklogStep.id, id),
         unchangedSince(trackerBacklogStep.updatedAt, input.updatedAt),
       ),
     )
-    .returning({ id: trackerBacklogStep.id });
-  if (!row) await refuseStepWrite(tx, input.id);
-  return { id: input.id };
+    .returning({ id: trackerBacklogStep.id })
+    .catch((error: unknown) => {
+      if (isUniqueViolation(error, "tracker_backlog_step_issue_id_key_unique")) {
+        throw duplicateKey();
+      }
+      throw error;
+    });
+  if (!row) await refuseStepWrite(tx, id);
+  return { id };
 }
 
 export async function deleteStep(tx: Transaction, raw: unknown): Promise<{ id: string }> {

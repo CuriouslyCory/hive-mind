@@ -281,11 +281,11 @@ describeDb("blog ideas", () => {
       publishedUrl: null,
     });
 
-    const before = Date.now();
+    const before = new Date().toISOString().slice(0, 10);
     const published = await run("save-blog-idea", { ...blogIdea, status: "published" });
-    const publishedAt = Date.parse((await findBlogIdea(published.id)).publishedAt ?? "");
-    expect(publishedAt).toBeGreaterThanOrEqual(before - 1_000);
-    expect(publishedAt).toBeLessThanOrEqual(Date.now() + 1_000);
+    const publishedAt = (await findBlogIdea(published.id)).publishedAt;
+    // Today's UTC date (or tomorrow's, if the test ran across midnight).
+    expect([before, new Date().toISOString().slice(0, 10)]).toContain(publishedAt);
 
     const dated = await run("save-blog-idea", {
       ...blogIdea,
@@ -294,9 +294,22 @@ describeDb("blog ideas", () => {
       publishedUrl: "",
     });
     expect(await findBlogIdea(dated.id)).toMatchObject({
-      publishedAt: "2026-09-01T00:00:00.000Z",
+      publishedAt: "2026-09-01",
       publishedUrl: null,
     });
+  });
+
+  it("accepts a snapshot row back into save-blog-idea unchanged", async () => {
+    const { id } = await run("save-blog-idea", {
+      ...blogIdea,
+      status: "published",
+      publishedAt: "2026-09-04",
+      publishedUrl: "https://example.com/post",
+    });
+    const read = await findBlogIdea(id);
+    expect(read.publishedAt).toBe("2026-09-04");
+    await run("save-blog-idea", { ...read, sortOrder: 3 });
+    expect(await findBlogIdea(id)).toMatchObject({ publishedAt: "2026-09-04", sortOrder: 3 });
   });
 
   it("requires updatedAt to update or delete", async () => {
@@ -356,7 +369,7 @@ describeDb("blog ideas", () => {
       updatedAt: read.updatedAt,
     });
     read = await findBlogIdea(id);
-    expect(read.publishedAt).toBe("2026-01-02T00:00:00.000Z");
+    expect(read.publishedAt).toBe("2026-01-02");
 
     await expect(run("delete-blog-idea", { id, updatedAt: read.updatedAt })).rejects.toThrow(
       /cannot be deleted/,
@@ -385,10 +398,11 @@ describeDb("blog ideas", () => {
     const publisher = await testDb.pool.connect();
     try {
       await publisher.query("begin");
+      // updated_at is left as it was, so only the edit's status condition
+      // can refuse it.
       await publisher.query(
         `update tracker_blog_idea
-         set status = 'published', published_at = now(),
-             updated_at = updated_at + interval '1 millisecond'
+         set status = 'published', published_at = current_date
          where id = $1`,
         [id],
       );
@@ -407,7 +421,11 @@ describeDb("blog ideas", () => {
     } finally {
       publisher.release();
     }
-    expect(await findBlogIdea(id)).toMatchObject({ status: "published", title: "Idea" });
+    expect(await findBlogIdea(id)).toMatchObject({
+      status: "published",
+      title: "Idea",
+      updatedAt: read.updatedAt,
+    });
   });
 });
 
@@ -615,6 +633,67 @@ describeDb("backlog steps", () => {
     await expect(run("delete-step", { id })).rejects.toThrow(TrackerNotFoundError);
   });
 
+  it("refuses a step key that another writer commits after the check", async () => {
+    const phaseId = await newPhase();
+    const issueNumber = await newIssue(phaseId);
+    const issue = await findIssueView(issueNumber);
+    const [plan] = issue.steps;
+    if (!plan) throw new Error("no plan step");
+    const duplicate = (key: string) =>
+      new TrackerRuleError(`Issue #${issueNumber} already has a step with key "${key}".`);
+
+    for (const [key, save] of [
+      // A new step: the insert waits on the other writer's uncommitted row.
+      [
+        "raced-insert",
+        () =>
+          run("save-step", {
+            issueNumber,
+            key: "raced-insert",
+            label: "L",
+            prompt: null,
+            sortOrder: 3,
+          }),
+      ],
+      // A renamed step: the update fails the unique constraint once it commits.
+      [
+        "raced-rename",
+        () =>
+          run("save-step", {
+            id: plan.id,
+            issueNumber,
+            key: "raced-rename",
+            label: plan.label,
+            prompt: plan.prompt,
+            sortOrder: plan.sortOrder,
+          }),
+      ],
+    ] as const) {
+      const writer = await testDb.pool.connect();
+      try {
+        await writer.query("begin");
+        await writer.query(
+          "insert into tracker_backlog_step (issue_id, key, label) values ($1, $2, 'Other')",
+          [issue.id, key],
+        );
+        const saved = save();
+        saved.catch(() => {});
+        await waitForLockWait();
+        await writer.query("commit");
+        await expect(saved).rejects.toThrow(duplicate(key));
+      } finally {
+        writer.release();
+      }
+    }
+    // Only the other writer's rows were added, and the renamed step kept its key.
+    expect((await findIssueView(issueNumber)).steps.map((step) => step.key).sort()).toEqual([
+      "implement",
+      "plan",
+      "raced-insert",
+      "raced-rename",
+    ]);
+  });
+
   it("sets and clears completion, keeping the first completion time", async () => {
     const phaseId = await newPhase();
     const issueNumber = await newIssue(phaseId);
@@ -770,6 +849,53 @@ describeDb("input validation", () => {
       "(input): Unrecognized key",
     ]) {
       expect(message).toContain(path);
+    }
+  });
+
+  it("refuses NUL in text as an input error, not a database error", async () => {
+    const input = { title: "Phase\u0000", description: "Notes\u0000", sortOrder: 0 };
+    const error = await run("save-phase", input).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TrackerInputError);
+    expect((error as Error).message).toContain("title: Must not contain NUL");
+    expect((error as Error).message).toContain("description: Must not contain NUL");
+  });
+
+  it("refuses issue and PR numbers beyond a Postgres integer", async () => {
+    const tooLarge = 2_147_483_648;
+    await expect(run("delete-issue", { issueNumber: tooLarge })).rejects.toThrow(
+      /^Invalid input: issueNumber:/,
+    );
+    await expect(
+      run("save-changelog-entry", {
+        date: "2026-09-01",
+        category: "Fix",
+        title: "Title",
+        summary: "Summary",
+        prNumbers: [1, tooLarge],
+      }),
+    ).rejects.toThrow(/^Invalid input: prNumbers\.1:/);
+    // The largest integer is still accepted.
+    await expect(run("delete-issue", { issueNumber: tooLarge - 1 })).rejects.toThrow(
+      TrackerNotFoundError,
+    );
+  });
+
+  it("refuses updatedAt on a create", async () => {
+    const updatedAt = new Date().toISOString();
+    const phaseId = await newPhase();
+    const issueNumber = await newIssue(phaseId);
+    for (const [name, input] of [
+      [
+        "save-changelog-entry",
+        { date: "2026-09-01", category: "Fix", title: "T", summary: "S", prNumbers: [] },
+      ],
+      ["save-phase", { title: "T", description: null, sortOrder: 0 }],
+      ["save-step", { issueNumber, key: "k", label: "L", prompt: null, sortOrder: 0 }],
+      ["save-blog-idea", blogIdea],
+    ] as const) {
+      await expect(runTrackerCommand(testDb.db, name, { ...input, updatedAt })).rejects.toThrow(
+        new TrackerInputError("Invalid input: updatedAt: Only allowed with id"),
+      );
     }
   });
 

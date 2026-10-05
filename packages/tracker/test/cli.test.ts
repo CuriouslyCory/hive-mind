@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createTestDatabase, describeDb, type TestDatabase } from "@hivemind/db/testing";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describeFailure } from "../src/cli.ts";
 import { TRACKER_COMMAND_NAMES } from "../src/input.ts";
 
 // Runs the CLI the way `pnpm tracker` does: Node with type stripping, on the
@@ -150,6 +151,31 @@ describeDb("tracker CLI", () => {
     );
   });
 
+  it("reports a batch's database failure with the Postgres message and code", async () => {
+    // A database without the tracker tables, so the first query fails in Postgres.
+    const unmigrated = await createTestDatabase({ migrate: false });
+    try {
+      const result = await runCli(["batch"], {
+        input: JSON.stringify([
+          { command: "save-phase", input: { title: "T", description: null, sortOrder: 0 } },
+        ]),
+        env: { DATABASE_URL: unmigrated.url },
+      });
+      expectFailure(
+        result,
+        1,
+        "internal",
+        /^Batch command 0 \(save-phase\) failed\. Cause: [\s\S]* Cause: relation "tracker_backlog_phase" does not exist \(42P01\)$/,
+      );
+      const url = new URL(unmigrated.url);
+      for (const secret of [unmigrated.url, url.password, url.host].filter(Boolean)) {
+        expect(result.stderr).not.toContain(secret);
+      }
+    } finally {
+      await unmigrated.drop();
+    }
+  });
+
   it("reports usage errors with exit 2", async () => {
     expectFailure(await runCli([]), 2, "usage");
     expectFailure(await runCli(["frobnicate"]), 2, "usage", /Unknown command "frobnicate"/);
@@ -181,5 +207,21 @@ describeDb("tracker CLI", () => {
     for (const command of ["snapshot", "cursor", "batch", ...TRACKER_COMMAND_NAMES]) {
       expect(result.stdout).toContain(command);
     }
+  });
+});
+
+describe("describeFailure", () => {
+  it("follows the cause chain up to three levels, with each code", () => {
+    const pgError = Object.assign(new Error("relation does not exist"), { code: "42P01" });
+    const chain = new Error("outer", {
+      cause: new Error("first", { cause: new Error("second", { cause: pgError }) }),
+    });
+    expect(describeFailure(chain)).toBe(
+      "outer Cause: first Cause: second Cause: relation does not exist (42P01)",
+    );
+    expect(describeFailure(new Error("deeper", { cause: chain }))).toBe(
+      "deeper Cause: outer Cause: first Cause: second",
+    );
+    expect(describeFailure("not an error")).toBe("Unknown failure.");
   });
 });

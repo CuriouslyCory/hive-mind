@@ -7,7 +7,8 @@ import { signedInPage, testUsers } from "./support";
 // The dev tracker page (docs/tracker.md). Under `next dev` a signed-in User
 // works the Backlog (Up next, copying a prompt completes its step) and the
 // Changelog, and the selected tab lives in `?tab=`. Under `next start`
-// (E2E_SERVER=start) the page is a 404 even when signed in.
+// (E2E_SERVER=start) the page is a 404, with that HTTP status, even when
+// signed in.
 
 let pool: pg.Pool;
 let users: TestHelpers;
@@ -76,6 +77,15 @@ test("under next dev, a signed-in User works the Backlog and the Changelog", asy
   await expect(plan).toBeChecked();
   await expect(issue).toContainText("1 of 2 steps complete");
 
+  // With completed issues hidden, completing the last step hides the issue
+  // and its checkbox; focus moves to Up next rather than to <body>.
+  await backlog.getByLabel("Hide completed issues").check();
+  await issue.getByRole("checkbox", { name: "Step 2 · Implement + PR" }).check();
+  await expect(status).toHaveText("Marked Step 2 · Implement + PR complete.");
+  await expect(issue).toBeHidden();
+  await expect(upNext.getByRole("heading", { name: "Up next" })).toBeFocused();
+  await expect(upNext).toContainText("No unfinished step in an open issue.");
+
   // The tabs by keyboard: ArrowRight from Backlog selects Changelog.
   await backlogTab.focus();
   await page.keyboard.press("ArrowRight");
@@ -123,7 +133,8 @@ test("under next start, /tracker is a 404 even for a signed-in User", async ({ b
   test.skip(!E2E_SERVES_BUILD, "Only a build served with next start is a 404.");
   const { context, page } = await signedInPage(browser, users);
 
-  await page.goto("/tracker");
+  const response = await page.goto("/tracker");
+  expect(response?.status()).toBe(404);
   await expect(page.getByText("This page could not be found.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Development tracker" })).toHaveCount(0);
   await expect(page.getByRole("tablist")).toHaveCount(0);
