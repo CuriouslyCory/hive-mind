@@ -452,7 +452,7 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
       expect(encodedJsonBytes(logged)).toBeLessThanOrEqual(MAX_EVENT_BYTES);
     });
 
-    it("refuses to serve an Event row that does not fit the contract", () => {
+    it("refuses to serve a corrupt Event row and withholds an unreadable one", () => {
       const row: EventRow = {
         id: uuid(),
         seq: "1",
@@ -472,10 +472,27 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
         creationFingerprint: null,
         createdAt: new Date(),
       };
-      expect(() => toEventDto(row)).toThrow(/does not match the contract/);
-      expect(() => toEventDto({ ...row, type: "plan.unknown", payload: {} })).toThrow(
-        /plan\.unknown/,
-      );
+      // Over the writer's payload limit: corruption, a generic error that
+      // names no stored value.
+      expect(() => toEventDto(row)).toThrow(/payload_too_large/);
+      expect(() => toEventDto(row)).not.toThrow(/xxxx|plan\.log_appended/);
+      // An unknown type is a newer writer's, not corruption (ADR-0015).
+      expect(toEventDto({ ...row, type: "plan.unknown", payload: { secret: "x" } })).toEqual({
+        id: row.id,
+        projectId: projectA,
+        seq: "1",
+        writerXid: "1",
+        type: "event.unavailable",
+        payloadVersion: 1,
+        payload: {},
+        actor: { kind: "system" },
+        actorSessionId: null,
+        planId: null,
+        taskId: null,
+        sessionId: null,
+        effectiveAt: row.effectiveAt.toISOString(),
+        createdAt: row.createdAt.toISOString(),
+      });
     });
   });
 

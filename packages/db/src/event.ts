@@ -27,12 +27,15 @@ export type SessionUpdateField =
  * `EVENT_PAYLOAD_VERSIONS`. The records an Event is about (Plan, Task,
  * Session) and its actor are columns, not payload fields. Payloads hold only
  * what describes the change, never credentials or whole requests. Changing a
- * payload's shape means a new version, since stored Events keep the old one.
+ * payload's shape or meaning means a new version, since stored Events keep the
+ * old one; a value added to an enum may keep the version (ADR-0015).
  */
 export interface EventPayloads {
   // Plan, Task and Session Events have the names and payloads of the
-  // contract's `eventSchema` (packages/contract/src/event.ts), which Event
-  // reads return as stored.
+  // contract's `knownEventSchema` (packages/contract/src/event.ts). Reads
+  // return a stored Event unchanged when the reading build knows its type,
+  // version and payload, and as `event.unavailable` otherwise (ADR-0015).
+  // That fallback is response-only and never a writable type here.
   /** `key` is the Plan's PLAN-N key. */
   "plan.created": { key: string; title: string; status: PlanStatus };
   /** `title` is the new title, or null if unchanged; the body is not repeated. */

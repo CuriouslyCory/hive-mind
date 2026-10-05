@@ -1,10 +1,14 @@
+import { UNAVAILABLE_EVENT_TYPE } from "@hivemind/contract";
+
 // Plain-text descriptions of Events for the dashboard (issue #11, "Shared
-// content"). Each known type reads only the payload fields its catalog entry
+// content"). Callers pass Events through the shared projection first
+// (server/event-projection.ts, ADR-0015), so an Event this build cannot read
+// arrives as `event.unavailable` and shows a fixed text. Each known type
+// still reads only the payload fields its catalog entry
 // (packages/db/src/event.ts) defines, each checked for its type; a missing or
 // mistyped field is left out rather than shown raw. The result is rendered as
 // React-escaped text, except `markdown`, which goes through the dashboard's
-// markdown renderer. Payloads are never spread into HTML or props, and an
-// unknown future type shows only its name.
+// markdown renderer. Payloads are never spread into HTML or props.
 
 export interface EventText {
   /** A one-line description, shown as escaped text. */
@@ -132,6 +136,8 @@ export function describeEvent(type: string, rawPayload: unknown): EventText {
         `Touched-path coverage became incomplete${reason ? ` (${reason.replaceAll("_", " ")})` : ""}`,
       );
     }
+    case UNAVAILABLE_EVENT_TYPE:
+      return text("Event details unavailable");
     default:
       return text(`Event ${type}`);
   }

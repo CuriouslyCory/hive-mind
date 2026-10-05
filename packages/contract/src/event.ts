@@ -27,7 +27,10 @@ import { blockReasonSchema, taskStatusSchema, taskTitleSchema } from "./task.ts"
  */
 export const MAX_EVENT_BYTES = 64 * 1024;
 
-/** Version of every payload below. A changed payload shape gets a new version. */
+/**
+ * Version of every payload below. A changed payload shape or meaning gets a
+ * new version; a value added to an enum may keep it (ADR-0015).
+ */
 export const EVENT_PAYLOAD_VERSION = 1;
 
 /** Why a claim ended without `done`. Clients must accept reasons they do not know. */
@@ -185,7 +188,6 @@ const eventBaseShape = {
   seq: decimalStringSchema,
   /** The writing transaction's ID (PostgreSQL xid8), as a decimal string. */
   writerXid: decimalStringSchema,
-  payloadVersion: z.literal(EVENT_PAYLOAD_VERSION),
   actor: actorSchema,
   /** The Session the actor acted through, when there was one. */
   actorSessionId: idSchema.nullable(),
@@ -202,16 +204,19 @@ const eventBaseShape = {
 function eventVariant<T extends EventType>(type: T) {
   return z.strictObject({
     ...eventBaseShape,
+    payloadVersion: z.literal(EVENT_PAYLOAD_VERSION),
     type: z.literal(type),
     payload: eventPayloads[type],
   });
 }
 
 /**
- * One coordination Event. Clients should handle `type` values they do not
- * know, since later versions add types.
+ * An Event of a type and payload version this build writes, with exactly its
+ * declared payload: the writers' vocabulary. Every Event the current
+ * `@hivemind/db` helpers write must match it (apps/web/test/event-catalog.test.ts).
+ * Reads return `eventSchema`, which adds `event.unavailable`.
  */
-export const eventSchema = z.discriminatedUnion("type", [
+export const knownEventSchema = z.discriminatedUnion("type", [
   eventVariant("plan.created"),
   eventVariant("plan.updated"),
   eventVariant("plan.status_changed"),
@@ -233,6 +238,50 @@ export const eventSchema = z.discriminatedUnion("type", [
   eventVariant("scope.touched"),
   eventVariant("scope.collection_finalized"),
   eventVariant("scope.coverage_lost"),
+]);
+
+export type KnownEvent = z.infer<typeof knownEventSchema>;
+
+/**
+ * The stable fields every stored Event has, whatever its type and payload
+ * version. A reader that cannot interpret an Event's details still returns
+ * these (ADR-0015).
+ */
+export const eventMetadataSchema = z.strictObject(eventBaseShape);
+
+export type EventMetadata = z.infer<typeof eventMetadataSchema>;
+
+/**
+ * The type of an Event whose details this build cannot read safely. It is a
+ * response-only representation, never written: no Event type may use it.
+ */
+export const UNAVAILABLE_EVENT_TYPE = "event.unavailable";
+
+/**
+ * A stored Event whose type, payload version or payload this build does not
+ * know, typically one written by a newer deployment before a rollback
+ * (ADR-0015). It keeps the Event's id, attribution, affected records and feed
+ * position; the original type, version and payload are withheld. Its
+ * `payloadVersion` describes this empty payload, not the stored one.
+ */
+export const unavailableEventSchema = z.strictObject({
+  ...eventBaseShape,
+  type: z.literal(UNAVAILABLE_EVENT_TYPE),
+  payloadVersion: z.literal(1),
+  payload: z.strictObject({}),
+});
+
+export type UnavailableEvent = z.infer<typeof unavailableEventSchema>;
+
+/**
+ * One coordination Event as reads return it: a known Event, or
+ * `event.unavailable` when this build cannot read its details. Clients
+ * should handle `type` values they do not know, since later versions add
+ * types.
+ */
+export const eventSchema = z.discriminatedUnion("type", [
+  ...knownEventSchema.options,
+  unavailableEventSchema,
 ]);
 
 export type Event = z.infer<typeof eventSchema>;
