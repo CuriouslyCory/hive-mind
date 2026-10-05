@@ -38,7 +38,7 @@ One subscription runs per open Project (`createProjectEventStream` in `apps/web/
 
 The browser never renders Event content from the stream. An Event is only an invalidation:
 
-1. **Filter.** `apps/web/src/lib/project-event-filters.ts` decides whether the Event affects the current page. The overview counts every Event. A Plan page counts Events of the Plan, its Tasks and the Sessions it shows. A Session page counts Events that affected the Session or that it acted through, and Events of its Task. It shows only its Plan's key, which never changes, so `plan.*` Events do not refresh it. An Event type this build does not know refreshes every page.
+1. **Filter.** `apps/web/src/lib/project-event-filters.ts` decides whether the Event affects the current page. The overview counts every Event. A Plan page counts Events of the Plan, its Tasks and the Sessions it shows. A Session page counts Events that affected the Session or that it acted through, and Events of its Task. It shows only its Plan's key, which never changes, so `plan.*` Events do not refresh it. An Event type this build does not know, `event.unavailable` included, refreshes every page (see [Events the server cannot read](#events-the-server-cannot-read)).
 2. **Deduplicate.** The ids of the last 2048 Events are remembered, and a redelivered Event is dropped.
 3. **Record, then advance.** An accepted Event marks the page dirty, and only then does the cursor move to the Event's position. The cursor never moves backwards.
 4. **Refresh.** Dirty marks are coalesced into `router.refresh()`, which re-reads the page from the server through the same authorization and snapshot as the initial render. At most one refresh runs at a time. A dirty-generation counter records marks that arrive while a refresh is running, and they cause exactly one more refresh after it. A refresh that has not finished after 20 seconds is treated as done.
@@ -86,7 +86,7 @@ The cookie route serves only GET; any other method gets a 404. It mounts no othe
 | `type` | SSE `id` | Meaning |
 |---|---|---|
 | `ready` | the start cursor: the one presented, or the fence `(H, 0)` of a tail | Sent once, first. A client that drops before its first Event can resume from it. |
-| `event` | the Event's cursor | `{ type, event }`, where `event` is the contract Event (`eventSchema` in `packages/contract/src/event.ts`). |
+| `event` | the Event's cursor | `{ type, event }`, where `event` is the contract Event (`eventSchema` in `packages/contract/src/event.ts`), or `event.unavailable` when the server cannot read its details. |
 | `heartbeat` | none | `{ type, serverTime, withheld }`. `withheld` is true while this Project has committed Events that the horizon holds back. |
 | `access_lost` | none | `{ type, code }` with `UNAUTHORIZED` or `NOT_FOUND`. The last frame; the cursor does not move. Do not reconnect until the credential or access is fixed. |
 
@@ -114,6 +114,15 @@ The constants are in `packages/contract/src/event-stream.ts` and `DEFAULT_EVENT_
 
 No connection or transaction is held between polls. The stream ends, and stops issuing queries, on rotation, request abort, body cancellation, a slow consumer or access loss, including while the generator is paused waiting for the client to read.
 
+## Events the server cannot read
+
+After a rollback, the database can hold Events that a newer deployment wrote, with a type, payload version or enum value this build does not know. The dashboard passes every stored Event through `projectEvent` (`apps/web/src/server/event-projection.ts`, ADR-0015), as the API and both stream routes do, so such an Event is not an error:
+
+- **Initial render and refresh.** A Plan or Session timeline shows the Event with its time, actor and affected Plan, Task and Session, and the fixed text "Event details unavailable", rendered as plain text, not markdown. Nothing from its stored payload reaches the page.
+- **Live.** The stream sends it as an `event` frame whose Event has type `event.unavailable`, an empty payload and its original cursor, and delivery continues after it. The filter does not know that type, so every page of the Project refreshes. That also covers what the withheld payload would have told it, such as the Plan a `session.attached` Session left. A browser bundle from before this change does the same, because it does not know the type either.
+
+A corrupt Event (invalid metadata or payload version, or a stored payload over the writer's 60 KiB limit) is still a server error: the page's read fails, and the stream ends with `INTERNAL_SERVER_ERROR` without moving its cursor past the Event.
+
 ## Markdown and untrusted text
 
 Plan bodies, Plan log entries and Session end summaries are written by agents and Users, so they are untrusted. One server renderer, `SafeMarkdown` in `apps/web/src/server/dashboard/markdown.tsx`, renders all of them with react-markdown and remark-gfm:
@@ -124,7 +133,7 @@ Plan bodies, Plan log entries and Session end summaries are written by agents an
 - Images are never loaded; each renders as `[image: alt text]`.
 - Headings are shifted down so a document's `#` does not compete with the page's headings.
 
-Labels, intents and Event text are not markdown. They render as plain React text, and Event text is built only from known payload fields (`apps/web/src/server/dashboard/event-text.ts`), never by spreading a payload into HTML or props.
+Labels, intents and Event text are not markdown. They render as plain React text, and Event text is built only from known payload fields of projected Events (`apps/web/src/server/dashboard/event-text.ts`), never by spreading a payload into HTML or props.
 
 ## Known limitations
 
@@ -142,3 +151,4 @@ Labels, intents and Event text are not markdown. They render as plain React text
 - `apps/web/test/event-stream.test.ts`: both routes' statuses, access loss during a stream, resume, withheld delivery, rotation, abort while paused, slow consumers and cleanup.
 - `apps/web/test/project-event-stream.test.ts`: the browser engine's decoding, deduplication, refresh coalescing, reconnects and terminal states.
 - `apps/web/test/dashboard-queries.test.ts` and `apps/web/test/markdown.test.ts`: page reads, cross-Project children, attribution and hostile markdown.
+- `apps/web/test/event-projection.test.ts`: the shared projection, with a pinned reader from before #14's `stolen` reason, unreadable details, corrupt rows and sanitized errors. The stream, page and browser tests above also cover Events a newer deployment wrote (ADR-0015).
