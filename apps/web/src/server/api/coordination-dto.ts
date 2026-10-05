@@ -3,8 +3,6 @@ import {
   type ClaimedTaskIds,
   type CollectionState,
   type Event,
-  eventSchema,
-  MAX_EVENT_BYTES,
   MAX_PAGE_LIMIT,
   type Overlap,
   type Plan,
@@ -16,7 +14,6 @@ import {
 import {
   type CollectionState as CollectionRow,
   type Event as EventRow,
-  encodedJsonBytes,
   isScopeComplete,
   type Plan as PlanRow,
   type PlanView,
@@ -26,6 +23,7 @@ import {
   type SessionView,
   type TaskView,
 } from "@hivemind/db";
+import { projectEvent } from "../event-projection";
 
 // Coordination records as the contract's JSON. Database rows never reach a
 // response directly: these pick the public fields, turn Dates into ISO
@@ -93,50 +91,15 @@ export function toTaskDto({ task, planNumber, claim }: TaskView): Task {
   };
 }
 
-function eventActor(row: EventRow): Actor {
-  if (row.actorKind === "system") return { kind: "system" };
-  if (row.actorKind === "user" && row.actorUserId) return { kind: "user", userId: row.actorUserId };
-  if (row.actorKind === "project_key" && row.actorKeyId) {
-    return { kind: "project_key", keyId: row.actorKeyId };
-  }
-  // event_actor_check rules this out.
-  throw new Error(`Event ${row.id} has no actor.`);
-}
-
 /**
- * An Event row as the contract's Event. The stored type and payload are
- * returned as they are, so `@hivemind/db`'s Event catalog (src/event.ts) must
- * use the contract's types and payloads; the DTO is validated against
- * `eventSchema` here so a row that does not fit fails with its type named
- * rather than as an anonymous output-validation error. The whole encoded DTO
- * is bounded by `MAX_EVENT_BYTES` (64 KiB), which #11 sizes its frames from.
+ * An Event row as the contract's Event, through the shared projection
+ * (`server/event-projection.ts`, ADR-0015): a known Event as stored, or
+ * `event.unavailable` when this build cannot read its details. A corrupt row
+ * throws `EventProjectionError`. The encoded result is at most
+ * `MAX_EVENT_BYTES` (64 KiB), which #11 sizes its frames from.
  */
 export function toEventDto(row: EventRow): Event {
-  const dto = {
-    id: row.id,
-    projectId: row.projectId,
-    seq: row.seq,
-    writerXid: row.writerXid,
-    type: row.type,
-    payloadVersion: row.payloadVersion,
-    payload: row.payload,
-    actor: eventActor(row),
-    actorSessionId: row.actorSessionId,
-    planId: row.planId,
-    taskId: row.taskId,
-    sessionId: row.sessionId,
-    effectiveAt: row.effectiveAt.toISOString(),
-    createdAt: row.createdAt.toISOString(),
-  };
-  const parsed = eventSchema.safeParse(dto);
-  if (!parsed.success) {
-    throw new Error(`Event ${row.id} (${row.type}) does not match the contract: ${parsed.error}`);
-  }
-  const bytes = encodedJsonBytes(parsed.data);
-  if (bytes > MAX_EVENT_BYTES) {
-    throw new Error(`Event ${row.id} encodes to ${bytes} bytes; the limit is ${MAX_EVENT_BYTES}.`);
-  }
-  return parsed.data;
+  return projectEvent(row);
 }
 
 /**

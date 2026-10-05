@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { describeEvent } from "../src/server/dashboard/event-text";
 import { SafeMarkdown, safeLinkUrl } from "../src/server/dashboard/markdown";
+import { canary } from "./support/future-events";
 
 // The dashboard's markdown renderer with hostile input (issue #11, "Shared
 // content"): nothing in the output may run script, load a resource or carry
@@ -230,6 +231,14 @@ describe("describeEvent", () => {
       markdown: null,
     });
     expect(describeEvent("scope.touched", null).text).toBe("Touched paths");
+  });
+
+  it("shows an unavailable Event as fixed text, whatever its payload holds", () => {
+    const secret = canary();
+    expect(describeEvent("event.unavailable", { message: secret })).toEqual({
+      text: "Event details unavailable",
+      markdown: null,
+    });
   });
 
   it("hands Plan log entries to the markdown renderer", () => {

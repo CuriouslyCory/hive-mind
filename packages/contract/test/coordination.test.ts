@@ -22,12 +22,14 @@ import {
   type Event,
   type EventType,
   endSessionInputSchema,
+  eventMetadataSchema,
   eventPageSchema,
   eventSchema,
   getProjectStatusInputSchema,
   heartbeatSessionOutputSchema,
   isDeclaredScopePattern,
   isTouchedPath,
+  knownEventSchema,
   listPlansInputSchema,
   listSessionsInputSchema,
   MAX_COLLECTION_BATCH_PATHS,
@@ -57,6 +59,8 @@ import {
   taskPageSchema,
   touchedPathsContentHash,
   touchedPathsManifestText,
+  UNAVAILABLE_EVENT_TYPE,
+  unavailableEventSchema,
   updatePlanInputSchema,
   updateSessionInputSchema,
   uploadCollectionBatchInputSchema,
@@ -620,18 +624,23 @@ describe("Events", () => {
 
   it.each(EVENT_TYPES)("a maximal %s Event is valid and at most 64 KiB encoded", (type) => {
     const event = maximalEvent(type);
+    expect(knownEventSchema.parse(event)).toEqual(event);
     expect(eventSchema.parse(event)).toEqual(event);
     expect(jsonBytes(event)).toBeLessThanOrEqual(MAX_EVENT_BYTES);
   });
 
-  it("rejects unknown types, payload fields and versions", () => {
+  // The writers' vocabulary and the readable union are both strict: the
+  // tolerance for newer Events lives in the server's projection, not here.
+  it.each([
+    ["known", knownEventSchema],
+    ["readable", eventSchema],
+  ] as const)("the %s schema rejects unknown types, payload fields and versions", (_, schema) => {
     const event = maximalEvent("task.done") as Record<string, unknown>;
-    expect(accepts(eventSchema, { ...event, type: "task.deleted" })).toBe(false);
-    expect(accepts(eventSchema, { ...event, payload: { from: "todo", extra: 1 } })).toBe(false);
-    expect(accepts(eventSchema, { ...event, payloadVersion: 2 })).toBe(false);
-    expect(accepts(eventSchema, { ...event, payload: MAXIMAL_PAYLOADS["task.claimed"] })).toBe(
-      false,
-    );
+    expect(accepts(schema, { ...event, type: "task.deleted" })).toBe(false);
+    expect(accepts(schema, { ...event, payload: { from: "todo", extra: 1 } })).toBe(false);
+    expect(accepts(schema, { ...event, payloadVersion: 2 })).toBe(false);
+    expect(accepts(schema, { ...event, payload: MAXIMAL_PAYLOADS["task.claimed"] })).toBe(false);
+    expect(accepts(schema, { ...event, extra: "x" })).toBe(false);
   });
 
   it("types the actor as a User, a Project key or the system", () => {
@@ -647,6 +656,59 @@ describe("Events", () => {
     ]) {
       expect(accepts(eventSchema, { ...event, actor })).toBe(false);
     }
+  });
+
+  describe("event.unavailable", () => {
+    const metadata = (({ type: _t, payloadVersion: _v, payload: _p, ...rest }) => rest)(
+      maximalEvent("task.done") as Record<string, unknown>,
+    );
+    const unavailable = {
+      ...metadata,
+      type: UNAVAILABLE_EVENT_TYPE,
+      payloadVersion: 1,
+      payload: {},
+    };
+
+    it("is readable with the stable metadata and an empty payload, at most 64 KiB", () => {
+      expect(eventMetadataSchema.parse(metadata)).toEqual(metadata);
+      expect(unavailableEventSchema.parse(unavailable)).toEqual(unavailable);
+      expect(eventSchema.parse(unavailable)).toEqual(unavailable);
+      expect(jsonBytes(unavailable)).toBeLessThanOrEqual(MAX_EVENT_BYTES);
+    });
+
+    it("is response-only: not a writable type, and the event. prefix is reserved", () => {
+      expect(accepts(knownEventSchema, unavailable)).toBe(false);
+      expect(EVENT_TYPES).not.toContain(UNAVAILABLE_EVENT_TYPE);
+      expect(EVENT_TYPES.filter((type) => type.startsWith("event."))).toEqual([]);
+    });
+
+    it.each([
+      ["a payload field", { payload: { secret: "canary" } }],
+      ["the stored payload", { payload: MAXIMAL_PAYLOADS["task.done"] }],
+      ["another version", { payloadVersion: 2 }],
+      ["the stored type", { originalType: "task.done" }],
+      ["an undeclared field", { creationFingerprint: "0".repeat(64) }],
+    ])("rejects %s", (_, change) => {
+      expect(accepts(eventSchema, { ...unavailable, ...change })).toBe(false);
+    });
+
+    it.each([
+      ["id", "not-a-uuid"],
+      ["seq", "-1"],
+      ["writerXid", 42],
+      ["actor", { kind: "system", userId: UUID }],
+      ["effectiveAt", "yesterday"],
+    ])("rejects invalid metadata (%s)", (field, value) => {
+      expect(accepts(eventMetadataSchema, { ...metadata, [field]: value })).toBe(false);
+      expect(accepts(eventSchema, { ...unavailable, [field]: value })).toBe(false);
+    });
+
+    it("parses a pinned mixed page unchanged", () => {
+      const page = fixture("event-page.unavailable.json");
+      expect(eventPageSchema.parse(page)).toEqual(page);
+      const types = (page as { items: Event[] }).items.map((event) => event.type);
+      expect(types).toEqual(["task.started", UNAVAILABLE_EVENT_TYPE, "session.status_changed"]);
+    });
   });
 
   it.each([

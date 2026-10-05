@@ -2,7 +2,12 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { anyCliEnvelopeSchema, exitCodeForEnvelope } from "@hivemind/contract";
+import {
+  anyCliEnvelopeSchema,
+  exitCodeForEnvelope,
+  UNAVAILABLE_EVENT_TYPE,
+  unavailableEventSchema,
+} from "@hivemind/contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createFileStore } from "../src/credentials/file.ts";
 import { createCredentialManager } from "../src/credentials/manager.ts";
@@ -19,6 +24,7 @@ import { expectGolden } from "./helpers/golden.ts";
 
 const base = mkdtempSync(join(tmpdir(), "hivemind-coordination-bin-"));
 let api: FakeBackend;
+let projectId: string;
 let home: string;
 let cwd: string;
 beforeAll(async () => {
@@ -27,6 +33,7 @@ beforeAll(async () => {
   cwd = join(base, "work");
   mkdirSync(join(cwd, ".git"), { recursive: true });
   const project = api.addProject(ORG_A.id, "bin");
+  projectId = project.id;
   writeFileSync(join(cwd, ".hivemind.json"), JSON.stringify({ version: 1, projectId: project.id }));
   const file = createFileStore({ dir: join(home, ".config", "hivemind") });
   await createCredentialManager({ env: {}, interactive: false, file }).save(api.origin, USER_TOKEN);
@@ -117,5 +124,35 @@ describe("compiled binary coordination commands", () => {
 
     const usage = envelope(await hivemind(["task", "start", task.data.task.id]));
     expect(usage).toMatchObject({ ok: false, error: { code: "USAGE_ERROR" } });
+  });
+
+  it("passes an Event the server cannot read through session log --json", async () => {
+    const started = envelope(
+      await hivemind(["session", "start", "--agent", "ci", "--intent", "Rollback"]),
+    ) as { data: { session: { id: string } } };
+    const sessionId = started.data.session.id;
+    const env = { HIVEMIND_SESSION: sessionId };
+    for (const title of ["One", "Two"])
+      envelope(await hivemind(["plan", "create", "--title", title], env));
+    // The middle Event as a server after a rollback returns one a newer
+    // deployment wrote (ADR-0015, issue #15).
+    const stored = api.coordination.events.find(
+      (event) => event.actorSessionId === sessionId && event.type === "plan.created",
+    );
+    if (!stored) throw new Error("Expected the first plan.created Event.");
+    Object.assign(stored, { projectId, type: UNAVAILABLE_EVENT_TYPE, payload: {} });
+
+    const result = await hivemind(["session", "log", sessionId]);
+    expect(result.status).toBe(0);
+    const log = envelope(result) as { ok: true; data: { items: { type: string }[] } };
+    expect(log.ok).toBe(true);
+    expect(log.data.items.map((event) => event.type)).toEqual([
+      "plan.created",
+      UNAVAILABLE_EVENT_TYPE,
+      "session.started",
+    ]);
+    expect(log.data.items[1]).toEqual(
+      unavailableEventSchema.parse(JSON.parse(JSON.stringify(stored))),
+    );
   });
 });

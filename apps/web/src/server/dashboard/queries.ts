@@ -49,6 +49,7 @@ import {
   UUID_POSITION,
 } from "../api/keyset";
 import { after, decodeCursor, encodeCursor, positionOf } from "../api/pagination";
+import { projectEvent } from "../event-projection";
 import { describeEvent } from "./event-text";
 import { type DashboardSnapshot, projectFeedCursor, runDashboardSnapshot } from "./snapshot";
 
@@ -491,7 +492,7 @@ async function summarizeSessions(
   });
 }
 
-/** Events for display: text from known payload fields only, with attributions. */
+/** Events for display: text from projected Events only, with attributions. */
 async function viewEvents(
   context: CoordinationContext,
   projectId: string,
@@ -513,12 +514,15 @@ async function viewEvents(
     rows.map((row) => row.taskId),
   );
   return rows.map((row) => {
+    // Through the shared projection, so an Event this build cannot read
+    // renders as unavailable and its stored payload never reaches the page.
+    const event = projectEvent(row);
     const number = row.planId ? numbers.get(row.planId) : undefined;
-    const { text, markdown } = describeEvent(row.type, row.payload);
+    const { text, markdown } = describeEvent(event.type, event.payload);
     return {
-      id: row.id,
-      seq: row.seq,
-      type: row.type,
+      id: event.id,
+      seq: event.seq,
+      type: event.type,
       actor: eventActor(row, names),
       actorSessionId: row.actorSessionId,
       planKey: number === undefined ? null : planKey(number),

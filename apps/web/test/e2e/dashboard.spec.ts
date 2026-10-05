@@ -4,10 +4,12 @@ import type { TestHelpers } from "better-auth/plugins";
 import pg from "pg";
 import { e2eDatabaseUrl } from "./e2e-env";
 import {
+  canary,
   coordinationApi,
   expectInert,
   followByKeyboard,
   HOSTILE,
+  insertFutureEvent,
   personalOrganizationId,
   signedInPage,
   testUsers,
@@ -18,7 +20,8 @@ import {
 // keyboard navigation through `/` → Project → Plan → Session, empty states,
 // one not-found answer for everything a User cannot read, the sign-in
 // redirect, and untrusted markdown and labels staying inert. Live updates are
-// in dashboard-live.spec.ts.
+// in dashboard-live.spec.ts. Events written by a newer deployment render as
+// unavailable, without their details (issue #15).
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
@@ -312,4 +315,101 @@ test("hostile Plan markdown, summaries and labels render as inert text", async (
     });
   }
   expect(dialogs).toEqual([]);
+});
+
+test("Events from a newer deployment show as unavailable in place, without their details", async ({
+  browser,
+}) => {
+  const { user, page } = await signedInPage(browser, users);
+  const api = await coordinationApi(users, user.id);
+  const project = await api.createProject(
+    await personalOrganizationId(pool, user.id),
+    `Future ${randomUUID().slice(0, 6)}`,
+  );
+  const sessionId = await api.startSession(project.id, {
+    agent: "future-agent",
+    intent: "Read newer Events",
+  });
+  const plan = await api.createPlan(project.id, { title: "Mixed vocabulary", sessionId });
+  const taskId = await api.addTask(project.id, plan.key, "Survive newer Events", sessionId);
+  await api.attach(project.id, sessionId, plan.key, taskId);
+  await api.appendLog(project.id, plan.key, "Known entry before", sessionId);
+
+  // Between two known log entries, three Events this build cannot read: an
+  // unknown type, a known type with a newer reason, and a known type at a
+  // newer payload version whose familiar field holds the secret.
+  const secret = canary();
+  const future = { projectId: project.id, actorUserId: user.id, actorSessionId: sessionId };
+  await insertFutureEvent(pool, {
+    ...future,
+    type: "plan.reviewed",
+    payloadVersion: 1,
+    payload: { secret },
+    planId: plan.id,
+  });
+  await insertFutureEvent(pool, {
+    ...future,
+    type: "task.released",
+    payloadVersion: 1,
+    payload: { reason: secret },
+    planId: plan.id,
+    taskId,
+    sessionId,
+  });
+  await insertFutureEvent(pool, {
+    ...future,
+    type: "plan.log_appended",
+    payloadVersion: 2,
+    payload: { message: secret },
+    planId: plan.id,
+  });
+  await api.appendLog(project.id, plan.key, "Known entry after", sessionId);
+
+  const unavailable = "event.unavailable";
+  for (const [path, testId] of [
+    [`/projects/${project.id}/plans/${plan.key}`, "plan-detail"],
+    [`/projects/${project.id}/sessions/${sessionId}`, "session-detail"],
+  ] as const) {
+    await test.step(path, async () => {
+      await page.goto(path);
+      await expectLive(page);
+      const items = page.getByTestId(testId).getByTestId("timeline-item");
+      // Newest first: each in its feed position between the known entries.
+      const expected = [
+        "plan.log_appended",
+        unavailable,
+        unavailable,
+        unavailable,
+        "plan.log_appended",
+      ];
+      for (const [index, type] of expected.entries()) {
+        await expect(items.nth(index)).toHaveAttribute("data-event-type", type);
+      }
+      await expect(items.nth(0)).toContainText("Known entry after");
+      await expect(items.nth(4)).toContainText("Known entry before");
+      for (const index of [1, 2, 3]) {
+        const item = items.nth(index);
+        // The fixed text, with the attribution and affected records kept.
+        await expect(item).toContainText(`${user.name}: Event details unavailable`);
+        await expect(item.getByRole("link", { name: plan.key })).toBeVisible();
+      }
+      // The newer release keeps its Task and Session.
+      await expect(items.nth(2)).toContainText("Survive newer Events");
+      await expect(
+        items.nth(2).getByRole("link", { name: "Session", exact: true }),
+      ).toHaveAttribute("href", `/projects/${project.id}/sessions/${sessionId}`);
+      await expect(page.locator("body")).not.toContainText(secret);
+      // The HTML includes the inline Server Component payload.
+      expect(await page.content()).not.toContain(secret);
+    });
+  }
+
+  await test.step("the Project overview", async () => {
+    // The overview has no timeline; it still renders, without the details.
+    await page.goto(`/projects/${project.id}`);
+    await expectLive(page);
+    await expect(page.getByTestId("project-overview")).toContainText("future-agent");
+    await expect(page.locator("body")).not.toContainText(secret);
+    expect(await page.content()).not.toContain(secret);
+  });
 });

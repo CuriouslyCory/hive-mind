@@ -233,6 +233,25 @@ describe("stream frames", () => {
     expect(eventStreamFrameSchema.safeParse({ ...frame, cursor: "abc" }).success).toBe(false);
   });
 
+  it("carry an unavailable Event with only its metadata and an empty payload", () => {
+    const page = JSON.parse(
+      readFileSync(new URL("./fixtures/v1/event-page.unavailable.json", import.meta.url), "utf8"),
+    ) as { items: Event[] };
+    const event = page.items.find((item) => item.type === "event.unavailable");
+    if (!event) throw new Error("event-page.unavailable.json has no unavailable Event.");
+    const frame = { type: "event", event };
+    expect(eventStreamFrameSchema.parse(frame)).toEqual(frame);
+    for (const invalid of [
+      { ...event, payload: { secret: "canary" } },
+      { ...event, payloadVersion: 2 },
+      { ...event, originalType: "task.released" },
+    ]) {
+      expect(eventStreamFrameSchema.safeParse({ type: "event", event: invalid }).success).toBe(
+        false,
+      );
+    }
+  });
+
   it("send bounded heartbeats with withheld diagnostics and no cursor", () => {
     const frame = { type: "heartbeat", serverTime: "2026-10-01T12:00:00.000Z", withheld: true };
     expect(heartbeatFrameSchema.parse(frame)).toEqual(frame);

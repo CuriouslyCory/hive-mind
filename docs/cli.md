@@ -498,6 +498,14 @@ All take `--project <id>`. "Session" means `--session <id>` or `HIVEMIND_SESSION
 
 The schemas of these `data` objects are the `/api/v1` output schemas in `packages/contract/src/` (`plan.ts`, `task.ts`, `session.ts`, `scope.ts`, `event.ts`, `status.ts`), with golden examples in `packages/contract/test/fixtures/v1/cli.*.json`. A Session's `status` is always its effective status at the time of the request. Event types and payloads are listed in `eventSchema` (`packages/contract/src/event.ts`).
 
+**Events the server cannot read.** After a rollback, the server can hold Events that a newer deployment wrote, with a type, payload version or enum value it does not know. It returns each one with `type: "event.unavailable"`, `payloadVersion: 1` and `payload: {}`, and keeps its `id`, `seq`, `writerXid`, `actor`, `actorSessionId`, `planId`, `taskId`, `sessionId`, `effectiveAt` and `createdAt` (ADR-0015). The CLI treats it like any other Event:
+
+- Human output prints its usual line, `<createdAt>  #<seq>  event.unavailable`, followed by the actor Session if there is one.
+- `--json` passes it through unchanged wherever Events appear: `items` of `plan log` and `session log`, `events.items` of `session show`, and `event` of `plan log --message`. The command succeeds with exit 0.
+- Scripts must accept Event types they do not know, since later versions add types. Do not read `payloadVersion` as the stored Event's version: the stored type, version and payload are withheld.
+
+An Event the server finds corrupt rather than newer fails the whole read with `INTERNAL_SERVER_ERROR` (exit 1).
+
 ## Command reference
 
 Global options, accepted anywhere on the command line:

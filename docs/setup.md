@@ -1,6 +1,6 @@
 # Setup
 
-One-time setup of the Vercel project, the Neon project, the GitHub OAuth apps, the CLI releases and the coordination sweep. Only the repo owner can do these steps. Do them in order: each step needs the ones before it. H5 is optional and can be done at any time. H6 is the check to run after deploying. H7 sets up CLI releases and needs a production deployment that passed H6. H8 sets up the coordination sweep's Cron job; set its secret before the first production deployment that includes M2.
+One-time setup of the Vercel project, the Neon project, the GitHub OAuth apps, the CLI releases and the coordination sweep. Only the repo owner can do these steps. Do them in order: each step needs the ones before it. H5 is optional and can be done at any time. H6 is the check to run after deploying. H7 sets up CLI releases and needs a production deployment that passed H6. H8 sets up the coordination sweep's Cron job; set its secret before the first production deployment that includes M2. H9 is not setup: it is the check to make before rolling production back to an older deployment.
 
 Values in this guide are the current ones for the `hive-mind-web` Vercel project in the `curiouslycorys-projects` team.
 
@@ -206,3 +206,26 @@ To try it on a preview, add a separate Preview value with `vercel env add CRON_S
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' https://hivemind.curiouslycory.com/api/cron/coordination` prints `401`. A `500` means `CRON_SECRET` is not set for this deployment.
 - [ ] The deployment's logs show a `GET /api/cron/coordination` with status 200 each minute, and no `CRON_SECRET is not set` errors.
 - [ ] With a CLI built from `main` and logged in (`hivemind login`), in the scratch repository from H6: start a Session (`hivemind session start --agent check --intent 'Cron check'`), then send no heartbeat. Right after 5 minutes, `hivemind session list --status stale` lists it. Within a minute or two after that, `hivemind session show <id> --json` shows a `session.status_changed` Event to `stale` with actor kind `system`. That Event proves the sweep ran. End the Session with `hivemind session end --session <id> --summary 'Cron check'`.
+
+## H9. Rolling back production
+
+Events are never changed after they are written, so a rollback leaves in the database the Events that the newer deployment wrote, possibly with types, payload versions or enum values the older build does not know. A build that contains the compatibility reader, `apps/web/src/server/event-projection.ts` (added by commit `81efa367d9a7d93823cd6a46c9b259241679856b`), returns such an Event as `event.unavailable`, without its details. An older build fails API and stream reads that include one: Project Events, Plan logs and Session logs answer 500, and the Event stream ends with a server error. Its dashboard timelines still load but show the stored type and recognized payload fields without validating them, so a newer Event's details, such as the message of a newer `plan.log_appended` version, are shown as written. ADR-0015 records the rule.
+
+- [ ] Deploy a production build that contains the reader before merging any change that adds an Event type, a payload version or an enum value in a payload, such as M4's Events ([#19](https://github.com/CuriouslyCory/hive-mind/issues/19)). That deployment is the earliest safe rollback target from then on.
+
+**Before each rollback:**
+
+1. Find the git commit of the target deployment; Vercel shows it on the deployment's page.
+2. Check that the target contains the compatibility reader:
+
+   ```bash
+   git fetch origin
+   git cat-file -e <target-commit>:apps/web/src/server/event-projection.ts && echo "has the reader"
+   ```
+
+   Exit status 0 means it does; any other status means it does not.
+3. If the target has the reader, roll back to it with Vercel's Instant Rollback or by promoting it.
+4. If it does not, do not promote it. Create a branch from the target commit, apply the reader to it (for example by cherry-picking the commit on `main` that added `event-projection.ts`, found with `git log --diff-filter=A --format=%H origin/main -- apps/web/src/server/event-projection.ts`, and resolving conflicts), and deploy that build to production instead. This applies to every deployment from before the reader, including those that already write #14's `stolen` reason.
+5. After the rollback, open a Plan page with recent activity and run `hivemind plan log <plan>`. An Event the build cannot read shows as "Event details unavailable" on the page and as `event.unavailable` in the CLI; neither returns an error.
+
+Never delete, edit or backfill Events to make an older build read them. This check covers Event reads only: the target must also run on the current database schema, which is why every schema change is expand/contract (`AGENTS.md`, "Schema changes").
