@@ -24,6 +24,7 @@ Next come M4 (ADRs), M5 (search), M6 (agent skills and hooks) and M7 (hardening)
 | `apps/cli` | `@hivemind/cli` | The `hivemind` CLI, compiled with Bun into standalone binaries, plus its installer and npm launcher |
 | `packages/contract` | `@hivemind/contract` | Zod schemas and the oRPC contract for `/api/v1`, error codes, `.hivemind.json` and the CLI's JSON output |
 | `packages/db` | `@hivemind/db` | Drizzle schema, committed SQL migrations, the migrator and a Postgres test harness |
+| `packages/tracker` | `@hivemind/tracker` | Private: the rules and JSON CLI (`pnpm tracker`) for the dev-only `/tracker` page ([docs/tracker.md](docs/tracker.md)) |
 | `packages/config` | `@hivemind/config` | Shared tsconfig bases and Vitest defaults |
 
 ## Local development
@@ -71,6 +72,8 @@ You need Node 24 and pnpm 12. `package.json` pins pnpm 12.8.1 in `packageManager
    ```
 
    Next reads `apps/web/.env.local`. Open http://localhost:3000. Sign-in works only on port 3000: the dev OAuth app's callback and the app's trusted host are both `localhost:3000`. If `next dev` picks another port because 3000 is taken, auth requests fail with `Host "localhost:3001" is not in the allowed hosts list`.
+
+Under `pnpm dev`, http://localhost:3000/tracker shows the dev tracker: the changelog, blog ideas and issue backlog for this repository's own development. See [docs/tracker.md](docs/tracker.md).
 
 ## CLI development
 

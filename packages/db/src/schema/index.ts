@@ -7,3 +7,4 @@ export * from "./event.ts";
 export * from "./project.ts";
 export * from "./project-api-key.ts";
 export * from "./scope.ts";
+export * from "./tracker.ts";

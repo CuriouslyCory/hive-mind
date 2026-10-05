@@ -18,6 +18,8 @@ Local setup (env, Postgres, migrations, `pnpm dev`): `README.md`.
 
 Production URL: `https://hivemind.curiouslycory.com`. Use it for production links, CLI defaults and OAuth callbacks; environment setup is in `docs/setup.md` (H3–H4).
 
+Dev tracker (the `next dev`-only `/tracker` page, the `pnpm tracker` CLI that is the only way agents write to it, and the `/tracker-git-scan` and `/tracker-backlog-review` skills): `docs/tracker.md`.
+
 ### Done
 
 Work is done when all four pass from the repo root:
