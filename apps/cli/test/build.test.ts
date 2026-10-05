@@ -8,6 +8,7 @@ import {
   TARGETS,
   validateOrigin,
 } from "../scripts/build.ts";
+import { cliVersion } from "../scripts/release-assets.ts";
 import { PRODUCTION_ORIGIN } from "../src/build-info.ts";
 
 describe("hostTarget", () => {
@@ -90,7 +91,7 @@ describe("planBuild", () => {
     const plan = planBuild({ commit: "0123abc" });
     expect(plan.outfile.endsWith("dist/hivemind")).toBe(true);
     expect(plan.defines).toEqual({
-      HIVEMIND_BUILD_VERSION: JSON.stringify("0.0.0"),
+      HIVEMIND_BUILD_VERSION: JSON.stringify(cliVersion()),
       HIVEMIND_BUILD_COMMIT: JSON.stringify("0123abc"),
       HIVEMIND_BUILD_TARGET: JSON.stringify(hostTarget()),
       HIVEMIND_DEFAULT_ORIGIN: JSON.stringify(PRODUCTION_ORIGIN),

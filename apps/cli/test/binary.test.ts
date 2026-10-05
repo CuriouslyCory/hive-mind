@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { build, hostTarget } from "../scripts/build.ts";
+import { cliVersion } from "../scripts/release-assets.ts";
 import { PRODUCTION_ORIGIN } from "../src/build-info.ts";
 import { json, run, shippedBinary } from "./helpers/binaries.ts";
 
@@ -15,7 +16,7 @@ describe("shipped binary (dist/hivemind)", () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toMatch(
-      new RegExp(`^hivemind 0\\.0\\.0 \\([0-9A-Za-z._-]+, ${hostTarget()}\\)\\n$`),
+      new RegExp(`^hivemind ${cliVersion()} \\([0-9A-Za-z._-]+, ${hostTarget()}\\)\\n$`),
     );
   });
 
