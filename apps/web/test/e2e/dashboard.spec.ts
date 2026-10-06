@@ -256,9 +256,31 @@ test("another User's Project, another Project's Plan and Session, and bogus ids 
   }
 });
 
-test("a signed-out visitor is sent to sign in, with the page to come back to", async ({ page }) => {
+test("a signed-out visitor sees the landing page at /, and is sent to sign in from other pages", async ({
+  page,
+}) => {
+  // The proxy rewrites `/` to the landing page, so the URL stays `/`.
   await page.goto("/");
-  await expect(page).toHaveURL(/^[^?]*\/sign-in(\?returnTo=%2F)?$/);
+  await expect(page).toHaveURL("/");
+  // The landing headline only renders on the landing page, so this waits for
+  // it rather than passing before the Projects heading could stream in.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Many agents, one codebase, no collisions.",
+  );
+  await expect(page.getByRole("heading", { name: "Projects" })).toHaveCount(0);
+
+  // A `cursor` the Projects list would ignore still shows the landing page.
+  for (const query of ["?cursor=", "?cursor=a&cursor=b"]) {
+    await page.goto(`/${query}`);
+    await expect(page).toHaveURL(`/${query}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Many agents, one codebase, no collisions.",
+    );
+  }
+
+  // A link to a page of the Projects list is a signed-in page like any other.
+  await page.goto("/?cursor=abc");
+  await expect(page).toHaveURL(`/sign-in?${new URLSearchParams({ returnTo: "/?cursor=abc" })}`);
   await expect(page.getByRole("button", { name: "Sign in with GitHub" })).toBeVisible();
 
   const path = `/projects/${randomUUID()}/plans/PLAN-1`;

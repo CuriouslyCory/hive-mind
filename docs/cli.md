@@ -18,7 +18,7 @@ Each binary is standalone: it needs no Node or Bun on the machine.
 
 ## Install
 
-The first public release has not been published yet. Until it is, neither install path below works. The curl installer also needs the GitHub repository's releases to be public.
+The first public release, [v0.1.0](https://github.com/CuriouslyCory/hive-mind/releases/tag/v0.1.0), is published on GitHub, and the install script below installs it. The npm package is not published yet (see [npm](#npm)).
 
 ### Install script
 
@@ -44,7 +44,7 @@ curl -fsSL https://github.com/CuriouslyCory/hive-mind/releases/latest/download/i
 
 ### npm
 
-The npm package name is `@curiouslycory/hivemind`. This name is pending the owner's confirmation and is not published yet.
+The npm package name is `@curiouslycory/hivemind`. The name is reserved on npm by a placeholder version, 0.0.0, that contains no CLI; the CLI itself is not published there yet, so the commands below do not work until it is.
 
 ```bash
 npm install -g @curiouslycory/hivemind

@@ -12,7 +12,7 @@ The page and its server action respond only when all of these hold (`trackerPage
 - `VERCEL_ENV` is unset or `development`;
 - the request's host is `localhost`, `127.0.0.1` or `[::1]`, on any port.
 
-Outside `next dev`, a production build answers `/tracker` with HTTP 404: in production, in preview deployments and under `next start` (including the browser tests' `E2E_SERVER=start`). Under `next dev`, any other host name also gets a 404. In every case a visitor without a login session cookie is first redirected to `/sign-in` by the proxy (`apps/web/src/proxy.ts`), as on every page. Any signed-in User can use the page. Sign-in works only on `localhost:3000` (see `README.md` → Local development), so use that host. The page tells search engines not to index it.
+Outside `next dev`, a production build answers `/tracker` with HTTP 404: in production, in preview deployments and under `next start` (including the browser tests' `E2E_SERVER=start`). Under `next dev`, any other host name also gets a 404. In every case a visitor without a login session cookie is first redirected to `/sign-in` by the proxy (`apps/web/src/proxy.ts`), as on every page except `/` and the public pages. Any signed-in User can use the page. Sign-in works only on `localhost:3000` (see `README.md` → Local development), so use that host. The page tells search engines not to index it.
 
 `next dev` listens on every interface, and the host check is not a network boundary: anyone on your network can reach the server and send `Host: localhost:3000`. The login session check still applies; to keep the server on loopback, run `pnpm dev -- --hostname 127.0.0.1`.
 

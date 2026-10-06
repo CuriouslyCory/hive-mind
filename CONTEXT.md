@@ -87,6 +87,6 @@ A bare word means the domain concept. Infrastructure meanings of the same word a
 
 One exception is forced by better-auth, which owns the `session` table name: that table holds login sessions, so the table for Sessions is `agent_session` (`agentSession` in code). Outside table and column names, write Session.
 
-In prose the product is "hive-mind". `hivemind` appears only in identifiers (the CLI binary, `@hivemind/*` packages, `.hivemind.json`).
+In prose the product is "hive-mind". The exception is the brand name **HiveMind**, the wordmark, which the public landing page and the brand assets use. `hivemind` appears only in identifiers (the CLI binary, `@hivemind/*` packages, `.hivemind.json`).
 
 Server environment variables never use the `HIVEMIND_` prefix; it is reserved for the CLI.

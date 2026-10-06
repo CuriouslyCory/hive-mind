@@ -1,0 +1,3 @@
+/* The whole design system in one import: tokens first, then components. */
+@import "./tokens.css";
+@import "./components.css";
