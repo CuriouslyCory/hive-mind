@@ -14,6 +14,12 @@ const toneIcons: Record<AlertTone, IconName> = {
 export type AlertProps = Omit<HTMLAttributes<HTMLDivElement>, "title" | "role"> & {
   /** Defaults to `info`. `danger` is announced at once (`role="alert"`); the rest politely (`role="status"`). */
   tone?: AlertTone;
+  /**
+   * Whether the Alert is a live region. Defaults to true. Pass false for a
+   * notice that is part of the page and should not be announced: it then
+   * renders `role="note"`.
+   */
+  live?: boolean;
   title?: ReactNode;
   /** What happened and the next step. A string becomes a paragraph. */
   children?: ReactNode;
@@ -30,11 +36,19 @@ function AlertBody({ children }: { children: ReactNode }) {
 }
 
 /** An inline message. Each tone travels with its glyph, never colour alone. */
-export function Alert({ tone = "info", title, action, className, children, ...rest }: AlertProps) {
+export function Alert({
+  tone = "info",
+  live = true,
+  title,
+  action,
+  className,
+  children,
+  ...rest
+}: AlertProps) {
   return (
     <div
       {...rest}
-      role={tone === "danger" ? "alert" : "status"}
+      role={live ? (tone === "danger" ? "alert" : "status") : "note"}
       className={cx("hm-alert", `hm-alert-${tone}`, className)}
     >
       <Icon name={toneIcons[tone]} />

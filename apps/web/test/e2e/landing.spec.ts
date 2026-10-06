@@ -52,6 +52,16 @@ test("a signed-out visitor gets the landing page at /, and at /welcome", async (
   ).toBeVisible();
 });
 
+test("/welcome names / as its canonical URL", async ({ page }) => {
+  await page.goto("/welcome");
+  const canonical = page.locator('link[rel="canonical"]');
+  await expect(canonical).toHaveCount(1);
+  // Next writes the root as the bare origin; as a URL it is the same as
+  // https://hivemind.curiouslycory.com/.
+  const href = (await canonical.getAttribute("href")) ?? "";
+  expect(new URL(href).href).toBe("https://hivemind.curiouslycory.com/");
+});
+
 test("every Sign in with GitHub link is the relative /sign-in, and the header one opens it", async ({
   page,
 }) => {
@@ -100,6 +110,31 @@ test("the theme switch reflects the system theme, then forces light or dark", as
   await expect(toggle).toHaveAttribute("aria-checked", "true");
 });
 
+// Cache Components hides the page in a React Activity on client navigation
+// and shows it again on Back, without a server render (AGENTS.md). The forced
+// theme and the switch must survive that.
+test("a forced theme survives a client navigation away and Back", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/");
+  const root = landingRoot(page);
+  const toggle = page.getByRole("switch", { name: "Dark theme" });
+  await expect(async () => {
+    await toggle.click();
+    await expect(root).toHaveAttribute("data-theme", "dark", { timeout: 500 });
+  }).toPass();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+  await page.getByRole("banner").getByRole("link", { name: "Sign in with GitHub" }).click();
+  await expect(page).toHaveURL("/sign-in");
+  await expect(page.getByRole("button", { name: "Sign in with GitHub" })).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL("/");
+  await expect(root).toBeVisible();
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+});
+
 test("Copy puts the documented install command on the clipboard", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: E2E_BASE_URL });
   await page.goto("/");
@@ -116,6 +151,29 @@ test("Copy puts the documented install command on the clipboard", async ({ page,
     documentedInstallCommand(),
   );
   // The label goes back after about 1.5 seconds.
+  await expect(copy).toHaveText(/^Copy install command$/, { timeout: 5_000 });
+});
+
+test("without a clipboard, Copy selects the install command and says so", async ({ page }) => {
+  await page.addInitScript(() => {
+    // An insecure origin has no navigator.clipboard.
+    Reflect.deleteProperty(Navigator.prototype, "clipboard");
+  });
+  await page.goto("/");
+  expect(await page.evaluate(() => "clipboard" in navigator)).toBe(false);
+  const copy = page.getByRole("button", { name: /install command$/ });
+  await expect(async () => {
+    await copy.click();
+    await expect(copy).toHaveText(/^Select and copy/, { timeout: 500 });
+  }).toPass();
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "Couldn't copy. The command is selected; press Ctrl+C to copy it.",
+    }),
+  ).toHaveCount(1);
+  expect(await page.evaluate(() => window.getSelection()?.toString().trim())).toBe(
+    documentedInstallCommand(),
+  );
   await expect(copy).toHaveText(/^Copy install command$/, { timeout: 5_000 });
 });
 
@@ -149,7 +207,50 @@ test("the dashboard mock's tabs switch panels by click and by arrow keys", async
   await expect(plans).toHaveAttribute("aria-selected", "true");
 });
 
-for (const width of [360, 390, 430]) {
+test("the dashboard mock's panels are tables with column headers", async ({ page }) => {
+  await page.goto("/");
+  const mock = page.getByRole("region", { name: "Example dashboard with sample data" });
+  const sessions = mock.getByRole("table", { name: "Live Sessions" });
+  await expect(sessions.getByRole("columnheader")).toHaveText([
+    "Status",
+    "Intent",
+    "Branch",
+    "Focus",
+    "Heartbeat",
+  ]);
+  // A header row and the four sample Sessions.
+  await expect(sessions.getByRole("row")).toHaveCount(5);
+  await expect(sessions.getByRole("row").nth(1).getByRole("cell")).toHaveCount(5);
+
+  await expect(async () => {
+    await mock.getByRole("tab", { name: /^Plans/ }).click();
+    await expect(mock.getByRole("table", { name: "Plans" })).toBeVisible({ timeout: 500 });
+  }).toPass();
+  await expect(mock.getByRole("table", { name: "Plans" }).getByRole("columnheader")).toHaveCount(4);
+  await mock.getByRole("tab", { name: /^Activity/ }).click();
+  await expect(
+    mock.getByRole("table", { name: "Recent Events" }).getByRole("columnheader"),
+  ).toHaveText(["Event", "Type", "When"]);
+});
+
+test("at 320px every dashboard mock tab fits inside the mock", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/");
+  const mock = page.getByRole("region", { name: "Example dashboard with sample data" });
+  const box = await mock.boundingBox();
+  if (!box) throw new Error("The dashboard mock has no box.");
+  const tabs = await mock.getByRole("tab").all();
+  expect(tabs).toHaveLength(3);
+  for (const tab of tabs) {
+    const tabBox = await tab.boundingBox();
+    if (!tabBox) throw new Error("A tab has no box.");
+    // The focus ring is 2px outside the tab, at a 2px offset.
+    expect(tabBox.x - 4).toBeGreaterThanOrEqual(box.x);
+    expect(tabBox.x + tabBox.width + 4).toBeLessThanOrEqual(box.x + box.width);
+  }
+});
+
+for (const width of [320, 360, 390, 430]) {
   test(`the page does not scroll sideways at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/");

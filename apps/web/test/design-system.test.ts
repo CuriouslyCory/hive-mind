@@ -327,6 +327,15 @@ describe("Alert", () => {
       expect(tags(render(createElement(Alert, { tone }, "x")), "div")[0]?.role).toBe("status");
     }
   });
+
+  it("renders role=note, not a live region, when live is false", () => {
+    for (const tone of ["info", "warning", "success", "danger"] as const) {
+      const [root] = tags(render(createElement(Alert, { tone, live: false }, "x")), "div");
+      expect(root?.role).toBe("note");
+      expect(root).not.toHaveProperty("aria-live");
+      expect(classesOf(root)).toContain(`hm-alert-${tone}`);
+    }
+  });
 });
 
 describe("Cell", () => {
@@ -429,6 +438,12 @@ describe("Logo", () => {
     expect(image?.alt).toBe("HiveMind");
     expect(image?.width).toBe("160");
     expect(image?.height).toBe("160");
+    expect(image?.src).toContain("hivemind-lockup.png");
+  });
+
+  it("gives a decorative lockup empty alt text", () => {
+    const [image] = tags(render(createElement(LogoLockup, { decorative: true })), "img");
+    expect(image?.alt).toBe("");
     expect(image?.src).toContain("hivemind-lockup.png");
   });
 });

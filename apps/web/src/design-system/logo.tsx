@@ -73,17 +73,27 @@ export type LogoLockupProps = {
   size?: number;
   /** `eager` when the lockup is above the fold. */
   loading?: "eager" | "lazy";
+  /**
+   * Empty alt text, for a lockup that only decorates and whose name would
+   * repeat one the page already gives. Defaults to false.
+   */
+  decorative?: boolean;
   className?: string;
 };
 
 /** The stacked lockup (mark over wordmark) for heroes and calls to action. */
-export function LogoLockup({ size = 200, loading, className }: LogoLockupProps) {
+export function LogoLockup({
+  size = 200,
+  loading,
+  decorative = false,
+  className,
+}: LogoLockupProps) {
   return (
     <Image
       src={brandAssets.lockup.src}
       width={size}
       height={size}
-      alt="HiveMind"
+      alt={decorative ? "" : "HiveMind"}
       loading={loading}
       className={cx("hm-lockup", className)}
     />

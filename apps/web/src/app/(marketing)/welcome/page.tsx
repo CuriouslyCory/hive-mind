@@ -114,6 +114,8 @@ function TopBar() {
           </a>
         </nav>
         <div className="lp-topbar-right">
+          {/* Hidden below 720px: a non-essential badge, and the top bar has
+              no room for it there. */}
           <Badge tone="neutral" pill className="lp-hide-sm">
             Early access
           </Badge>
@@ -289,31 +291,46 @@ function Terminal() {
         <span className="lp-terminal-dot" />
         <span className="lp-terminal-label">A typical run</span>
       </div>
-      {/* Long lines scroll inside the block. Chromium and Firefox put a
-          scrolling block in the tab order themselves. */}
+      {/* Long lines wrap instead of scrolling, so the block never needs a
+          keyboard scroll stop. Each line is its own block, indented so its
+          wrapped rows hang under the text after "$ " or "# ". The "\n" at
+          the end of each line keeps copied text one command per line. */}
       <pre className="lp-term">
         {TYPICAL_RUN.map((line, index) => {
           const key = `${index}`;
-          if (line.kind === "blank") return <span key={key}>{"\n"}</span>;
+          if (line.kind === "blank") {
+            return (
+              <span key={key} className="lp-term-line">
+                {"\n"}
+              </span>
+            );
+          }
           if (line.kind === "comment") {
             return (
-              <span key={key}>
-                <span className="lp-cmt">{line.text}</span>
+              <span key={key} className="lp-term-line lp-cmt">
+                {line.text}
                 {"\n"}
               </span>
             );
           }
           return (
             <span key={key} data-command={fullCommand(line)}>
-              <span className="lp-dim">$</span> {line.text}
-              {line.note ? (
-                <>
-                  {"        "}
-                  <span className="lp-cmt">{line.note}</span>
-                </>
+              <span className="lp-term-line">
+                <span className="lp-dim">$</span> {line.text}
+                {line.note ? (
+                  <>
+                    {"        "}
+                    <span className="lp-cmt lp-term-note">{line.note}</span>
+                  </>
+                ) : null}
+                {"\n"}
+              </span>
+              {line.continuation ? (
+                <span className="lp-term-line lp-term-continuation">
+                  {`    ${line.continuation}`}
+                  {"\n"}
+                </span>
               ) : null}
-              {line.continuation ? `\n    ${line.continuation}` : null}
-              {"\n"}
             </span>
           );
         })}
@@ -451,8 +468,10 @@ function CliSection() {
         </div>
         <div className="lp-install">
           <span className="lp-install-label">Install</span>
-          <code className="lp-mono lp-install-command">{INSTALL_COMMAND}</code>
-          <CopyButton text={INSTALL_COMMAND} what="install command" />
+          <code id="install-command" className="lp-mono lp-install-command">
+            {INSTALL_COMMAND}
+          </code>
+          <CopyButton text={INSTALL_COMMAND} what="install command" sourceId="install-command" />
         </div>
       </div>
     </section>
@@ -521,7 +540,7 @@ function RoadmapSection() {
             <li key={milestone.id} className="lp-ms">
               <span className="lp-mono lp-ms-id">{milestone.id}</span>
               <h3 className="lp-ms-name">{milestone.name}</h3>
-              <span className="lp-ms-note lp-hide-sm">{milestone.note}</span>
+              <span className="lp-ms-note">{milestone.note}</span>
               <Badge tone={MILESTONE_TONES[milestone.status]}>{milestone.status}</Badge>
             </li>
           ))}
@@ -553,7 +572,8 @@ function GetStartedBand() {
         </div>
         <div className="lp-lockup-slot">
           <div className="lp-lockup-tile">
-            <LogoLockup />
+            {/* Decorative: read out, it would only say "HiveMind" once more. */}
+            <LogoLockup decorative />
           </div>
         </div>
       </div>

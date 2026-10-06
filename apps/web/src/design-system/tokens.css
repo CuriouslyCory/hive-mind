@@ -1,6 +1,6 @@
 /* HiveMind design tokens (docs/design-system.md). This file is the source of
-   truth for their values (ADR-0016). No other stylesheet in apps/web
-   declares these names.
+   truth for their values (ADR-0016). No stylesheet in apps/web outside the
+   design system and the pages that opt into it declares or uses these names.
 
    Themes: data-theme="light" or "dark" on an element forces that theme for
    it and everything inside it. Elsewhere the tokens follow the operating

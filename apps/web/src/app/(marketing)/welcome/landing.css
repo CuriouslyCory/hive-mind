@@ -16,7 +16,7 @@
   right: 0;
   min-height: 100dvh;
 }
-.hm-landing :where(a, button, pre, main):focus-visible {
+.hm-landing :where(a, button, main):focus-visible {
   outline: var(--border-focus) solid var(--focus);
   outline-offset: 2px;
 }
@@ -266,6 +266,16 @@
   transform-origin: center;
   animation: lp-buzz 1.2s ease-in-out infinite;
 }
+/* The pulses here are illustration, not live status, so they stop within 5
+   seconds (WCAG 2.2.2; docs/design-system.md → Rules → Motion). The last node
+   starts 1s late, so the honeycomb gets three pulses (1s + 3 × 1.2s) and the
+   Badges, which start together, four (4 × 1.2s). */
+.hm-landing .lp-honeycomb-pulses circle {
+  animation-iteration-count: 3;
+}
+.hm-landing .hm-badge-buzzing::before {
+  animation-iteration-count: 4;
+}
 @keyframes lp-buzz {
   0%,
   100% {
@@ -293,17 +303,18 @@
   gap: 10px;
   margin-top: var(--space-3);
 }
+/* A row wraps rather than truncating the agent's name on a narrow card or
+   under larger text spacing. */
 .hm-landing .lp-sess-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-1) var(--space-3);
 }
 .hm-landing .lp-who {
   font-weight: 700;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .hm-landing .lp-when {
   margin-left: auto;
@@ -352,7 +363,6 @@
   padding: var(--space-6) 28px;
   box-shadow: var(--shadow-float);
   min-width: 0;
-  --focus: var(--honey);
 }
 .hm-landing .lp-terminal-head {
   display: flex;
@@ -372,12 +382,26 @@
   text-transform: uppercase;
   color: var(--honey);
 }
+/* Long lines wrap, so the block never scrolls. Wrapped rows hang 2ch in,
+   under the text after "$ " or "# "; a continuation's under its own text. */
 .hm-landing .lp-term {
   margin: 0;
-  white-space: pre;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font: 400 13px / 20px var(--font-mono);
-  border-radius: var(--radius-sm);
+}
+.hm-landing .lp-term-line {
+  display: block;
+  padding-left: 2ch;
+  text-indent: -2ch;
+}
+.hm-landing .lp-term-continuation {
+  padding-left: 6ch;
+  text-indent: -6ch;
+}
+/* A trailing comment wraps as a whole, never between "#" and its words. */
+.hm-landing .lp-term-note {
+  white-space: nowrap;
 }
 .hm-landing .lp-cmt {
   color: var(--honey);
@@ -426,18 +450,25 @@
 .hm-landing .lp-cells .hm-cell {
   min-width: 0;
 }
+/* The mock's tables. A fixed layout sizes the columns from the header
+   cells, with the main column taking the rest; cells after the first are
+   padded var(--space-3) on the left, as a column gap, which the header
+   widths include. */
 .hm-landing .lp-table {
-  display: flex;
-  flex-direction: column;
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
-.hm-landing .lp-row {
-  display: grid;
-  gap: var(--space-3);
-  align-items: center;
-  padding: var(--space-3) 0;
+.hm-landing .lp-table :is(th, td) {
+  padding: var(--space-3) 0 var(--space-3) var(--space-3);
   border-top: var(--border-hair) solid var(--line);
+  text-align: left;
+  vertical-align: middle;
 }
-.hm-landing .lp-row-head {
+.hm-landing .lp-table :is(th, td):first-child {
+  padding-left: 0;
+}
+.hm-landing .lp-table th {
   border-top: 0;
   padding-top: 0;
   color: var(--ink-muted);
@@ -445,17 +476,32 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.hm-landing .lp-row-sessions {
-  grid-template-columns: 132px minmax(0, 1fr) 148px 88px 92px;
+.hm-landing .lp-col-status,
+.hm-landing .lp-col-key {
+  width: 132px;
 }
-.hm-landing .lp-row-plans {
-  grid-template-columns: 132px minmax(0, 1fr) 148px 180px;
+.hm-landing .lp-col-branch,
+.hm-landing .lp-col-plan-status {
+  width: 160px;
 }
-.hm-landing .lp-row-events {
-  grid-template-columns: minmax(0, 1fr) 180px 92px;
+.hm-landing .lp-col-focus {
+  width: 100px;
 }
-.hm-landing .lp-cell-text {
-  min-width: 0;
+.hm-landing .lp-col-when {
+  width: 104px;
+}
+.hm-landing .lp-col-tasks,
+.hm-landing .lp-col-type {
+  width: 192px;
+}
+.hm-landing .lp-cell-main {
+  overflow-wrap: anywhere;
+}
+/* The secondary line that carries a hidden column's value on small screens
+   (see the 720px breakpoint). */
+.hm-landing .lp-show-sm,
+.hm-landing .lp-show-xs {
+  display: none;
 }
 
 /* CLI */
@@ -481,11 +527,12 @@
   font: 700 13px / 18px var(--font-sans);
   color: var(--ink-muted);
 }
+/* Wraps anywhere rather than scrolling, so it needs no keyboard scroll stop. */
 .hm-landing .lp-install-command {
   flex: 1 1 420px;
   min-width: 0;
-  overflow-x: auto;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--ink);
 }
 
@@ -650,8 +697,30 @@
     font-size: 28px;
     line-height: 34px;
   }
+  /* Only what a small screen can do without: the "Early access" badge and
+     the " with GitHub" of the header's Sign in (its aria-label keeps the
+     full name). Content moves rather than disappears; see .lp-show-sm. */
   .hm-landing .lp-hide-sm {
     display: none;
+  }
+  .hm-landing .lp-show-sm {
+    display: block;
+  }
+  /* A moved branch or Event type, in the code-sm style for identifiers in
+     tables (docs/design-system.md → Type scale). */
+  .hm-landing .lp-show-sm.lp-mono {
+    font: 500 11px / 16px var(--font-mono);
+    margin-top: var(--space-0_5);
+  }
+  .hm-landing .lp-ms {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  /* The note drops to its own line under the name, after the status. */
+  .hm-landing .lp-ms-note {
+    order: 1;
+    flex-basis: 100%;
+    padding-left: calc(36px + var(--space-4));
   }
   .hm-landing .lp-lockup-tile img {
     height: 140px;
@@ -659,7 +728,8 @@
 
   /* Not in the design, which is 560px wide at a 390px viewport: the top bar
      drops "Early access" and " with GitHub" and shrinks the logo, the
-     honeycomb stays inside the column, and the tables keep three columns. */
+     honeycomb stays inside the column, and the tables keep two or three
+     columns, the others moving into the main cell. */
   .hm-landing .lp-topbar-inner {
     gap: var(--space-3);
   }
@@ -690,20 +760,25 @@
   .hm-landing .lp-live {
     margin-left: 0;
   }
-  .hm-landing .lp-row-sessions {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+  /* The main column takes the room; the others fit their content. */
+  .hm-landing .lp-table {
+    table-layout: auto;
   }
-  .hm-landing .lp-row-plans {
-    grid-template-columns: 56px minmax(0, 1fr) auto;
+  .hm-landing .lp-table :is(th, td) {
+    width: auto;
+    white-space: nowrap;
   }
-  .hm-landing .lp-row-events {
-    grid-template-columns: minmax(0, 1fr) auto;
+  .hm-landing .lp-table :is(.lp-col-main, .lp-cell-main) {
+    width: 100%;
+    white-space: normal;
   }
   .hm-landing .lp-footer-note {
     margin-left: 0;
   }
+}
 
-  /* Touch targets: at least 44px tall. */
+/* Touch targets: at least 44px tall on small screens and on any touch screen. */
+@media (max-width: 720px), (pointer: coarse) {
   .hm-landing .lp-home,
   .hm-landing .hm-switch,
   .hm-landing .lp-foot-link {
@@ -730,5 +805,22 @@
 @media (max-width: 480px) {
   .hm-landing .lp-cells {
     grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  /* The heartbeat column would leave the intent too narrow; its value moves
+     under the status Badge. */
+  .hm-landing .lp-hide-xs {
+    display: none;
+  }
+  .hm-landing .lp-show-xs {
+    display: block;
+    margin-top: var(--space-1);
+  }
+}
+
+/* Printed, the page flows from the top of the first sheet like any other. */
+@media print {
+  .hm-landing {
+    position: static;
+    min-height: 0;
   }
 }

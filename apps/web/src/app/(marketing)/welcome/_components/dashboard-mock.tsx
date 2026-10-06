@@ -108,86 +108,136 @@ const EVENTS: readonly SampleEvent[] = [
   },
 ];
 
+// The panels are tables, so each cell is announced with its column header.
+// Below 720px a column that does not fit (lp-hide-sm) moves to a secondary
+// line in the main cell (lp-show-sm) rather than disappearing, and below
+// 480px the Sessions' heartbeat moves under the status (lp-hide-xs,
+// lp-show-xs).
+
 function SessionsPanel() {
   return (
-    <div className="lp-table">
-      <div className="lp-row lp-row-sessions lp-row-head">
-        <span>Status</span>
-        <span>Intent</span>
-        <span className="lp-hide-sm">Branch</span>
-        <span className="lp-hide-sm">Focus</span>
-        <span>Heartbeat</span>
-      </div>
-      {SESSIONS.map((session) => (
-        <div key={session.intent} className="lp-row lp-row-sessions">
-          <span>
-            {session.status === "Buzzing" ? (
-              <Badge tone="honey" buzzing>
-                Buzzing
-              </Badge>
-            ) : (
-              <Badge tone="neutral">Resting</Badge>
-            )}
-          </span>
-          <span className="lp-cell-text">
-            <b>{session.intent}</b>
-            <br />
-            <span className="lp-faint lp-small">{session.owner}</span>
-          </span>
-          <span className="lp-mono lp-muted lp-hide-sm">{session.branch}</span>
-          <span className="lp-mono lp-hide-sm">{session.focus}</span>
-          <span className="lp-small lp-muted">{session.heartbeat}</span>
-        </div>
-      ))}
-    </div>
+    <table className="lp-table" aria-label="Live Sessions">
+      <thead>
+        <tr>
+          <th scope="col" className="lp-col-status">
+            Status
+          </th>
+          <th scope="col" className="lp-col-main">
+            Intent
+          </th>
+          <th scope="col" className="lp-col-branch lp-hide-sm">
+            Branch
+          </th>
+          <th scope="col" className="lp-col-focus lp-hide-sm">
+            Focus
+          </th>
+          <th scope="col" className="lp-col-when lp-hide-xs">
+            Heartbeat
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {SESSIONS.map((session) => (
+          <tr key={session.intent}>
+            <td>
+              {session.status === "Buzzing" ? (
+                <Badge tone="honey" buzzing>
+                  Buzzing
+                </Badge>
+              ) : (
+                <Badge tone="neutral">Resting</Badge>
+              )}
+              <span className="lp-show-xs lp-small lp-muted">{session.heartbeat}</span>
+            </td>
+            <td className="lp-cell-main">
+              <b>{session.intent}</b>
+              <br />
+              <span className="lp-faint lp-small">{session.owner}</span>
+              <span className="lp-show-sm lp-mono lp-muted">
+                {session.focus === "—" ? session.branch : `${session.branch} · ${session.focus}`}
+              </span>
+            </td>
+            <td className="lp-mono lp-muted lp-hide-sm">{session.branch}</td>
+            <td className="lp-mono lp-hide-sm">{session.focus}</td>
+            <td className="lp-small lp-muted lp-hide-xs">{session.heartbeat}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
 function PlansPanel() {
   return (
-    <div className="lp-table">
-      <div className="lp-row lp-row-plans lp-row-head">
-        <span>Plan</span>
-        <span>Title</span>
-        <span>Status</span>
-        <span className="lp-hide-sm">Tasks</span>
-      </div>
-      {PLANS.map((plan) => (
-        <div key={plan.key} className="lp-row lp-row-plans">
-          <span className="lp-mono">{plan.key}</span>
-          <span className="lp-cell-text">
-            <b>{plan.title}</b>
-          </span>
-          <span>
-            <Badge tone={PLAN_TONES[plan.status]}>{plan.status}</Badge>
-          </span>
-          <span className="lp-small lp-muted lp-hide-sm">
-            {plan.done} of {plan.total} done
-          </span>
-        </div>
-      ))}
-    </div>
+    <table className="lp-table" aria-label="Plans">
+      <thead>
+        <tr>
+          <th scope="col" className="lp-col-key">
+            Plan
+          </th>
+          <th scope="col" className="lp-col-main">
+            Title
+          </th>
+          <th scope="col" className="lp-col-plan-status">
+            Status
+          </th>
+          <th scope="col" className="lp-col-tasks lp-hide-sm">
+            Tasks
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {PLANS.map((plan) => (
+          <tr key={plan.key}>
+            <td className="lp-mono">{plan.key}</td>
+            <td className="lp-cell-main">
+              <b>{plan.title}</b>
+              <span className="lp-show-sm lp-small lp-muted">
+                {plan.done} of {plan.total} Tasks done
+              </span>
+            </td>
+            <td>
+              <Badge tone={PLAN_TONES[plan.status]}>{plan.status}</Badge>
+            </td>
+            <td className="lp-small lp-muted lp-hide-sm">
+              {plan.done} of {plan.total} done
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
 function ActivityPanel() {
   return (
-    <div className="lp-table">
-      <div className="lp-row lp-row-events lp-row-head">
-        <span>Event</span>
-        <span className="lp-hide-sm">Type</span>
-        <span>When</span>
-      </div>
-      {EVENTS.map((event) => (
-        <div key={`${event.type}-${event.when}`} className="lp-row lp-row-events">
-          <span className="lp-cell-text">
-            <b>{event.actor}</b> {event.what}
-          </span>
-          <span className="lp-mono lp-muted lp-hide-sm">{event.type}</span>
-          <span className="lp-small lp-muted">{event.when}</span>
-        </div>
-      ))}
-    </div>
+    <table className="lp-table" aria-label="Recent Events">
+      <thead>
+        <tr>
+          <th scope="col" className="lp-col-main">
+            Event
+          </th>
+          <th scope="col" className="lp-col-type lp-hide-sm">
+            Type
+          </th>
+          <th scope="col" className="lp-col-when">
+            When
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {EVENTS.map((event) => (
+          <tr key={`${event.type}-${event.when}`}>
+            <td className="lp-cell-main">
+              <b>{event.actor}</b> {event.what}
+              <span className="lp-show-sm lp-mono lp-muted">{event.type}</span>
+            </td>
+            <td className="lp-mono lp-muted lp-hide-sm">{event.type}</td>
+            <td className="lp-small lp-muted">{event.when}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -203,7 +253,7 @@ export function DashboardMock() {
   return (
     <Card className="lp-dash" role="region" aria-label="Example dashboard with sample data">
       <div className="lp-dash-head">
-        <span className="lp-h3">web-app</span>
+        <h3 className="lp-h3">web-app</h3>
         <span className="lp-small lp-muted">acme · PLAN-1 to PLAN-4</span>
         <span className="lp-live">
           <LiveHex />
@@ -217,7 +267,8 @@ export function DashboardMock() {
           <Cell label="Open tasks" value="11" tone="neutral" />
           <Cell label="Overlaps" value="1" tone="neutral" />
         </div>
-        <Alert tone="warning" title="Overlap on packages/parser/lexer.ts">
+        {/* Part of a static picture: announcing it would interrupt the page. */}
+        <Alert tone="warning" live={false} title="Overlap on packages/parser/lexer.ts">
           Two live Sessions' Scopes cover this path. Advisory only; nothing is blocked.
         </Alert>
         <Tabs
