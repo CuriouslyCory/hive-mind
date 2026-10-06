@@ -184,6 +184,35 @@ test("a decision recorded through the API reaches an open home page on its next 
   await page.context().close();
 });
 
+test("a long Project name is cut off in the rail and leaves room for both columns", async ({
+  browser,
+}) => {
+  const { user, page } = await signedInPage(browser, users);
+  const api = await coordinationApi(users, user.id);
+  const organizationId = await personalOrganizationId(pool, user.id);
+  const name = `A Project whose name is far too long for the rail ${randomUUID().slice(0, 6)}`;
+  await api.createProject(organizationId, name);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const projectName = page
+    .getByRole("navigation", { name: "Projects" })
+    .getByRole("link")
+    .filter({ hasText: name })
+    .locator(".home-rail-name");
+  await expect(projectName).toHaveAttribute("title", name);
+  const cut = await projectName.evaluate((element) => element.scrollWidth > element.clientWidth);
+  expect(cut).toBe(true);
+
+  // The feeds sit beside the tables, not under them.
+  const sessions = await sessionsTable(page).boundingBox();
+  const decisions = await page.getByTestId("home-decisions").boundingBox();
+  expect(sessions && decisions).toBeTruthy();
+  if (sessions && decisions) expect(decisions.x).toBeGreaterThan(sessions.x + sessions.width);
+
+  await page.context().close();
+});
+
 test("a signed-out link to a home-page view goes to sign-in and keeps the view as the return path", async ({
   page,
 }) => {

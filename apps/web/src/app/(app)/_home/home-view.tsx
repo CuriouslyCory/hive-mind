@@ -163,7 +163,9 @@ function RailLink({
         data-selected={selected || undefined}
       >
         <span className="home-rail-text">
-          <span className="home-rail-name">{name}</span>
+          <span className="home-rail-name" title={name}>
+            {name}
+          </span>
           <span className="home-rail-sub">{sub}</span>
         </span>
         {buzzing > 0 ? (
