@@ -225,3 +225,113 @@ export async function collectTouchedPaths(cwd: string, env: Env): Promise<Touche
     return { available: true, root, failure: `git status failed (${status.failure})` };
   return { available: true, root, selection: selectTouchedPaths(parsePorcelainZ(status.stdout)) };
 }
+
+// ---------------------------------------------------------------------------
+// Commit reads for ADR sync (issue #19, ADR-0017). `adr sync` reads one
+// commit's tree and never the working tree, so unmerged branches and dirty
+// files cannot reach hive-mind's copy. Revisions come from the user (`--ref`)
+// and are passed after `--end-of-options`, so a value starting with `-` is a
+// revision, never an option.
+
+/** Enough for `git ls-tree` of a directory with tens of thousands of entries. */
+const MAX_TREE_BYTES = 32 * 1024 * 1024;
+
+/** The full hash of the commit `rev` names, or null when it names none. */
+export async function gitResolveCommit(cwd: string, env: Env, rev: string): Promise<string | null> {
+  const result = await runGit(
+    ["rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`],
+    { cwd, env },
+  );
+  const hash = result.ok ? singleLine(result.stdout) : null;
+  return hash !== null && gitCommitSchema.safeParse(hash).success ? hash : null;
+}
+
+/** Whether this clone has the commit `hash` (a shallow clone or a fresh clone after a force-push may not). */
+export async function gitHasCommit(cwd: string, env: Env, hash: string): Promise<boolean> {
+  if (!gitCommitSchema.safeParse(hash).success) return false;
+  return (await runGit(["cat-file", "-e", `${hash}^{commit}`], { cwd, env })).ok;
+}
+
+/**
+ * Whether `ancestor` is an ancestor of (or equal to) `descendant`: true or
+ * false as git answers, null when git cannot tell (a missing commit, a
+ * shallow history, git failing).
+ */
+export async function gitIsAncestor(
+  cwd: string,
+  env: Env,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean | null> {
+  const result = await runGit(["merge-base", "--is-ancestor", ancestor, descendant], { cwd, env });
+  if (result.ok) return true;
+  return result.failure === "exit 1" ? false : null;
+}
+
+export interface GitTreeEntry {
+  /** `100644`, `100755`, `120000` (symlink), `040000` (tree), `160000` (submodule). */
+  mode: string;
+  type: string;
+  oid: string;
+  /** Bytes of a blob; null for anything else. */
+  size: number | null;
+  /** Repository-relative POSIX path. A name that is not UTF-8 has U+FFFD in it. */
+  path: string;
+}
+
+export type GitTreeResult = { ok: true; entries: GitTreeEntry[] } | { ok: false; failure: string };
+
+const lossyUtf8 = new TextDecoder("utf-8");
+
+/**
+ * The entries directly inside `directory` (repository-relative, no trailing
+ * slash) in `commit`'s tree, with blob sizes, so a large blob can be refused
+ * before it is read. A missing directory is an empty list.
+ */
+export async function gitListTree(
+  cwd: string,
+  env: Env,
+  commit: string,
+  directory: string,
+): Promise<GitTreeResult> {
+  const result = await runGit(
+    ["ls-tree", "-l", "-z", "--full-tree", "--end-of-options", commit, "--", `${directory}/`],
+    { cwd, env, maxBytes: MAX_TREE_BYTES },
+  );
+  if (!result.ok) return { ok: false, failure: result.failure ?? "unknown" };
+  const entries: GitTreeEntry[] = [];
+  let start = 0;
+  for (let index = 0; index < result.stdout.length; index++) {
+    if (result.stdout[index] !== 0) continue;
+    const field = result.stdout.subarray(start, index);
+    start = index + 1;
+    // `<mode> SP <type> SP <oid> SP+ <size> TAB <path>`; the path is unquoted under -z.
+    const tab = field.indexOf(0x09);
+    if (tab === -1) continue;
+    const [mode, type, oid, size] = field.subarray(0, tab).toString("latin1").trim().split(/ +/);
+    if (!mode || !type || !oid) continue;
+    entries.push({
+      mode,
+      type,
+      oid,
+      size: size === undefined || size === "-" ? null : Number(size),
+      path: lossyUtf8.decode(field.subarray(tab + 1)),
+    });
+  }
+  return { ok: true, entries };
+}
+
+export type GitBlobResult = { ok: true; bytes: Buffer } | { ok: false; failure: string };
+
+/** A blob's exact bytes; a blob larger than `maxBytes` is a failure (`maxBuffer`), not a partial read. */
+export async function gitReadBlob(
+  cwd: string,
+  env: Env,
+  oid: string,
+  maxBytes: number,
+): Promise<GitBlobResult> {
+  const result = await runGit(["cat-file", "blob", oid], { cwd, env, maxBytes });
+  return result.ok
+    ? { ok: true, bytes: result.stdout }
+    : { ok: false, failure: result.failure ?? "unknown" };
+}

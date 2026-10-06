@@ -138,6 +138,12 @@ describe("registry", () => {
       "task claim",
       "session heartbeat",
       "scope check",
+      "adr new",
+      "adr list",
+      "adr show",
+      "adr status",
+      "adr supersede",
+      "adr sync",
     ])
       expect(help.stdout).toContain(name);
   });

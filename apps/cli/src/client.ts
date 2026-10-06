@@ -15,15 +15,19 @@ import {
   type FinalizeCollectionInput,
   type HeartbeatSessionInput,
   isApiErrorCode,
+  type ListAdrsInput,
   type PlanStatus,
   type RegisterCollectionManifestInput,
   type RemoveSessionScopeInput,
+  type ReserveAdrInput,
   type SessionListFilter,
   type SetPlanStatusInput,
   type StartSessionInput,
+  type SyncAdrsInput,
   type TaskStatus,
   type UpdatePlanInput,
   type UpdateSessionInput,
+  type UploadAdrContentsInput,
   type UploadCollectionBatchInput,
 } from "@hivemind/contract";
 import { createORPCClient, ORPCError } from "@orpc/client";
@@ -241,6 +245,89 @@ const projectStatus = z.looseObject({
     overlaps: z.boolean(),
   }),
 });
+// ADRs (M4, issue #19). State, status and change kinds stay plain strings for
+// the same reason as Plan statuses.
+const adrReservation = z.looseObject({
+  title: z.string(),
+  slug: z.string(),
+  gitBranch: nullableString,
+  sessionId: nullableString,
+  reservedAt: z.string(),
+});
+const adrSummaryShape = {
+  id: z.string(),
+  projectId: z.string(),
+  number: z.number(),
+  state: z.string(),
+  title: z.string(),
+  slug: z.string(),
+  path: nullableString,
+  status: nullableString,
+  date: nullableString,
+  supersedes: z.array(z.number()),
+  contentSha256: nullableString,
+  commitSha: nullableString,
+  syncedAt: nullableString,
+  reservation: adrReservation.nullable(),
+  reservationTaken: z.boolean(),
+  warningCount: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+};
+const adrProblem = z.looseObject({ code: z.string(), message: z.string() });
+const adrSummary = z.looseObject(adrSummaryShape);
+const adr = z.looseObject({
+  ...adrSummaryShape,
+  content: nullableString,
+  supersededBy: z.array(z.number()),
+  warnings: z.array(adrProblem),
+});
+const adrSyncState = z.looseObject({
+  commitSha: z.string(),
+  syncedAt: z.string(),
+  syncedBy: z.unknown(),
+});
+const adrPage = z.looseObject({
+  items: z.array(adrSummary),
+  nextCursor: nullableString,
+  lastSync: adrSyncState.nullable(),
+});
+const reservedAdr = z.looseObject({ adr, created: z.boolean() });
+const adrWithSync = z.looseObject({ adr, lastSync: adrSyncState.nullable() });
+const adrContentResult = z.looseObject({
+  sha256: z.string(),
+  valid: z.boolean(),
+  created: z.boolean(),
+  errors: z.array(adrProblem),
+  warnings: z.array(adrProblem),
+});
+const uploadedAdrContents = z.looseObject({ files: z.array(adrContentResult) });
+const adrChange = z.looseObject({
+  number: z.number(),
+  change: z.string(),
+  path: z.string(),
+  statusFrom: nullableString,
+  statusTo: nullableString,
+});
+const adrSyncWarning = z.looseObject({
+  number: z.number(),
+  path: z.string(),
+  code: z.string(),
+  message: z.string(),
+});
+const adrSyncResult = z.looseObject({
+  changed: z.boolean(),
+  lastSync: adrSyncState,
+  previousCommitSha: nullableString,
+  forced: z.boolean(),
+  added: z.number(),
+  updated: z.number(),
+  removed: z.number(),
+  unchanged: z.number(),
+  changes: z.array(adrChange),
+  warnings: z.looseObject({ items: z.array(adrSyncWarning), complete: z.boolean() }),
+});
+
 const createdPlan = z.looseObject({ plan, created: z.boolean() });
 const changedPlan = z.looseObject({ plan, changed: z.boolean() });
 const planStatusChange = z.looseObject({
@@ -305,6 +392,11 @@ export const lenientSchemas = {
   collectionChange,
   collectionBatch,
   projectStatus,
+  adrPage,
+  reservedAdr,
+  adrWithSync,
+  uploadedAdrContents,
+  adrSyncResult,
 } as const;
 
 export type ApiOrganization = z.infer<typeof organization>;
@@ -322,6 +414,14 @@ export type ApiOverlapPage = z.infer<typeof overlapPage>;
 export type ApiHeartbeat = z.infer<typeof heartbeat>;
 export type ApiCollectionState = z.infer<typeof collectionState>;
 export type ApiProjectStatus = z.infer<typeof projectStatus>;
+export type ApiAdrSummary = z.infer<typeof adrSummary>;
+export type ApiAdr = z.infer<typeof adr>;
+export type ApiAdrPage = z.infer<typeof adrPage>;
+export type ApiAdrSyncState = z.infer<typeof adrSyncState>;
+export type ApiAdrChange = z.infer<typeof adrChange>;
+export type ApiAdrSyncWarning = z.infer<typeof adrSyncWarning>;
+export type ApiAdrContentResult = z.infer<typeof adrContentResult>;
+export type ApiAdrSyncResult = z.infer<typeof adrSyncResult>;
 export type TaskAction = "release" | "start" | "done";
 
 export interface ApiPage<T> {
@@ -471,6 +571,25 @@ export interface HivemindApi {
     input: Omit<FinalizeCollectionInput, "id">,
   ): Promise<{ collection: ApiCollectionState; changed: boolean }>;
   getProjectStatus(projectId: string, sessionId?: string): Promise<ApiProjectStatus>;
+
+  // ADRs. `reserveAdr` takes a caller-generated `adrId`, like the creations
+  // above. The two upload calls are safe to repeat: content is addressed by
+  // its sha256, and a sync of the commit already synced with the same files
+  // changes nothing.
+  listAdrs(projectId: string, input?: Omit<ListAdrsInput, "id">): Promise<ApiAdrPage>;
+  reserveAdr(
+    projectId: string,
+    input: Omit<ReserveAdrInput, "id">,
+  ): Promise<{ adr: ApiAdr; created: boolean }>;
+  getAdr(
+    projectId: string,
+    number: number,
+  ): Promise<{ adr: ApiAdr; lastSync: ApiAdrSyncState | null }>;
+  uploadAdrContents(
+    projectId: string,
+    files: UploadAdrContentsInput["files"],
+  ): Promise<{ files: ApiAdrContentResult[] }>;
+  syncAdrs(projectId: string, input: Omit<SyncAdrsInput, "id">): Promise<ApiAdrSyncResult>;
   /** The raw typed oRPC client, for routes added after this file. Outputs are unvalidated. */
   readonly orpc: ContractRouterClient<ApiContract>;
 }
@@ -610,8 +729,9 @@ export function createOriginFetch(options: ApiClientOptions): OriginFetch {
       response = await fetchImpl(url, {
         method: request.method,
         headers,
-        // Management bodies are small JSON (16 KiB cap), so buffering is fine
-        // and avoids streaming-body (duplex) differences between runtimes.
+        // Request bodies are small JSON (16 KiB, 256 KiB for ADR uploads), so
+        // buffering is fine and avoids streaming-body (duplex) differences
+        // between runtimes.
         body: idempotent ? undefined : await request.arrayBuffer(),
         redirect: "manual",
         signal: AbortSignal.any(signals),
@@ -884,6 +1004,26 @@ export function createApiClient(options: ApiClientOptions): HivemindApi {
         orpc.projects.status(
           sessionId === undefined ? { id: projectId } : { id: projectId, sessionId },
         ),
+      ),
+    listAdrs: (projectId, input = {}) =>
+      call("projects.adrs.list", adrPage, () =>
+        orpc.projects.adrs.list({ id: projectId, ...input }),
+      ),
+    reserveAdr: (projectId, input) =>
+      call("projects.adrs.reserve", reservedAdr, () =>
+        orpc.projects.adrs.reserve({ id: projectId, ...input }),
+      ),
+    getAdr: (projectId, number) =>
+      call("projects.adrs.get", adrWithSync, () =>
+        orpc.projects.adrs.get({ id: projectId, number }),
+      ),
+    uploadAdrContents: (projectId, files) =>
+      call("projects.adrs.contents", uploadedAdrContents, () =>
+        orpc.projects.adrs.contents({ id: projectId, files }),
+      ),
+    syncAdrs: (projectId, input) =>
+      call("projects.adrs.sync", adrSyncResult, () =>
+        orpc.projects.adrs.sync({ id: projectId, ...input }),
       ),
   };
 }

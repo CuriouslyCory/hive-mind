@@ -7,18 +7,28 @@ import { createFileStore, type FileCredentialStore } from "../../src/credentials
 import { type MemoryStore, memoryStore } from "./memory-store.ts";
 import { runShell, type ShellResult } from "./shell.ts";
 
-/** A clock whose sleeps return at once and advance `now`; every sleep is recorded. */
+/**
+ * A clock whose sleeps return at once and advance `now`; every sleep is
+ * recorded. `today()` returns `date`, which tests may change.
+ */
 export interface FakeClock extends Clock {
   sleeps: number[];
+  /** What `today()` returns; `FAKE_TODAY` unless a test sets it. */
+  date: string;
   /** Called at the start of each sleep (e.g. to abort the signal on the nth wait). */
   onSleep?: (index: number) => void;
 }
 
-export function fakeClock(): FakeClock {
+/** The date the fake clock reports by default. */
+export const FAKE_TODAY = "2026-10-05";
+
+export function fakeClock(date = FAKE_TODAY): FakeClock {
   let now = 0;
   const clock: FakeClock = {
     sleeps: [],
+    date,
     now: () => now,
+    today: () => clock.date,
     async sleep(ms, signal) {
       clock.onSleep?.(clock.sleeps.length);
       clock.sleeps.push(ms);

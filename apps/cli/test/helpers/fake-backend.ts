@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
-import { MAX_MANAGEMENT_BODY_BYTES, PROJECT_KEY_PERMISSIONS } from "@hivemind/contract";
+import {
+  MAX_ADR_UPLOAD_BODY_BYTES,
+  MAX_MANAGEMENT_BODY_BYTES,
+  PROJECT_KEY_PERMISSIONS,
+} from "@hivemind/contract";
 import {
   type FakeServer,
   type RecordedRequest,
@@ -283,8 +287,13 @@ export async function startFakeBackend(
         notFound();
         return;
       }
-      // The server's request cap, enforced before parsing.
-      if (Buffer.byteLength(request.body) > MAX_MANAGEMENT_BODY_BYTES) {
+      // The server's request cap, enforced before parsing; the two ADR
+      // upload routes have their own.
+      const cap =
+        request.method === "POST" && /^adrs\/(?:contents|sync)$/.test(parts.slice(2).join("/"))
+          ? MAX_ADR_UPLOAD_BODY_BYTES
+          : MAX_MANAGEMENT_BODY_BYTES;
+      if (Buffer.byteLength(request.body) > cap) {
         sendOrpcError(response, 413, "PAYLOAD_TOO_LARGE", "The request body is too large.");
         return;
       }
