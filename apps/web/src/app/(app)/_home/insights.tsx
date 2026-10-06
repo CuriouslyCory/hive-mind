@@ -40,9 +40,19 @@ function Stat({
       <dt className="home-eyebrow">{label}</dt>
       <dd className="home-stat-value">{stat.value === null ? "—" : format(stat.value)}</dd>
       <dd className={`home-small home-num home-delta-${delta?.tone ?? "flat"}`}>
-        {delta
-          ? delta.text
-          : `No comparison with the ${RANGE_TEXT[dashboard.params.range].previous}`}
+        {delta ? (
+          <>
+            {delta.text}
+            {/* The colour says which way is good; so does this, in words. */}
+            {delta.tone === "flat" ? null : (
+              <span className="home-sr-only">
+                {delta.tone === "good" ? " (better)" : " (worse)"}
+              </span>
+            )}
+          </>
+        ) : (
+          `No comparison with the ${RANGE_TEXT[dashboard.params.range].previous}`
+        )}
       </dd>
     </div>
   );

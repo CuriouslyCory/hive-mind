@@ -9,6 +9,8 @@ import {
   type HomeRange,
   type HomeStat,
   type HomeThroughputBucket,
+  type PlanTab,
+  type SessionTab,
 } from "../../../server/dashboard/home-types";
 import type { Attribution, SessionLabel } from "../../../server/dashboard/queries";
 
@@ -23,6 +25,34 @@ export function homeRoute(params: HomeParams, patch: Partial<HomeParams> = {}): 
 /** "1 Task", "3 Tasks". `plural` is the irregular plural, when there is one. */
 export function plural(count: number, word: string, pluralWord = `${word}s`): string {
   return `${count} ${count === 1 ? word : pluralWord}`;
+}
+
+const SESSION_TAB_WORDS: Record<SessionTab, string> = {
+  active: "active ",
+  ended: "ended ",
+  overlap: "overlapping ",
+  all: "",
+};
+
+const PLAN_TAB_WORDS: Record<PlanTab, string> = {
+  all: "",
+  active: "active ",
+  paused: "paused ",
+  done: "finished ",
+};
+
+/**
+ * How many rows a list view's selected tab has, named by the tab so that it
+ * agrees with the tab's count rather than the card's total: "3 active
+ * Sessions", "4 Sessions" (All), "2 paused Plans".
+ */
+export function listCount(
+  list: { kind: "sessions"; tab: SessionTab } | { kind: "plans"; tab: PlanTab },
+  count: number,
+): string {
+  const word = list.kind === "sessions" ? SESSION_TAB_WORDS[list.tab] : PLAN_TAB_WORDS[list.tab];
+  const noun = list.kind === "sessions" ? "Session" : "Plan";
+  return `${count} ${word}${count === 1 ? noun : `${noun}s`}`;
 }
 
 /**

@@ -18,7 +18,7 @@ import { ThemeSwitch } from "../../../site/theme-switch";
 import { projectPath } from "../_components/paths";
 import { SignOutButton } from "../sign-out-button";
 import { FilterInput } from "./filter-input";
-import { homeRoute, plural, RANGE_TEXT, sessionName } from "./format";
+import { homeRoute, listCount, plural, RANGE_TEXT, sessionName } from "./format";
 import { Freshness } from "./freshness";
 import { Activity, Agents, Decisions, HotPaths, Throughput } from "./insights";
 import { NavTabs } from "./nav-tabs";
@@ -182,7 +182,9 @@ function RailLink({
 export function ProjectsRail({ dashboard }: { dashboard: HomeDashboard }) {
   const { params, projects } = dashboard;
   return (
-    <aside className="home-rail" aria-labelledby="home-rail-heading">
+    // One landmark: the navigation, named by the heading. The rail's notes
+    // need none of their own.
+    <div className="home-rail">
       <h2 id="home-rail-heading" className="home-eyebrow home-rail-heading">
         Projects
       </h2>
@@ -215,7 +217,7 @@ export function ProjectsRail({ dashboard }: { dashboard: HomeDashboard }) {
       <p className="home-rail-note home-rail-foot">
         Add a Project with <code className="hm-code">hivemind init</code> in its repository.
       </p>
-    </aside>
+    </div>
   );
 }
 
@@ -234,10 +236,12 @@ function MainHeading({ dashboard }: { dashboard: HomeDashboard }) {
       : "Every Plan, Session and Event across the Organizations you belong to, live.";
   } else if (params.view === "plans") {
     title = "Plans";
-    meta = `${plural(dashboard.plans.matching, "Plan")} in ${scopeName}${matching}.`;
+    const { tab, matching: count } = dashboard.plans;
+    meta = `${listCount({ kind: "plans", tab }, count)} in ${scopeName}${matching}.`;
   } else {
     title = "Sessions";
-    meta = `${plural(dashboard.sessions.matching, "Session")} in ${scopeName}${matching}.`;
+    const { tab, matching: count } = dashboard.sessions;
+    meta = `${listCount({ kind: "sessions", tab }, count)} in ${scopeName}${matching}.`;
   }
   return (
     <div className="home-heading-row">

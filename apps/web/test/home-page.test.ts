@@ -5,6 +5,7 @@ import {
   attentionDetail,
   attributionLabel,
   eventPredicate,
+  listCount,
   statDelta,
   throughputSummary,
 } from "../src/app/(app)/_home/format";
@@ -89,6 +90,16 @@ describe("the home view", () => {
     expect(current.map((link) => link.text)).toEqual(["All Projects2 Projects2 buzzing"]);
   });
 
+  it("gives the rail one landmark, named by its heading", () => {
+    expect(html).not.toContain("<aside");
+    expect(html.match(/aria-labelledby="home-rail-heading"/g)).toHaveLength(1);
+    expect(html).toContain('<nav aria-labelledby="home-rail-heading">');
+  });
+
+  it("reads each tab's count after its label", () => {
+    expect(html).toMatch(/>Active<span class="hm-sr-only">, <\/span><span class="hm-tab-count">/);
+  });
+
   it("links each summary cell to the list it summarizes", () => {
     expect(hrefOf(html, /^Active Plans: 3\./)).toBe("/?view=plans&plans=active");
     expect(hrefOf(html, /^Buzzing: 2\./)).toBe("/?view=sessions");
@@ -135,6 +146,9 @@ describe("the home view", () => {
   it("shows Throughput deltas, colored by whether they are good, and a dash for a null median", () => {
     expect(html).toMatch(/home-delta-good[^"]*">\+15% vs previous 7 days/);
     expect(html).toMatch(/home-delta-bad[^"]*">-25% vs previous 7 days/);
+    // Not by colour alone.
+    expect(text(html)).toContain("+15% vs previous 7 days (better)");
+    expect(text(html)).toContain("-25% vs previous 7 days (worse)");
     // Plans finished had no previous value to compare with.
     expect(text(html)).toContain("No comparison with the previous 7 days");
     expect(html).toMatch(/<dd class="home-stat-value">—<\/dd>/);
@@ -222,7 +236,21 @@ describe("the list views", () => {
     expect(html).toMatch(/<h1[^>]*>Sessions<\/h1>/);
     expect(html).toContain('data-testid="home-sessions"');
     expect(html).not.toContain('data-testid="home-plans"');
+    // The count is the Active tab's, so the line names the tab.
+    expect(text(html)).toContain("3 active Sessions in all Projects.");
     expect(html).not.toContain("Active Plans: 3");
+  });
+});
+
+describe("listCount", () => {
+  it("names the selected tab, except All", () => {
+    expect(listCount({ kind: "sessions", tab: "active" }, 3)).toBe("3 active Sessions");
+    expect(listCount({ kind: "sessions", tab: "all" }, 4)).toBe("4 Sessions");
+    expect(listCount({ kind: "sessions", tab: "overlap" }, 1)).toBe("1 overlapping Session");
+    expect(listCount({ kind: "sessions", tab: "ended" }, 0)).toBe("0 ended Sessions");
+    expect(listCount({ kind: "plans", tab: "paused" }, 2)).toBe("2 paused Plans");
+    expect(listCount({ kind: "plans", tab: "done" }, 1)).toBe("1 finished Plan");
+    expect(listCount({ kind: "plans", tab: "all" }, 9)).toBe("9 Plans");
   });
 });
 
