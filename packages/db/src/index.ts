@@ -18,6 +18,49 @@ export function createDb(pool: pg.Pool) {
 export type Db = ReturnType<typeof createDb>;
 
 export {
+  ADR_SLUG,
+  ADR_SYNC_NOTICE_CODES,
+  type AdrContentInput,
+  type AdrSyncEntry,
+  type AdrSyncNotice,
+  type AdrSyncNoticeCode,
+  type AdrSyncProblem,
+  type AdrSyncProblemReason,
+  type AdrSyncState,
+  type AdrSyncSummary,
+  type AdrSyncSummaryChange,
+  type AdrWriter,
+  isReservationTaken,
+  MAX_ADR_FLOOR_ADVANCE,
+  MAX_ADR_PATH_LENGTH,
+  MAX_ADR_SYNC_ENTRIES,
+  type ReserveAdrInput,
+  type ReserveAdrOutcome,
+  reserveAdr,
+  type StoreAdrContentsOutcome,
+  type SyncAdrsInput,
+  type SyncAdrsOutcome,
+  storeAdrContents,
+  syncAdrs,
+} from "./adr.ts";
+export {
+  type AdrDetail,
+  type AdrLink,
+  type AdrPage,
+  type AdrReservation,
+  type AdrView,
+  type AdrWithChain,
+  getAdr,
+  type ListAdrsInput,
+  listAdrs,
+  MAX_ADR_CHAIN_DEPTH,
+  readAdr,
+  readAdrSyncState,
+  readAdrs,
+  readRecentAdrs,
+  recentAdrs,
+} from "./adr-read.ts";
+export {
   createClient,
   createPool,
   describeConnectionError,
@@ -160,6 +203,18 @@ export {
   type DbOrTransaction,
   type ProjectInput,
 } from "./project.ts";
+export {
+  ADR_STATES,
+  ADR_STATUSES,
+  type Adr,
+  type AdrContent,
+  type AdrContentWarning,
+  type AdrState,
+  type AdrStatus,
+  MAX_ADR_CONTENT_BYTES,
+  MAX_ADR_NUMBER,
+  MAX_ADR_TITLE_LENGTH,
+} from "./schema/adr.ts";
 export {
   type AgentSession,
   CREATOR_KINDS,

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Transaction } from "./coordination.ts";
 import { type Principal, samePrincipal, sessionOwner } from "./principal.ts";
+import { type Adr, adr } from "./schema/adr.ts";
 import {
   type AgentSession,
   agentSession,
@@ -12,20 +13,24 @@ import {
 import { type Event, event } from "./schema/event.ts";
 
 // Creation replay (issue #12, "Transaction, identity and Event invariants").
-// Plan, Task and Session creation and Plan log appends take a UUID the client
-// generated once, so a client that lost the response can retry safely. The
-// server stores a fingerprint of the original input and the authenticated
-// principal with the record, and a retry is recognized by comparing them,
-// never the record's current (possibly edited) fields.
+// Plan, Task and Session creation, Plan log appends and ADR reservations take
+// a UUID the client generated once, so a client that lost the response can
+// retry safely. The server stores a fingerprint of the original input and the
+// authenticated principal with the record, and a retry is recognized by
+// comparing them, never the record's current (possibly edited) fields.
 
-/** What a caller-supplied UUID creates. A Plan log entry is a `plan.log_appended` Event. */
-export type CreationKind = "plan" | "task" | "session" | "plan_log";
+/**
+ * What a caller-supplied UUID creates. A Plan log entry is a
+ * `plan.log_appended` Event; an `adr` is an ADR reservation (src/adr.ts).
+ */
+export type CreationKind = "plan" | "task" | "session" | "plan_log" | "adr";
 
 export interface CreationRows {
   plan: Plan;
   task: Task;
   session: AgentSession;
   plan_log: Event;
+  adr: Adr;
 }
 
 export interface CreationRequest<K extends CreationKind> {
@@ -103,6 +108,26 @@ async function findCreation<K extends CreationKind>(
       },
     };
   }
+  if (kind === "adr") {
+    const [row] = await tx.select().from(adr).where(eq(adr.id, id)).limit(1);
+    if (!row) return undefined;
+    return {
+      row: row as CreationRows[K],
+      stored: {
+        projectId: row.projectId,
+        // A row that ADR sync created for an unreserved file was never a
+        // reservation, so its (generated) id cannot be replayed as one.
+        sameAction: row.reservedByKind !== null,
+        principal:
+          row.reservedByKind === "user" && row.reservedByUserId
+            ? { kind: "user", userId: row.reservedByUserId }
+            : row.reservedByKind === "project_key" && row.reservedByKeyId
+              ? { kind: "project_key", keyId: row.reservedByKeyId }
+              : null,
+        fingerprint: row.creationFingerprint,
+      },
+    };
+  }
   const [row] = await tx.select().from(event).where(eq(event.id, id)).limit(1);
   if (!row) return undefined;
   return {
@@ -141,6 +166,7 @@ const PRIMARY_KEYS: Record<CreationKind, string> = {
   task: "task_pkey",
   session: "agent_session_pkey",
   plan_log: "event_pkey",
+  adr: "adr_pkey",
 };
 
 /** Whether `error` (or the driver error Drizzle wraps in `cause`) violated `constraint`. */

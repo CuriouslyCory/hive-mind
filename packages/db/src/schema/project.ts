@@ -1,6 +1,10 @@
-import { index, integer, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { check, index, integer, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, timestamptz, updatedAt } from "../columns.ts";
-import { organization } from "./auth.ts";
+import { organization, user } from "./auth.ts";
+
+/** Who ran a Project's last ADR sync. The same values as `CREATOR_KINDS` (schema/coordination.ts). */
+const ADR_SYNCED_BY_KINDS = ["user", "project_key"] as const;
 
 // A Project is a codebase an organization coordinates work on (CONTEXT.md).
 // Plans, Tasks, Sessions, Scopes and Events belong to a Project (M2,
@@ -30,6 +34,18 @@ export const project = pgTable(
     // it rotates through Projects oldest (or never swept) first. Internal: not
     // part of the Project DTO. Set in raw SQL, which leaves updated_at alone.
     coordinationSweptAt: timestamptz(),
+    // The number the next ADR reservation gets, unless an ADR or floor is
+    // already at or past it (`reserveAdr`, src/adr.ts). Raised by ADR sync.
+    // Internal, like next_plan_number.
+    nextAdrNumber: integer().notNull().default(1),
+    // The last ADR sync: the commit it read, when, and who ran it (a User or
+    // a Project key; the key id is history, with no foreign key). All null
+    // until the first sync. Set in raw SQL, which leaves updated_at alone.
+    adrSyncedCommitSha: text(),
+    adrSyncedAt: timestamptz(),
+    adrSyncedByKind: text({ enum: ADR_SYNCED_BY_KINDS }),
+    adrSyncedByUserId: uuid().references(() => user.id, { onDelete: "restrict" }),
+    adrSyncedByKeyId: uuid(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -42,6 +58,17 @@ export const project = pgTable(
     index("project_coordination_swept_at_idx").on(
       table.coordinationSweptAt.asc().nullsFirst(),
       table.id,
+    ),
+    check("project_next_adr_number_check", sql.raw("next_adr_number >= 1")),
+    check(
+      "project_adr_synced_check",
+      sql.raw(
+        "(adr_synced_commit_sha is null and adr_synced_at is null and adr_synced_by_kind is null " +
+          "and adr_synced_by_user_id is null and adr_synced_by_key_id is null) or " +
+          "(adr_synced_commit_sha ~ '^[0-9a-f]{40}([0-9a-f]{24})?$' and adr_synced_at is not null and (" +
+          "(adr_synced_by_kind = 'user' and adr_synced_by_user_id is not null and adr_synced_by_key_id is null) or " +
+          "(adr_synced_by_kind = 'project_key' and adr_synced_by_key_id is not null and adr_synced_by_user_id is null)))",
+      ),
     ),
   ],
 );
