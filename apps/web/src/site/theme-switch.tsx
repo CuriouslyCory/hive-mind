@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Switch } from "../../../../design-system/switch";
+import { Switch } from "../design-system/switch";
 
-/** The page's design-system root, which carries `data-theme`. */
-const ROOT_SELECTOR = ".hm-landing";
+/** The page's root (`SitePage`), which carries `data-theme`. */
+const ROOT_SELECTOR = ".hm-site";
 
 /**
- * The top bar's dark theme switch. The page renders `data-theme="system"`, so
- * the first paint follows the operating system in CSS alone; this switch
- * only reflects the effective theme once mounted and, when toggled, forces
- * `light` or `dark` on the page root. The choice is not kept across visits.
+ * The dark theme switch, for a `SiteHeader`. `SitePage` renders
+ * `data-theme="system"`, so the first paint follows the operating system in
+ * CSS alone; this switch only reflects the effective theme once mounted and,
+ * when toggled, forces `light` or `dark` on the page root. The choice is not
+ * kept across visits.
  */
 export function ThemeSwitch() {
   const ref = useRef<HTMLSpanElement>(null);
@@ -33,7 +34,7 @@ export function ThemeSwitch() {
   }, []);
 
   return (
-    <span ref={ref} className="lp-theme">
+    <span ref={ref} className="site-theme">
       <Switch
         aria-label="Dark theme"
         checked={dark}

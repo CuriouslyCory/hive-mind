@@ -23,7 +23,7 @@ The landing page has to live at `/`, which is already the signed-in Projects lis
   - **Themes.** The bundle's `[data-theme="dark"] …` component rules became component tokens set per theme in `tokens.css`, and `tokens.css` adds a `system` theme that follows `prefers-color-scheme`. Both work in CSS alone, before hydration. The hive card re-points the colour tokens so the controls inside it keep their contrast on navy in both themes.
   - **Components.** `Input` uses `useId` instead of a module counter, so ids match between server and client. `Button` gained `href` (a Next `Link` for app routes), `Card` gained `headingLevel`, `Tabs` gained panels, roving focus, arrow keys and a wrapping tablist, `Alert` gained `live` (`role="note"` when false) and `LogoLockup` gained `decorative`. `components.css` adds the type scale classes, `hm-hex`, `hm-code`, the logo tile and reduced-motion rules.
 - The landing page and the brand assets call the product **HiveMind**, the wordmark's spelling; other prose keeps "hive-mind" and identifiers keep `hivemind` (`CONTEXT.md` → Naming rules). The root layout's title and the dashboard are unchanged.
-- Only the landing page uses it. The dashboard and the dev tracker keep their own stylesheets, and the sign-in and device pages stay unstyled; migrating them is separate work.
+- Only the landing page uses it. The dashboard and the dev tracker keep their own stylesheets, and the sign-in and device pages stay unstyled; migrating them is separate work. (Sign-in has since moved onto it, inside the site frame described in `docs/design-system.md` → Site pages.)
 
 ### Routing
 

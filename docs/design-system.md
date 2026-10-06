@@ -2,7 +2,7 @@
 
 The HiveMind design system is the brand's colours, type, spacing and components, ported to typed React from a design-system file exported from Claude Design. Where it came from, what changed in the port and how the landing page is routed are in [ADR-0016](adr/0016-hivemind-design-system-and-landing-page.md); this page describes the code. Its identity comes from the logo: hexagonal cells, a navy ground and a honey-gold hub. Its three principles are **precise** (a 4px grid, tabular figures, real contrast), **warm** (navy and honey, never grey and blue) and **a little playful** (hexagons where others use circles, a honey glow where others use a shadow).
 
-For now only the public landing page uses it. The dashboard and the dev tracker keep their own stylesheets (`apps/web/src/app/(app)/dashboard.css`, `tracker/tracker.css`) and are not affected by it.
+For now the public pages use it: the landing page and sign-in, both framed by `SitePage` (see Site pages). The dashboard and the dev tracker keep their own stylesheets (`apps/web/src/app/(app)/dashboard.css`, `tracker/tracker.css`) and are not affected by it.
 
 ## Where it lives
 
@@ -16,6 +16,7 @@ For now only the public landing page uses it. The dashboard and the dev tracker 
 | `apps/web/src/design-system/index.ts` | The React components. There is no `@/` alias; import it by relative path. |
 | `apps/web/public/brand/` | The logo files: mark, wordmark and the square lockup, downscaled from the originals. |
 | `apps/web/src/app/icon.png`, `apple-icon.png` | The favicon and touch icon, from the mark (app-router metadata files). |
+| `apps/web/src/site/` | The frame of the public pages (see Site pages): `SitePage`, `SiteHeader`, `SiteFooter`, `ThemeSwitch`, the shared repository links and `site.css`. |
 | `apps/web/test/design-system.test.ts` | The markup contracts (classes per variant, ARIA, link versus button), the keyboard and toggle rules, and the theme and hive card tokens with their contrast. |
 
 ## Using it on a page
@@ -36,7 +37,42 @@ export default function Page() {
 
 - `designSystemFontClassName` loads Sora, Nunito Sans and JetBrains Mono, served from the app itself, for that page only and points `--font-display`, `--font-sans` and `--font-mono` at them. Without it the font tokens fall back to the system stacks in `tokens.css`. The fonts are never set on `<body>`.
 - `hm-root` sets the base text (Nunito Sans 15/22 in `ink` on `surface`), `box-sizing` for everything inside, and `color-scheme` from the theme, so form controls and scrollbars inside the element match it. It does not reach the viewport: the page's own scrollbar and the canvas around the element keep the browser's default scheme. Do not fix that with a `:root:has(.hm-root)` rule; Cache Components keeps a visited page mounted but hidden, so the rule would also apply on the dashboard.
+- A public page uses `SitePage` instead (next section), which does all of this for it.
 - Importing `tokens.css` declares its custom properties on `:root`. No stylesheet in `apps/web` outside the design system and the pages that opt into it declares or uses these names, so loading it changes nothing outside elements that use the `hm-` classes or the tokens.
+
+### Site pages
+
+A public page renders `SitePage` from `apps/web/src/site` as its root. It imports the design system's styles, puts `hm-root`, `designSystemFontClassName` and `data-theme="system"` on its root element, and renders a skip link, the `header` it is given, `<main>` and the site footer (`SiteFooter`, the same on every page). The root covers the viewport whatever styles `<body>` has, so the page needs no rules on `html` or `body`.
+
+```tsx
+import { Button } from "../../design-system";
+import { SiteHeader, SitePage, ThemeSwitch } from "../../site";
+// After the site import, so the page's rules come after the design system's.
+import "./my-page.css";
+
+export default function Page() {
+  return (
+    <SitePage
+      className="hm-my-page"
+      mainId="my-page"
+      header={
+        <SiteHeader nav={[{ href: "#how", label: "How it works" }]}>
+          <ThemeSwitch />
+          <Button href="/sign-in">Sign in</Button>
+        </SiteHeader>
+      }
+    >
+      …
+    </SitePage>
+  );
+}
+```
+
+- `mainId` is the id of `<main>` and the skip link's target. Give each page its own: Cache Components keeps a visited page mounted but hidden, so two pages' `<main>` can be in the document at once, and with a shared id the skip link would go to the hidden one.
+- `className` is the page's scope class. Scope every rule in the page's stylesheet under it (`.hm-landing`, `.hm-sign-in`), and the frame's under `.hm-site` (`site.css`): global stylesheets stay loaded after client navigation, so an unscoped rule reaches every page visited later.
+- `SiteHeader` takes `homeHref` (`/` by default, or an anchor such as `#top` on the home page itself), `nav` (links for the Primary navigation, hidden at 1024px and below) and, as children, the controls at its right end. On screens 720px wide or less and on touch screens those controls are 44px tall. A label too long for a 320px screen can wrap its spare words in `site-hide-sm` and keep the whole label as the control's `aria-label`.
+- `ThemeSwitch` sets `data-theme` on the `SitePage` root, so the forced theme applies to the whole page. It is not kept across visits.
+- `site-wrap` is the content column: at most 1200px wide with the page gutters, `space-12` and `space-4` at 720px and below.
 
 ### Themes
 
@@ -104,7 +140,7 @@ The app serves the three faces itself. `apps/web/src/design-system/fonts/` holds
 - **Logo.** Use the supplied files only: never redraw, recolour or crop the mark. All three sit on an opaque white ground, so on `surface-hive` or any dark surface they go inside the white logo tile (`radius-lg`), never straight on the dark colour; there is no dark variant yet. The wordmark sits beside the mark in the top bar at 28–36px tall. The mark alone is for the app icon, favicon and spaces narrower than 120px, at least 24px, with clear space of about 1/8 of its width on every side. The lockup is for marketing pages and sign-in, at least 160px wide.
 - **Icons.** The 16 glyphs of the icon set (24px viewBox, 2px round strokes and joins, a hexagon where a circle would be the default, filled dots for emphasis) at 20px in controls and 16px in badges, `space-1` or `space-2` from their label. `spark` marks anything AI-generated; `node` means connected agents; `hex` and `hive` are the empty and filled cell. A new icon follows the same grammar.
 - **Motion.** Hover and press change colour in `duration-fast`. A working agent *buzzes*: its dot pulses `shadow-glow` every 1.2s (`Badge buzzing`). Under `prefers-reduced-motion` the pulse stops and transform motion (button press, switch thumb) becomes an instant change. By default the pulse repeats for as long as the agent works, because there it is live status. On a page where it is decorative or illustrative, such as the landing page, the page must stop it within 5 seconds or offer a way to pause it (WCAG 2.2.2); the landing page sets `animation-iteration-count` under `.hm-landing`. Disabled controls drop to 50% opacity and keep their colour.
-- **Copy.** The product is **HiveMind** on the landing page and in brand assets, and "hive-mind" in other prose (`CONTEXT.md` → Naming rules). Sentence case everywhere except eyebrows. Speak to one person ("you"); the hive is "it", never "we"; agents are "agents". Lead with the result, then the mechanism, with specific numbers. Whimsy lives in nouns and verbs (a workspace is a *hive*, a running agent is *buzzing*, an idle one *resting*). No exclamation marks in UI copy and at most one per marketing page; no emoji. Errors say what happened and the next step in two short sentences. Empty states invite: "No tasks yet. Drop one in and the hive will pick it up."
+- **Copy.** The product is **HiveMind** on the public pages and in brand assets, and "hive-mind" in other prose (`CONTEXT.md` → Naming rules). Sentence case everywhere except eyebrows. Speak to one person ("you"); the hive is "it", never "we"; agents are "agents". Lead with the result, then the mechanism, with specific numbers. Whimsy lives in nouns and verbs (a workspace is a *hive*, a running agent is *buzzing*, an idle one *resting*). No exclamation marks in UI copy and at most one per marketing page; no emoji. Errors say what happened and the next step in two short sentences. Empty states invite: "No tasks yet. Drop one in and the hive will pick it up."
 
 ## Components
 
