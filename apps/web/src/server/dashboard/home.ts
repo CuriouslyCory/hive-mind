@@ -1180,17 +1180,34 @@ interface EventCandidate {
  * actor agent or Project name: the newest `HOME_EVENT_WINDOW` are read and
  * filtered here, because their text exists only once described. Without a
  * filter, only the `HOME_EVENT_LIMIT` shown are read.
+ *
+ * The newest are found per Project, each through `event_project_id_seq_idx`
+ * (at most `limit` index entries per Project), and merged by `seq`. A single
+ * `project_id in (…) order by seq desc` could instead walk the global
+ * `event_seq_unique` index through every tenant's newer Events.
  */
 async function readEvents(
   tx: Transaction,
   input: { scopeIds: string[]; q: string; projectName: (id: string) => string },
 ): Promise<EventCandidate[]> {
+  const limit = input.q === "" ? HOME_EVENT_LIMIT : HOME_EVENT_WINDOW;
+  const newest = sql`
+    select newest.seq
+    from unnest(${sql.param(input.scopeIds)}::uuid[]) as p(id)
+      cross join lateral (
+        select e.seq from event e
+        where e.project_id = p.id
+        order by e.seq desc
+        limit ${limit}
+      ) as newest
+    order by newest.seq desc
+    limit ${limit}
+  `;
   const rows = await tx
     .select()
     .from(event)
-    .where(inArray(event.projectId, input.scopeIds))
-    .orderBy(desc(event.seq))
-    .limit(input.q === "" ? HOME_EVENT_LIMIT : HOME_EVENT_WINDOW);
+    .where(and(inArray(event.projectId, input.scopeIds), sql`${event.seq} in (${newest})`))
+    .orderBy(desc(event.seq));
   const actorIds = unique(rows.map((row) => row.actorSessionId));
   const agents =
     actorIds.length === 0
