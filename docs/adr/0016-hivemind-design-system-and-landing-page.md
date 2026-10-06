@@ -7,7 +7,7 @@ date: 2026-10-05
 
 ## Context
 
-Until now hive-mind had no visual identity: the dashboard uses a minimal stylesheet (`apps/web/src/app/(app)/dashboard.css`), and a signed-out visit to `/` redirected to `/sign-in`, so nothing told a visitor what the product is. [#1](https://github.com/CuriouslyCory/hive-mind/issues/1) is the stack issue; no milestone issue covers this work.
+Until now hive-mind had no visual identity: the dashboard uses a minimal stylesheet (`apps/web/src/app/(app)/dashboard.css`), and a signed-out visit to `/` redirected to `/sign-in`, so nothing told a visitor what the product is. [#1](https://github.com/CuriouslyCory/hive-mind/issues/1) is the stack issue; no milestone issue covers this work, which landed in [#24](https://github.com/CuriouslyCory/hive-mind/pull/24).
 
 The identity comes from the HiveMind design system, a file exported from Claude Design. It contains a brand book (colour, type, spacing, shape, motion, copy and logo rules), a token file with light and dark values, a reference component bundle (Button, Badge, Card, Input, Switch, Tabs, Alert, Cell) with its stylesheet, the logo files (mark, wordmark, lockup) and an icon set of 16 glyphs. A landing page design came with it. The export is not in the repo, so this ADR records what was taken from it.
 
