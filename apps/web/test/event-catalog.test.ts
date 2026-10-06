@@ -20,6 +20,7 @@ import {
   endSession,
   finalizeCollection,
   heartbeatSession,
+  insertEvent,
   type Principal,
   recordCollectionManifest,
   releaseTask,
@@ -247,6 +248,46 @@ describeDb("the Event catalog", () => {
     expect(await finalizeCollection(db, collection)).toMatchObject(ok);
     expect(await heartbeatSession(db, { ...own(c), collectionId: randomUUID() })).toMatchObject(ok);
     expect(await heartbeatSession(db, { ...own(c), collectionId: randomUUID() })).toMatchObject(ok);
+
+    // ADR Events. Issue #19 ships this reader before any helper writes them,
+    // so they go through `insertEvent` here, one sync with a change of each
+    // kind and one reservation acted through a Session.
+    await db.transaction(async (tx) => {
+      await insertEvent(tx, {
+        projectId: project.id,
+        type: "adr.reserved",
+        payload: {
+          adrId: randomUUID(),
+          number: 17,
+          title: "Use ADRs",
+          slug: "use-adrs",
+          floor: 16,
+        },
+        actor: { ...principal, sessionId: c },
+        now: new Date(),
+      });
+      await insertEvent(tx, {
+        projectId: project.id,
+        type: "adr.synced",
+        payload: {
+          commitSha: "a".repeat(40),
+          previousCommitSha: null,
+          forced: false,
+          added: 2,
+          updated: 1,
+          removed: 1,
+          changes: [
+            { number: 1, change: "added", statusFrom: null, statusTo: "accepted" },
+            { number: 2, change: "restored", statusFrom: null, statusTo: "superseded" },
+            { number: 3, change: "updated", statusFrom: "proposed", statusTo: "accepted" },
+            { number: 4, change: "removed", statusFrom: "deprecated", statusTo: null },
+          ],
+          truncated: false,
+        },
+        actor: principal,
+        now: new Date(),
+      });
+    });
 
     const rows = await db
       .select()

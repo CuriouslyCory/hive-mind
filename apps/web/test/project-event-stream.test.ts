@@ -908,6 +908,10 @@ describe("live update filters", () => {
       false,
     );
     expect(affectsPlan(asStream({ type: "brand.new" }), scope)).toBe(true);
+    // ADR Events name their ADR in the payload and change nothing on a Plan page.
+    for (const type of ["adr.reserved", "adr.synced"]) {
+      expect(affectsPlan(asStream({ type, actorSessionId: sessionId }), scope)).toBe(false);
+    }
   });
 
   it("refreshes a Session page for Events it acted through or that affected it", () => {
@@ -924,6 +928,12 @@ describe("live update filters", () => {
       affectsSession(asStream({ type: "session.started", sessionId: randomUUID() }), scope),
     ).toBe(false);
     expect(affectsSession(asStream({ type: "brand.new" }), scope)).toBe(true);
+    // An ADR reserved through the Session is in its timeline; other ADR Events are not.
+    expect(
+      affectsSession(asStream({ type: "adr.reserved", actorSessionId: sessionId }), scope),
+    ).toBe(true);
+    expect(affectsSession(asStream({ type: "adr.reserved" }), scope)).toBe(false);
+    expect(affectsSession(asStream({ type: "adr.synced" }), scope)).toBe(false);
   });
 
   it("refreshes every page for event.unavailable, including the Plan a Session left", () => {

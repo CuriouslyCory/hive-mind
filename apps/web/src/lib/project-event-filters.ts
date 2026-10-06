@@ -50,13 +50,15 @@ function previousPlanId(event: StreamEvent): unknown {
 /**
  * A Plan page: Events of the Plan or its Tasks (claims included, since task
  * Events carry the Plan), a Session leaving the Plan, and any Event of a
- * Session the page shows (Scope, heartbeat and liveness changes).
+ * Session the page shows (Scope, heartbeat and liveness changes). ADR Events
+ * change nothing it shows, even when a shown Session acted through them.
  */
 export function affectsPlan(
   event: StreamEvent,
   scope: { planId: string; taskIds?: readonly string[]; sessionIds?: readonly string[] },
 ): boolean {
   if (!isKnownEventType(event.type)) return true;
+  if (event.type.startsWith("adr.")) return false;
   if (event.planId === scope.planId) return true;
   if (event.taskId !== null && scope.taskIds?.includes(event.taskId)) return true;
   if (event.type === "session.attached" && previousPlanId(event) === scope.planId) return true;

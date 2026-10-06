@@ -44,6 +44,7 @@ export {
   createOnce,
 } from "./creation.ts";
 export {
+  type AdrSyncChange,
   type CoverageLostReason,
   EVENT_PAYLOAD_VERSIONS,
   type EventInput,
@@ -52,6 +53,7 @@ export {
   type EventType,
   encodedJsonBytes,
   insertEvent,
+  MAX_ADR_SYNC_EVENT_CHANGES,
   MAX_EVENT_DTO_BYTES,
   MAX_EVENT_PAYLOAD_BYTES,
 } from "./event.ts";

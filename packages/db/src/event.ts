@@ -22,6 +22,22 @@ export type SessionUpdateField =
   | "gitCommit"
   | "status";
 
+/** An ADR's status, as ADR-0001 defines it, in `adr.*` payloads. */
+type AdrFileStatus = "proposed" | "accepted" | "deprecated" | "superseded";
+
+/**
+ * One ADR in an `adr.synced` Event (the contract's `ADR_SYNC_CHANGE_KINDS`).
+ * A status is null where no published copy exists: before `added` or
+ * `restored`, and after `removed`.
+ */
+export type AdrSyncChange =
+  | { number: number; change: "added" | "restored"; statusFrom: null; statusTo: AdrFileStatus }
+  | { number: number; change: "updated"; statusFrom: AdrFileStatus; statusTo: AdrFileStatus }
+  | { number: number; change: "removed"; statusFrom: AdrFileStatus; statusTo: null };
+
+/** At most this many changes are listed in one `adr.synced` Event. */
+export const MAX_ADR_SYNC_EVENT_CHANGES = 100;
+
 /**
  * The Event types and their payloads, at the payload version in
  * `EVENT_PAYLOAD_VERSIONS`. The records an Event is about (Plan, Task,
@@ -114,6 +130,31 @@ export interface EventPayloads {
     reason: CoverageLostReason;
     pathCount: number | null;
   };
+  // ADR Events affect no Plan, Task or Session: the ADR is named in the
+  // payload, and plan_id, task_id and session_id stay null (issue #19).
+  /**
+   * A reserved ADR number (1 to 9999). `floor` is the highest ADR number the
+   * client saw locally and on the default branch, 0 when it saw none.
+   */
+  "adr.reserved": { adrId: string; number: number; title: string; slug: string; floor: number };
+  /**
+   * One sync of the ADRs at `commitSha` (a full lowercase commit hash).
+   * `previousCommitSha` is the commit synced before, null for the first sync;
+   * `forced` means the client skipped its ancestry check. The counts cover
+   * every change (`added` includes `restored`); `changes` lists the first
+   * `MAX_ADR_SYNC_EVENT_CHANGES` in number order and `truncated` says whether
+   * there were more. Never titles or content.
+   */
+  "adr.synced": {
+    commitSha: string;
+    previousCommitSha: string | null;
+    forced: boolean;
+    added: number;
+    updated: number;
+    removed: number;
+    changes: AdrSyncChange[];
+    truncated: boolean;
+  };
 }
 
 export type EventType = keyof EventPayloads;
@@ -140,6 +181,8 @@ export const EVENT_PAYLOAD_VERSIONS: { readonly [T in EventType]: number } = {
   "scope.touched": 1,
   "scope.collection_finalized": 1,
   "scope.coverage_lost": 1,
+  "adr.reserved": 1,
+  "adr.synced": 1,
 };
 
 /**

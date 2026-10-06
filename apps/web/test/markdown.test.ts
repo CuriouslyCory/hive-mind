@@ -241,6 +241,39 @@ describe("describeEvent", () => {
     });
   });
 
+  it("names ADRs by number, quotes a reserved title as text and counts a sync", () => {
+    const hostile = '<img src=x onerror="alert(1)">';
+    const reserved = describeEvent("adr.reserved", {
+      adrId: "00000000-0000-4000-8000-000000000000",
+      number: 17,
+      title: hostile,
+      slug: "x",
+      floor: 16,
+    });
+    expect(reserved).toEqual({ text: `Reserved ADR-0017 "${hostile}"`, markdown: null });
+    expect(renderToStaticMarkup(createElement("p", null, reserved.text))).toBe(
+      "<p>Reserved ADR-0017 &quot;&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&quot;</p>",
+    );
+    const synced = {
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      previousCommitSha: null,
+      forced: false,
+      added: 2,
+      updated: 1,
+      removed: 0,
+      changes: [],
+      truncated: false,
+    };
+    expect(describeEvent("adr.synced", synced).text).toBe(
+      "Synced ADRs at 0123456: 2 added, 1 updated, 0 removed",
+    );
+    expect(describeEvent("adr.synced", { ...synced, forced: true }).text).toBe(
+      "Synced ADRs at 0123456: 2 added, 1 updated, 0 removed (forced)",
+    );
+    expect(describeEvent("adr.reserved", { number: "17", title: 1 }).text).toBe("Reserved an ADR");
+    expect(describeEvent("adr.synced", null).text).toBe("Synced ADRs");
+  });
+
   it("hands Plan log entries to the markdown renderer", () => {
     const described = describeEvent("plan.log_appended", { message: "[x](javascript:alert(1))" });
     expect(described.markdown).toBe("[x](javascript:alert(1))");

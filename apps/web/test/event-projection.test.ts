@@ -143,6 +143,20 @@ describe("an older reader that keeps the projection", () => {
     expect(readAsOlderBuild(claimed)).toEqual(unavailableOf(claimed));
   });
 
+  it("withholds ADR Events, which came after it", () => {
+    const reserved = row({
+      type: "adr.reserved",
+      payload: { adrId: randomUUID(), number: 17, title: CANARY, slug: "use-adrs", floor: 16 },
+      planId: null,
+      taskId: null,
+      sessionId: null,
+    });
+    expect(projectEvent(reserved)).toMatchObject({ type: "adr.reserved", payload: { number: 17 } });
+    const projected = readAsOlderBuild(reserved);
+    expect(projected).toEqual(unavailableOf(reserved));
+    expectNoStoredDetails(projected);
+  });
+
   it("while today's reader returns the stolen release itself", () => {
     expect(projectEvent(stolen)).toEqual({
       ...unavailableOf(stolen),
@@ -175,6 +189,24 @@ describe("projectEvent", () => {
       { type: "plan.log_appended", payloadVersion: 2, payload: { message: CANARY } },
     ],
     ["an extra payload field", { payload: { reason: "released", token: CANARY } }],
+    [
+      "a title in an ADR sync change",
+      {
+        type: "adr.synced",
+        payload: {
+          commitSha: "a".repeat(40),
+          previousCommitSha: null,
+          forced: false,
+          added: 1,
+          updated: 0,
+          removed: 0,
+          changes: [
+            { number: 1, change: "added", statusFrom: null, statusTo: "accepted", title: CANARY },
+          ],
+          truncated: false,
+        },
+      },
+    ],
     ["a missing payload field", { payload: {} }],
     ["a mistyped payload field", { payload: { reason: 7 } }],
     ["a payload that is not an object", { payload: [CANARY] }],

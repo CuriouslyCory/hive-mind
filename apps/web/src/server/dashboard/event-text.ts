@@ -136,11 +136,30 @@ export function describeEvent(type: string, rawPayload: unknown): EventText {
         `Touched-path coverage became incomplete${reason ? ` (${reason.replaceAll("_", " ")})` : ""}`,
       );
     }
+    case "adr.reserved":
+      return text(`Reserved ${adrKey(num(payload, "number"))}${quoted(str(payload, "title"))}`);
+    case "adr.synced": {
+      const commit = str(payload, "commitSha");
+      const counts = (["added", "updated", "removed"] as const)
+        .map((key) => {
+          const count = num(payload, key);
+          return count === null ? null : `${count} ${key}`;
+        })
+        .filter((part) => part !== null);
+      return text(
+        `Synced ADRs${commit ? ` at ${commit.slice(0, 7)}` : ""}${counts.length > 0 ? `: ${counts.join(", ")}` : ""}${payload.forced === true ? " (forced)" : ""}`,
+      );
+    }
     case UNAVAILABLE_EVENT_TYPE:
       return text("Event details unavailable");
     default:
       return text(`Event ${type}`);
   }
+}
+
+/** `ADR-0017` for 17, or "an ADR" when the number is missing. */
+function adrKey(number: number | null): string {
+  return number === null ? "an ADR" : `ADR-${String(number).padStart(4, "0")}`;
 }
 
 function capitalize(value: string): string {
