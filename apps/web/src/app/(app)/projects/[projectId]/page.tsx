@@ -10,11 +10,17 @@ import { ProjectOverviewView } from "../../_components/project-overview";
 // session, params and data are request-time reads, inside Suspense.
 export default function ProjectPage({ params, searchParams }: PageProps<"/projects/[projectId]">) {
   return (
-    <main>
-      <Suspense fallback={<p role="status">Loading the Project…</p>}>
+    <div>
+      <Suspense
+        fallback={
+          <p role="status" className="app-loading">
+            Loading the Project…
+          </p>
+        }
+      >
         <Overview params={params} searchParams={searchParams} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 

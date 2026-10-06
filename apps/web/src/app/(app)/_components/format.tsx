@@ -1,8 +1,11 @@
 import type { PlanProgress, PlanStatus, SessionStatus, TaskStatus } from "@hivemind/db";
+import { Badge, type BadgeTone } from "../../../design-system/badge";
 import type { Attribution } from "../../../server/dashboard/queries";
+import { planStatusBadge } from "../_home/format";
 
 // Small display pieces shared by the dashboard pages. Everything renders as
-// React text: status is spelled out (color only repeats it), and times are
+// React text: status is a Badge whose word carries it (the dot's colour only
+// repeats it, with the home page's tones), and times are
 // shown relative to the snapshot's database time with the exact UTC time in
 // the `<time>` element.
 
@@ -27,49 +30,42 @@ export function AttributionText({ value }: { value: Attribution }) {
   }
 }
 
-const SESSION_STATUS_TEXT: Record<SessionStatus, string> = {
-  active: "Active",
-  idle: "Idle",
-  stale: "Stale",
-  ended: "Ended",
-  abandoned: "Abandoned",
+type StatusBadge = { label: string; tone: BadgeTone; buzzing?: boolean };
+
+const SESSION_STATUS: Record<SessionStatus, StatusBadge> = {
+  active: { label: "Active", tone: "honey", buzzing: true },
+  idle: { label: "Idle", tone: "neutral" },
+  stale: { label: "Stale", tone: "honey" },
+  ended: { label: "Ended", tone: "info" },
+  abandoned: { label: "Abandoned", tone: "danger" },
 };
+
+function StatusBadgeView({ badge, prefix }: { badge: StatusBadge; prefix: boolean }) {
+  return (
+    <Badge tone={badge.tone} buzzing={badge.buzzing}>
+      {prefix && <span className="hm-sr-only">Status: </span>}
+      {badge.label}
+    </Badge>
+  );
+}
 
 export function SessionStatusText({ status }: { status: SessionStatus }) {
-  return (
-    <span className={`status status-${status}`}>
-      <span className="visually-hidden">Status: </span>
-      {SESSION_STATUS_TEXT[status]}
-    </span>
-  );
+  return <StatusBadgeView badge={SESSION_STATUS[status]} prefix />;
 }
-
-const PLAN_STATUS_TEXT: Record<PlanStatus, string> = {
-  draft: "Draft",
-  active: "Active",
-  paused: "Paused",
-  done: "Done",
-  abandoned: "Abandoned",
-};
 
 export function PlanStatusText({ status }: { status: PlanStatus }) {
-  return (
-    <span className={`status status-plan-${status}`}>
-      <span className="visually-hidden">Status: </span>
-      {PLAN_STATUS_TEXT[status]}
-    </span>
-  );
+  return <StatusBadgeView badge={planStatusBadge(status)} prefix />;
 }
 
-const TASK_STATUS_TEXT: Record<TaskStatus, string> = {
-  todo: "To do",
-  in_progress: "In progress",
-  blocked: "Blocked",
-  done: "Done",
+const TASK_STATUS: Record<TaskStatus, StatusBadge> = {
+  todo: { label: "To do", tone: "neutral" },
+  in_progress: { label: "In progress", tone: "honey" },
+  blocked: { label: "Blocked", tone: "danger" },
+  done: { label: "Done", tone: "success" },
 };
 
 export function TaskStatusText({ status }: { status: TaskStatus }) {
-  return <span className={`status status-task-${status}`}>{TASK_STATUS_TEXT[status]}</span>;
+  return <StatusBadgeView badge={TASK_STATUS[status]} prefix={false} />;
 }
 
 /** "3 of 5 Tasks done" with the other counts, and a progress bar repeating it. */

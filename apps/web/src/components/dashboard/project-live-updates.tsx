@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
@@ -15,6 +14,8 @@ import {
   useSyncExternalStore,
   useTransition,
 } from "react";
+import { Alert } from "../../design-system/alert";
+import { Button } from "../../design-system/button";
 import type { LiveUpdateScope } from "../../lib/project-event-filters";
 import {
   createProjectEventStream,
@@ -184,17 +185,20 @@ export function ProjectLiveContent({ children }: { children: ReactNode }) {
   const snapshot = useProjectLiveSnapshot();
   if (snapshot?.status.kind !== "access-lost") return children;
   return (
-    <main data-testid="project-access-lost">
-      <div role="alert">
-        <p>
-          {snapshot.status.code === "UNAUTHORIZED"
+    <div data-testid="project-access-lost">
+      <Alert
+        tone="danger"
+        title={
+          snapshot.status.code === "UNAUTHORIZED"
             ? "Your sign-in has ended, so this Project is hidden."
-            : "You no longer have access to this Project, so it is hidden."}
-        </p>
-        <p>
-          <Link href="/">Go to all Projects</Link>
-        </p>
-      </div>
-    </main>
+            : "You no longer have access to this Project, so it is hidden."
+        }
+        action={
+          <Button size="sm" href="/">
+            Go to all Projects
+          </Button>
+        }
+      />
+    </div>
   );
 }

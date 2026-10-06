@@ -2,6 +2,7 @@
 
 import type { BlogIdeaView, BlogStatus } from "@hivemind/tracker";
 import { useState } from "react";
+import { Badge, type BadgeTone } from "../../../../design-system/badge";
 import { useTracker } from "./runner";
 import {
   ConfirmButton,
@@ -31,6 +32,12 @@ const STATUS_TEXT: Record<BlogStatus, string> = {
   idea: "Idea",
   draft: "Draft",
   published: "Published",
+};
+
+const STATUS_TONE: Record<BlogStatus, BadgeTone> = {
+  idea: "neutral",
+  draft: "honey",
+  published: "success",
 };
 
 export function BlogTab({ ideas }: { ideas: readonly BlogIdeaView[] }) {
@@ -91,10 +98,10 @@ function Idea({
       ) : (
         <>
           <p className="tracker-meta">
-            <span className={`status tracker-blog-${idea.status}`}>
-              <span className="visually-hidden">Status: </span>
+            <Badge tone={STATUS_TONE[idea.status]}>
+              <span className="hm-sr-only">Status: </span>
               {STATUS_TEXT[idea.status]}
-            </span>
+            </Badge>
             {idea.publishedAt ? (
               <>
                 {" "}
@@ -114,7 +121,7 @@ function Idea({
           <div className="tracker-actions">
             <button id={editId} type="button" onClick={() => onEdit(editId)}>
               {published ? "Edit publication details" : "Edit"}
-              <span className="visually-hidden"> of {idea.title}</span>
+              <span className="hm-sr-only"> of {idea.title}</span>
             </button>
             {published ? null : (
               <>

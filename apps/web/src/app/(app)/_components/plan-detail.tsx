@@ -55,11 +55,13 @@ export function PlanDetailView({
         asOf={asOf}
         scope={planScope(detail)}
       />
-      <ProjectHeading project={project} asOf={asOf} linked />
-      <h1>
-        {plan.key}: {plan.title}
-      </h1>
-      <dl>
+      <ProjectHeading
+        project={project}
+        asOf={asOf}
+        trail={[{ label: plan.key }]}
+        title={`${plan.key}: ${plan.title}`}
+      />
+      <dl className="project-facts">
         <dt>Status</dt>
         <dd>
           <PlanStatusText status={plan.status} />
@@ -81,7 +83,7 @@ export function PlanDetailView({
         )}
       </dl>
 
-      <section aria-labelledby="plan-body">
+      <section className="project-card" aria-labelledby="plan-body">
         <h2 id="plan-body">Plan</h2>
         {plan.body === null ? (
           <p className="muted">No description.</p>
@@ -90,13 +92,13 @@ export function PlanDetailView({
         )}
       </section>
 
-      <section aria-labelledby="plan-tasks">
+      <section className="project-card" aria-labelledby="plan-tasks">
         <h2 id="plan-tasks">Tasks</h2>
         {detail.tasks.items.length === 0 && cursors.tasks === undefined ? (
           <p>No Tasks yet.</p>
         ) : (
           <table>
-            <caption className="visually-hidden">Tasks in order</caption>
+            <caption className="hm-sr-only">Tasks in order</caption>
             <thead>
               <tr>
                 <th scope="col">#</th>
@@ -153,7 +155,7 @@ export function PlanDetailView({
         />
       </section>
 
-      <section aria-labelledby="plan-sessions">
+      <section className="project-card" aria-labelledby="plan-sessions">
         <h2 id="plan-sessions">Sessions attached to this Plan</h2>
         {detail.sessions.items.length === 0 ? (
           <p>No Sessions are attached to this Plan.</p>
@@ -174,7 +176,7 @@ export function PlanDetailView({
         />
       </section>
 
-      <section aria-labelledby="plan-activity">
+      <section className="project-card" aria-labelledby="plan-activity">
         <h2 id="plan-activity">Activity</h2>
         {detail.activity.items.length === 0 ? (
           <p>No activity yet.</p>

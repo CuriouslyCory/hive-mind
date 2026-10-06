@@ -1,5 +1,6 @@
 import type { Route } from "next";
 import { ProjectLivePage } from "../../../components/dashboard/project-live-updates";
+import { Alert } from "../../../design-system/alert";
 import { SafeMarkdown } from "../../../server/dashboard/markdown";
 import type { SessionDetail } from "../../../server/dashboard/queries";
 import { AttributionText, formatUtc, Optional, SessionStatusText, Timestamp } from "./format";
@@ -27,12 +28,16 @@ export function SessionDetailView({
         asOf={asOf}
         scope={{ kind: "session", sessionId: session.id, taskId: session.attachedTask?.id ?? null }}
       />
-      <ProjectHeading project={project} asOf={asOf} linked />
-      <h1>Session: {session.agent}</h1>
-      <p>
+      <ProjectHeading
+        project={project}
+        asOf={asOf}
+        trail={[{ label: session.agent }]}
+        title={`Session: ${session.agent}`}
+      />
+      <p className="project-lead">
         <strong>Intent:</strong> {session.intent}
       </p>
-      <dl>
+      <dl className="project-facts">
         <dt>Status</dt>
         <dd>
           <SessionStatusText status={session.status} />
@@ -77,7 +82,7 @@ export function SessionDetailView({
         )}
       </dl>
 
-      <section aria-labelledby="session-summary">
+      <section className="project-card" aria-labelledby="session-summary">
         <h2 id="session-summary">End summary</h2>
         {session.summary === null ? (
           <p className="muted">
@@ -88,19 +93,19 @@ export function SessionDetailView({
         )}
       </section>
 
-      <section aria-labelledby="session-scope">
+      <section className="project-card" aria-labelledby="session-scope">
         <h2 id="session-scope">Scope</h2>
         {!session.scopeComplete && (
-          <p className="warning">
+          <Alert tone="warning" live={false}>
             The touched-path record of this Session is incomplete, so overlap checks involving it
             may miss overlaps.
-          </p>
+          </Alert>
         )}
         {detail.scopes.items.length === 0 && cursors.scopes === undefined ? (
           <p>No Scopes reported.</p>
         ) : (
           <table>
-            <caption className="visually-hidden">Scopes, oldest first</caption>
+            <caption className="hm-sr-only">Scopes, oldest first</caption>
             <thead>
               <tr>
                 <th scope="col">Path or pattern</th>
@@ -132,7 +137,7 @@ export function SessionDetailView({
         />
       </section>
 
-      <section aria-labelledby="session-events">
+      <section className="project-card" aria-labelledby="session-events">
         <h2 id="session-events">Timeline</h2>
         {detail.events.items.length === 0 ? (
           <p>No Events yet.</p>

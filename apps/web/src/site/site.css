@@ -3,25 +3,17 @@
    and the footer. Every rule is scoped under .hm-site: Next keeps global
    stylesheets loaded after client navigation, and Cache Components keeps a
    visited page mounted but hidden, so an unscoped rule would reach the
-   dashboard. Nothing here styles html or body, and nothing depends on their
-   styles. Breakpoints are 1024px and 720px, as on the landing page. */
+   signed-in pages. The element defaults, the focus ring and the theme come
+   from the design system's baseline on every page (ADR-0019). Breakpoints
+   are 1024px and 720px, as on the landing page. */
 
-/* The page root. It is positioned against the initial containing block, so
-   it spans the viewport whatever margin or padding <body> has (the browser's
-   default 8px, or the dashboard's rules after a client navigation), and its
-   surface fills at least one screen, with the footer at the bottom. */
+/* The page root: its surface fills at least one screen, with the footer at
+   the bottom. */
 .hm-site {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-}
-.hm-site :where(a, button, main):focus-visible {
-  outline: var(--border-focus) solid var(--focus);
-  outline-offset: 2px;
+  background: var(--surface);
 }
 .hm-site main:focus {
   outline: none;
@@ -197,13 +189,5 @@
   }
   .hm-site .site-topbar-right .hm-btn {
     height: 44px;
-  }
-}
-
-/* Printed, the page flows from the top of the first sheet like any other. */
-@media print {
-  .hm-site {
-    position: static;
-    min-height: 0;
   }
 }

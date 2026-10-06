@@ -1,0 +1,239 @@
+/* The frame of the signed-in pages (AppShell, AppNav, Viewer and Breadcrumb
+   in this directory): the page root, the skip link, the top bar, the content
+   column and the breadcrumb, plus the messages the loading, error and
+   not-found states show. Every rule is scoped under .app-shell: Next keeps
+   global stylesheets loaded after client navigation, and Cache Components
+   keeps a visited page mounted but hidden, so an unscoped rule would reach
+   the public pages. The element defaults, the focus ring and the theme come
+   from the design system's baseline (ADR-0019). Breakpoints are 1024px and
+   720px, as on the public pages. */
+
+/* The page root: a sunken ground for the pages' cards, at least one screen
+   tall. */
+.app-shell {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-sunken);
+}
+.app-shell main:focus {
+  outline: none;
+}
+.app-shell .app-sr-only {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* Skip link: off screen until focused. */
+.app-shell .app-skip {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 10;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: 700 15px / 22px var(--font-sans);
+  box-shadow: var(--shadow-float);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.app-shell .app-skip:focus-visible {
+  transform: none;
+}
+
+/* The content column, shared by the top bar and main. */
+.app-shell .app-wrap {
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-left: clamp(16px, 4vw, 48px);
+  padding-right: clamp(16px, 4vw, 48px);
+}
+
+/* Top bar */
+.app-shell .app-topbar {
+  background: var(--surface);
+  border-bottom: var(--border-hair) solid var(--line);
+}
+.app-shell .app-topbar-inner {
+  min-height: 64px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.app-shell .app-home {
+  display: inline-flex;
+  border-radius: var(--radius-lg);
+  flex: none;
+}
+.app-shell .app-home .hm-logo-tile {
+  padding: var(--space-1) var(--space-2);
+}
+.app-shell .app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.app-shell .app-nav-link {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--ink-muted);
+  font: 700 15px / 22px var(--font-sans);
+  text-decoration: none;
+  transition:
+    background-color var(--duration-fast),
+    color var(--duration-fast);
+}
+.app-shell .app-nav-link:hover {
+  background: var(--hive-tint);
+  color: var(--ink);
+}
+/* The current page or section: darker text on a tint, with a honey edge,
+   so it is not marked by colour alone. */
+.app-shell .app-nav-link[aria-current] {
+  background: var(--hive-tint);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--honey);
+}
+.app-shell .app-topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.app-shell .site-theme {
+  display: inline-flex;
+}
+.app-shell .app-viewer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font: 700 13px / 18px var(--font-sans);
+}
+.app-shell .app-viewer > span:first-child {
+  display: inline-flex;
+}
+.app-shell .app-viewer-initial {
+  font: 800 12px / 1 var(--font-display);
+}
+.app-shell .app-viewer-name {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Sign out's failure message. */
+.app-shell .app-topbar-right [role="alert"] {
+  margin: 0;
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--danger);
+}
+
+/* Main: the page, in the content column. */
+.app-shell .app-main {
+  flex: 1;
+  min-width: 0;
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-16);
+}
+
+/* Breadcrumb, at the top of a page's content. */
+.app-shell .app-breadcrumb {
+  margin-bottom: var(--space-2);
+  font: 700 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+}
+.app-shell .app-breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.app-shell .app-breadcrumb li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.app-shell .app-crumb-current {
+  padding: var(--space-1) 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.app-shell .app-crumb-link {
+  padding: var(--space-1) 0;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.app-shell .app-crumb-link:hover {
+  color: var(--ink);
+}
+.app-shell .app-crumb-sep {
+  flex: none;
+  color: var(--ink-faint);
+}
+
+/* Loading, error and not-found states. */
+.app-shell .app-loading {
+  color: var(--ink-muted);
+}
+.app-shell .app-message {
+  max-width: 640px;
+  padding: var(--space-6);
+  border: var(--border-hair) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-cell);
+}
+.app-shell .app-message > :last-child {
+  margin-bottom: 0;
+}
+.app-shell .app-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .app-shell .app-main {
+    padding-top: var(--space-6);
+  }
+  .app-shell .app-viewer-name {
+    display: none;
+  }
+}
+
+/* Touch targets: at least 44px tall on small screens and on any touch screen. */
+@media (max-width: 720px), (pointer: coarse) {
+  .app-shell .app-home,
+  .app-shell .app-nav-link,
+  .app-shell .app-crumb-link,
+  .app-shell .app-topbar-right .hm-switch {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .app-shell .app-topbar-right .hm-switch {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .app-shell .app-topbar-right .hm-btn {
+    height: 44px;
+  }
+}

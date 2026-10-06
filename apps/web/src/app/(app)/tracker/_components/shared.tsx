@@ -2,6 +2,7 @@
 
 import { pullUrl } from "@hivemind/tracker/constants";
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { buttonClassName } from "../../../../design-system/button";
 import { formatUtc } from "../../_components/format";
 
 // Pieces the tracker's tabs share: forms, fields, times and PR links.
@@ -137,7 +138,7 @@ export function EditorForm({
         <legend>{title}</legend>
         {children}
         <div className="tracker-actions">
-          <button type="submit" className="tracker-primary">
+          <button type="submit" className={buttonClassName({ variant: "primary" })}>
             {saving ? "Saving…" : submitLabel}
           </button>
           <button type="button" onClick={onCancel}>
@@ -216,7 +217,7 @@ export function ConfirmButton({
     return (
       <button ref={triggerRef} type="button" onClick={() => setArmed(true)}>
         {label}
-        <span className="visually-hidden"> {context}</span>
+        <span className="hm-sr-only"> {context}</span>
       </button>
     );
   }
@@ -226,7 +227,7 @@ export function ConfirmButton({
       <button
         ref={confirmRef}
         type="button"
-        className="tracker-danger"
+        className={buttonClassName({ variant: "danger" })}
         aria-describedby={questionId}
         aria-disabled={pending}
         onClick={() => {
@@ -244,7 +245,7 @@ export function ConfirmButton({
         }}
       >
         {confirmLabel}
-        <span className="visually-hidden"> {context}</span>
+        <span className="hm-sr-only"> {context}</span>
       </button>{" "}
       <button type="button" onClick={() => setArmed(false)}>
         Cancel

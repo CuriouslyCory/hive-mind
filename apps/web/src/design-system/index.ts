@@ -1,5 +1,6 @@
-// The HiveMind design system (docs/design-system.md). Pages also import
-// ./styles.css and put designSystemFontClassName on their root element.
+// The HiveMind design system (docs/design-system.md). The root layout loads
+// ./styles.css and puts the fonts' class (./fonts.ts) on <html> (ADR-0019),
+// so pages only import components.
 
 export { Alert, type AlertProps, type AlertTone } from "./alert";
 export { Badge, type BadgeProps, type BadgeTone } from "./badge";
@@ -15,7 +16,6 @@ export {
 export { Card, type CardProps, type CardVariant } from "./card";
 export { Cell, type CellProps, type CellTone } from "./cell";
 export { cx } from "./cx";
-export { designSystemFontClassName } from "./fonts";
 export {
   HEXAGON_CLIP_PATH,
   Hexagon,

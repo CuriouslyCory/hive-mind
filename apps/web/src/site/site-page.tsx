@@ -1,8 +1,6 @@
-import "../design-system/styles.css";
 import "./site.css";
 import type { ReactNode } from "react";
 import { cx } from "../design-system/cx";
-import { designSystemFontClassName } from "../design-system/fonts";
 import { SiteFooter } from "./site-footer";
 
 export type SitePageProps = {
@@ -22,18 +20,14 @@ export type SitePageProps = {
 };
 
 /**
- * The frame of a public page on the design system (docs/design-system.md →
- * Site pages): the design-system root with its fonts and the system theme,
- * a skip link, the header, `<main>` and the site footer. The root covers the
- * viewport whatever styles `<body>` has, and its theme is the one the
- * header's `ThemeSwitch` changes.
+ * The frame of a public page (docs/design-system.md → Site pages): a skip
+ * link, the header, `<main>` and the site footer, filling at least the
+ * viewport. The design-system root, its fonts and the theme the header's
+ * `ThemeSwitch` changes are on <html> (ADR-0019).
  */
 export function SitePage({ mainId, header, className, mainClassName, children }: SitePageProps) {
   return (
-    <div
-      className={cx("hm-root hm-site", designSystemFontClassName, className)}
-      data-theme="system"
-    >
+    <div className={cx("hm-site", className)}>
       <a className="site-skip" href={`#${mainId}`}>
         Skip to main content
       </a>

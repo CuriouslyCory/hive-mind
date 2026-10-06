@@ -195,8 +195,10 @@ test("a User with no Projects is told how to create one, and an empty Project sa
 }) => {
   const { user, page } = await signedInPage(browser, users);
   await page.goto("/");
-  await expect(page.getByRole("main")).toContainText("You have no Projects yet.");
-  await expect(page.getByRole("main").locator("code", { hasText: "hivemind init" })).toBeVisible();
+  // The empty state, not the Projects rail beside it (both are in main).
+  const empty = page.getByRole("main").getByRole("region", { name: "No Projects yet" });
+  await expect(empty).toContainText("You have no Projects yet.");
+  await expect(empty.locator("code", { hasText: "hivemind init" })).toBeVisible();
 
   const api = await coordinationApi(users, user.id);
   const project = await api.createProject(

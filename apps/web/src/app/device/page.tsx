@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Suspense } from "react";
+import { Alert, Button, Input } from "../../design-system";
 import { auth } from "../../server/auth";
 import { formatUserCode, viewDeviceRequest } from "../../server/device-approval";
 import { requireLoginSession } from "../../server/login-session";
+import { SiteHeader, SitePage } from "../../site";
+// After the site import, so this page's rules come after the frame's.
+import "./device.css";
 import { DecisionForm } from "./decision-form";
 
 export const metadata: Metadata = { title: "Sign in the CLI · hive-mind" };
@@ -13,14 +17,19 @@ export const metadata: Metadata = { title: "Sign in the CLI · hive-mind" };
  * address and a user code, or opens `/device?user_code=...`. The page shows
  * the request to the signed-in User; only its Approve button signs the CLI in.
  */
+//
+// It is framed like sign-in (docs/design-system.md → Site pages), and every
+// style in device.css is scoped under `.hm-device`.
 export default function DevicePage({ searchParams }: PageProps<"/device">) {
   return (
-    <main>
-      <h1>Sign in the hive-mind CLI</h1>
-      <Suspense fallback={<p>Loading…</p>}>
-        <DeviceRequest searchParams={searchParams} />
-      </Suspense>
-    </main>
+    <SitePage className="hm-device" mainId="device" mainClassName="dv-main" header={<SiteHeader />}>
+      <div className="dv-card">
+        <h1 className="hm-text-heading-md">Sign in the hive-mind CLI</h1>
+        <Suspense fallback={<p className="dv-muted">Loading…</p>}>
+          <DeviceRequest searchParams={searchParams} />
+        </Suspense>
+      </div>
+    </SitePage>
   );
 }
 
@@ -44,14 +53,14 @@ async function DeviceRequest({
       return (
         <>
           <p>A hive-mind command-line tool is asking to sign in as you.</p>
-          <p>
-            Code: <strong>{formatUserCode(request.userCode)}</strong>
+          <p className="dv-code">
+            Code: <strong className="hm-text-code">{formatUserCode(request.userCode)}</strong>
           </p>
           <p>
             Check that this is the code shown in your terminal. Approve only if you ran{" "}
             <code>hivemind login</code> yourself, just now.
           </p>
-          <p>
+          <p className="dv-muted">
             Approving gives the CLI (client <code>{request.clientId}</code>) a login session as{" "}
             {user.name} ({user.email}). It can do anything you can do in hive-mind, in every
             organization you belong to, until it expires or you run <code>hivemind logout</code>.
@@ -61,24 +70,26 @@ async function DeviceRequest({
       );
     case "decided":
       return (
-        <p role="status">
+        <Alert tone={request.status === "approved" ? "success" : "info"}>
           {request.status === "approved"
             ? "This request was already approved. Return to your terminal."
             : "This request was denied."}
-        </p>
+        </Alert>
       );
     case "unavailable":
-      return <p role="alert">This code cannot be approved from this account.</p>;
+      return <Alert tone="danger">This code cannot be approved from this account.</Alert>;
     case "expired":
       return (
-        <p role="alert">
+        <Alert tone="danger">
           This code has expired. Run <code>hivemind login</code> again to get a new one.
-        </p>
+        </Alert>
       );
     case "invalid":
       return (
         <>
-          <p role="alert">That code was not found. Check the code shown in your terminal.</p>
+          <Alert tone="danger">
+            That code was not found. Check the code shown in your terminal.
+          </Alert>
           <UserCodeForm />
         </>
       );
@@ -91,19 +102,20 @@ async function DeviceRequest({
  */
 function UserCodeForm() {
   return (
-    <form method="get" action="/device">
-      <label>
-        Code from your terminal{" "}
-        <input
-          name="user_code"
-          required
-          maxLength={64}
-          autoComplete="off"
-          autoCapitalize="characters"
-          spellCheck={false}
-        />
-      </label>{" "}
-      <button type="submit">Continue</button>
+    <form className="dv-form" method="get" action="/device">
+      <Input
+        label="Code from your terminal"
+        name="user_code"
+        required
+        maxLength={64}
+        autoComplete="off"
+        autoCapitalize="characters"
+        spellCheck={false}
+        mono
+      />
+      <Button type="submit" variant="primary">
+        Continue
+      </Button>
     </form>
   );
 }

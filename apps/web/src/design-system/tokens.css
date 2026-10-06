@@ -1,12 +1,13 @@
 /* HiveMind design tokens (docs/design-system.md). This file is the source of
-   truth for their values (ADR-0016). No stylesheet in apps/web outside the
-   design system and the pages that opt into it declares or uses these names.
+   truth for their values (ADR-0016); the root layout loads it on every page
+   (ADR-0019). No stylesheet in apps/web declares these names again.
 
    Themes: data-theme="light" or "dark" on an element forces that theme for
-   it and everything inside it. Elsewhere the tokens follow the operating
-   system's colour scheme: on :root unless <html> has data-theme="light", and
-   on any element with data-theme="system" (to follow the system inside a
-   forced theme). This is CSS alone, so it holds before hydration. */
+   it and everything inside it; ThemeSwitch sets it on <html>. Elsewhere the
+   tokens follow the operating system's colour scheme: on :root unless <html>
+   has data-theme="light", and on any element with data-theme="system" (the
+   root layout's default, and a way to follow the system inside a forced
+   theme). This is CSS alone, so it holds before hydration. */
 :root,
 [data-theme="light"],
 [data-theme="system"] {
