@@ -431,7 +431,7 @@ a.hm-btn {
 }
 .hm-alert-body {
   margin: 0;
-  color: var(--ink-muted);
+  color: var(--ink);
 }
 .hm-alert-info {
   background: var(--hive-tint);
@@ -460,11 +460,6 @@ a.hm-btn {
 }
 .hm-alert-danger svg {
   color: var(--danger);
-}
-.hm-alert-body,
-.hm-alert-success .hm-alert-body,
-.hm-alert-danger .hm-alert-body {
-  color: var(--ink);
 }
 .hm-alert-action {
   margin-left: auto;
