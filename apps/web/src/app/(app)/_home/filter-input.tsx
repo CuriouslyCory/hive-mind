@@ -6,45 +6,51 @@ import { useEffect, useRef, useState } from "react";
 import { Input } from "../../../design-system/input";
 import { homeHref } from "../../../server/dashboard/home-params";
 import { type HomeParams, MAX_HOME_QUERY_LENGTH } from "../../../server/dashboard/home-types";
-
-/** How long typing pauses before the filter applies. */
-export const FILTER_DEBOUNCE_MS = 300;
+import { createFilterController, normalizeFilter } from "./filter-controller";
 
 /**
  * The home page's filter. All page state is in the URL, so typing replaces
  * the URL (debounced; Enter applies at once) and the server renders the
  * filtered page. The page is not remounted by a search-param change, so the
- * field keeps focus and its text while the new page loads.
+ * field keeps focus and its text while the new page loads. The races between
+ * typing and other navigation are settled in `createFilterController`
+ * (./filter-controller.ts).
  */
 export function FilterInput({ params }: { params: HomeParams }) {
   const router = useRouter();
   const [value, setValue] = useState(params.q);
-  const focused = useRef(false);
-  // The params a debounced apply builds on: the latest render's, not the
-  // ones from when typing started.
+  const [filter] = useState(() =>
+    createFilterController({
+      params,
+      navigate: (href) => router.replace(href as Route, { scroll: false }),
+    }),
+  );
   const latest = useRef(params);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     latest.current = params;
   });
 
-  // Follow the URL when it changes from elsewhere (Clear filters, Back),
-  // unless the reader is typing: their text is newer than the URL.
+  // Each change of URL state, keyed by its URL so that a refresh of the same
+  // state is not one. Another navigation (a rail link, Clear filters, a tab,
+  // Back) drops a pending edit and shows the URL's filter.
+  const href = homeHref(params);
   useEffect(() => {
-    if (!focused.current) setValue(params.q);
-  }, [params.q]);
+    void href;
+    const text = filter.rendered(latest.current);
+    if (text !== null) setValue((shown) => (normalizeFilter(shown) === text ? shown : text));
+  }, [filter, href]);
 
-  // A pending filter is dropped when the page is hidden or left.
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  function apply(text: string) {
-    clearTimeout(timer.current);
-    const current = latest.current;
-    const q = text.trim().slice(0, MAX_HOME_QUERY_LENGTH);
-    if (q === current.q) return;
-    router.replace(homeHref(current, { q }) as Route, { scroll: false });
-  }
+  // Back and Forward drop a pending edit before it can replace the entry they
+  // show. So does hiding or leaving the page.
+  useEffect(() => {
+    const cancel = () => filter.cancel();
+    window.addEventListener("popstate", cancel);
+    return () => {
+      window.removeEventListener("popstate", cancel);
+      filter.cancel();
+    };
+  }, [filter]);
 
   return (
     <Input
@@ -55,23 +61,23 @@ export function FilterInput({ params }: { params: HomeParams }) {
       maxLength={MAX_HOME_QUERY_LENGTH}
       autoComplete="off"
       value={value}
-      onFocus={() => {
-        focused.current = true;
-      }}
       onBlur={() => {
-        focused.current = false;
+        // Focus left the window (another app, the browser's Back button):
+        // the edit stays pending, and Back cancels it.
+        if (document.hasFocus()) filter.blur();
       }}
       onChange={(event) => {
-        const text = event.target.value;
-        setValue(text);
-        clearTimeout(timer.current);
-        timer.current = setTimeout(() => apply(text), FILTER_DEBOUNCE_MS);
+        setValue(event.target.value);
+        filter.edit(event.target.value);
       }}
       onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          apply(event.currentTarget.value);
+        // Enter that confirms an IME composition is not a submit. Safari
+        // reports it after compositionend, with keyCode 229.
+        if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) {
+          return;
         }
+        event.preventDefault();
+        filter.submit(event.currentTarget.value);
       }}
     />
   );
