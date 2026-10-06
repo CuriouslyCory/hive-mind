@@ -358,7 +358,11 @@ export const adrNew: CommandDefinition = {
       const existing = await readFileNoFollow(source.absolute, {
         maxBytes: MAX_ADR_FILE_BYTES,
       }).catch(() => null);
-      if (existing === null || !existing.equals(Buffer.from(template.contents, "utf8"))) {
+      // A rerun on a later day renders today's date, so the template written
+      // by an earlier run differs only in `date`. That file is still ours.
+      const redated =
+        existing === null ? null : rewriteAdrFrontmatter(existing, { date: context.clock.today() });
+      if (redated === null || !redated.ok || redated.contents !== template.contents) {
         throw new CliError(
           "CONFLICT",
           `${name} is reserved, but ${target} already exists with different content and was left unchanged.`,

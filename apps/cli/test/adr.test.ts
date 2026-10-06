@@ -195,6 +195,30 @@ describe("adr new", () => {
     expect(next.data).toMatchObject({ adr: { number: 5 } });
   });
 
+  it("replays with --id on a later day, keeping the file written with the earlier date", async () => {
+    const repos = repo();
+    await json(["adr", "new", "--title", "Overnight"], { cwd: repos.work });
+    const adrId = String(bodyOf(posts("/adrs").at(-1)).adrId);
+    const path = join(repos.work, "docs/adr/0004-overnight.md");
+    const bytes = read(path);
+    expect(bytes).toContain(`date: ${FAKE_TODAY}\n`);
+    const replay = await json(["adr", "new", "--title", "Overnight", "--id", adrId], {
+      cwd: repos.work,
+      clock: fakeClock("2026-10-06"),
+    });
+    expect(replay.code, replay.stderr).toBe(0);
+    expect(replay.data).toMatchObject({ created: false, file: { status: "unchanged" } });
+    expect(read(path)).toBe(bytes);
+
+    writeFileSync(path, bytes.replace("## Context", "## Context\n\nMy edit."));
+    const edited = await json(["adr", "new", "--title", "Overnight", "--id", adrId], {
+      cwd: repos.work,
+      clock: fakeClock("2026-10-06"),
+    });
+    expect(edited.code).toBe(2);
+    expect(edited.error?.code).toBe("CONFLICT");
+  });
+
   it("never overwrites a different file, and never writes a second file with the number", async () => {
     const repos = repo();
     const path = join(repos.work, "docs/adr/0004-use-queues.md");
