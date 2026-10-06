@@ -217,6 +217,7 @@ describe("coordination CLI envelopes", () => {
     ["cli.task-claim.json", "task claim", "claim-task.json"],
     ["cli.session-start.json", "session start", "start-session.json"],
     ["cli.status.json", "status", "project-status.json"],
+    ["cli.plan-decide.json", "plan decide", "record-plan-decision.json"],
   ])("%s carries the API response as data", (name, command, response) => {
     expect(fixture(name)).toMatchObject({ schemaVersion: 1, command, ok: true });
     expect(data(name)).toEqual(fixture(response));

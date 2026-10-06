@@ -1,5 +1,7 @@
 import {
+  decisionTextSchema,
   initialPlanStatusSchema,
+  MAX_DECISION_TEXT_LENGTH,
   PLAN_STATUSES,
   planTitleSchema,
   TASK_STATUSES,
@@ -292,6 +294,66 @@ export const planLog: CommandDefinition = {
     return {
       data: result,
       human: [result.created ? `Logged ${result.event.id}.` : `Already logged ${result.event.id}.`],
+    };
+  },
+};
+
+/**
+ * A decision as the contract stores it: trimmed, then one line of 1 to
+ * `MAX_DECISION_TEXT_LENGTH` characters without control characters. Checked
+ * here so a bad decision fails before any request.
+ */
+function decisionTextOf(value: string): string {
+  const parsed = decisionTextSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const trimmed = value.trim();
+  if (trimmed === "") throw usageError("<text> is blank: give the decision as one line of text.");
+  if (trimmed.length > MAX_DECISION_TEXT_LENGTH) {
+    throw usageError(
+      `<text> is ${trimmed.length} characters; a decision is at most ${MAX_DECISION_TEXT_LENGTH}.`,
+      "Keep the decision to one line and put the reasoning in 'hivemind plan log <plan> --message'.",
+    );
+  }
+  throw usageError(
+    "<text> must be one line of valid text, without line breaks or other control characters.",
+  );
+}
+
+export const planDecide: CommandDefinition = {
+  name: "plan decide",
+  summary: "Record a decision against a Plan",
+  description: [
+    "Records a one-line decision (at most 500 characters, trimmed), allowed in",
+    "any Plan status. It appears in the dashboard's Decisions panel and in the",
+    "Plan's activity ('hivemind plan log <plan>'). Quote the text. The",
+    "decision's id is generated once per run; after a lost answer, check",
+    "'hivemind plan log <plan>' and retry only with --id <id>.",
+  ].join("\n"),
+  args: [PLAN_ARG, { name: "text", description: "The decision, one line", required: true }],
+  options: { id: idOption("decision"), session: ATTRIBUTION_OPTION, project: PROJECT_OPTION },
+  examples: [
+    "hivemind plan decide PLAN-3 'Retry with jittered backoff, capped at 30 seconds.'",
+    "hivemind plan decide PLAN-3 'Keep the v1 envelope; add fields only.' --json",
+  ],
+  async run(context) {
+    const planRef = planRefOf(context.args[0] as string);
+    const text = decisionTextOf(context.args[1] as string);
+    const eventId = creationId(context);
+    const sessionId = optionalSessionOf(context);
+    const projectId = await projectOf(context);
+    const api = await context.api();
+    const result = await createWithRecovery(
+      context,
+      { what: "decision", id: eventId, inspect: `hivemind plan log ${planRef}` },
+      () => api.recordPlanDecision(projectId, { planRef, eventId, text, sessionId }),
+    );
+    return {
+      data: result,
+      human: [
+        result.created
+          ? `Recorded decision ${result.event.id}.`
+          : `Already recorded decision ${result.event.id}.`,
+      ],
     };
   },
 };

@@ -208,6 +208,7 @@ describe("plan", () => {
       ["task", "add", planKey, "--title", "Slow"],
       ["session", "start", "--agent", "a", "--intent", "Slow"],
       ["plan", "log", planKey, "--message", "Slow"],
+      ["plan", "decide", planKey, "Slow"],
     ];
     for (const argv of creates) {
       for (const fetch of [gatewayTimeout, outputCheck]) {
@@ -267,6 +268,123 @@ describe("plan", () => {
     expect(JSON.parse(coordinationRequests().at(-1)?.body ?? "{}").sessionId).toBe(sessionId);
     await json(["plan", "create", "--title", "Plain"]);
     expect(JSON.parse(coordinationRequests().at(-1)?.body ?? "{}").sessionId).toBeUndefined();
+  });
+});
+
+describe("plan decide", () => {
+  it("matches the golden envelope, sends the trimmed text and shows it in plan log", async () => {
+    const { planKey } = await activePlanWithTask();
+    // The golden decision was recorded with a Project key.
+    const key = await json(["key", "create", "--name", "agent"]);
+    const asKey = {
+      env: { PATH: process.env.PATH, HOME: scratch, HIVEMIND_TOKEN: at(key.data, "secret") },
+    };
+    const decided = await json(
+      ["plan", "decide", planKey, "  Retry with jittered backoff.  "],
+      asKey,
+    );
+    expectGolden(decided.envelope, "cli.plan-decide.json");
+    expect(decided.data).toMatchObject({
+      created: true,
+      event: { type: "plan.decision_recorded", payload: { text: "Retry with jittered backoff." } },
+    });
+    const sent = JSON.parse(coordinationRequests().at(-1)?.body ?? "{}");
+    expect(coordinationRequests().at(-1)?.url).toMatch(/\/plans\/PLAN-1\/decisions$/);
+    expect(sent).toEqual({
+      eventId: at(decided.data, "event.id"),
+      text: "Retry with jittered backoff.",
+    });
+
+    const log = await json(["plan", "log", planKey]);
+    expect(at(log.data, "items.0.type")).toBe("plan.decision_recorded");
+    expect((await run(["plan", "log", planKey])).stdout).toMatch(
+      /plan\.decision_recorded {2}Retry with jittered backoff\.\n/,
+    );
+
+    const human = await run(["plan", "decide", planKey.toLowerCase(), "Cap at 30 seconds."]);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toMatch(/^Recorded decision [0-9a-f-]{36}\.\n$/);
+  });
+
+  it("generates the id once and replays with --id; other text with that id is exit 2", async () => {
+    const { planKey } = await activePlanWithTask();
+    const first = await json(["plan", "decide", planKey, "Once"]);
+    const id = at(first.data, "event.id");
+    expect(JSON.parse(coordinationRequests().at(-1)?.body ?? "{}").eventId).toBe(id);
+    const replay = await json(["plan", "decide", planKey, "Once", "--id", id]);
+    expect(replay.data).toMatchObject({ created: false, event: { id } });
+    expect((await run(["plan", "decide", planKey, "Once", "--id", id])).stdout).toBe(
+      `Already recorded decision ${id}.\n`,
+    );
+    const other = await json(["plan", "decide", planKey, "Different", "--id", id]);
+    expect(other.code).toBe(2);
+    expect(other.error?.code).toBe("CONFLICT");
+  });
+
+  it("names the generated id and plan log when the answer is lost", async () => {
+    const { planKey } = await activePlanWithTask();
+    const lost = async (input: URL | Request | string, init?: RequestInit) => {
+      await globalThis.fetch(input, init);
+      return new Response("<html>gateway</html>", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const human = await run(["plan", "decide", planKey, "Lost"], { fetch: lost });
+    expect(human.code).toBe(1);
+    const id = /created anyway with id ([0-9a-f-]{36})\./.exec(human.stderr)?.[1];
+    expect(id, human.stderr).toBeDefined();
+    expect(human.stderr).toContain(`Check with 'hivemind plan log ${planKey}'`);
+    expect(human.stderr).toContain(`--id ${id}`);
+    const retried = await json(["plan", "decide", planKey, "Lost", "--id", id as string]);
+    expect(retried.data).toMatchObject({ created: false, event: { id } });
+  });
+
+  it("rejects blank, multi-line or oversized text, and a bad plan or --id, before sending", async () => {
+    const { planKey } = await activePlanWithTask();
+    const before = coordinationRequests().length;
+    const usage = async (argv: string[], message: string, options: RunOptions = {}) => {
+      const failed = await json(argv, options);
+      expect(failed.code, argv.join(" ")).toBe(1);
+      expect(failed.error?.code).toBe("USAGE_ERROR");
+      expect(failed.error?.message).toContain(message);
+    };
+    await usage(["plan", "decide", planKey, "   "], "<text> is blank");
+    await usage(["plan", "decide", planKey, "First line\nsecond"], "one line");
+    await usage(["plan", "decide", planKey, "Tab\there"], "control characters");
+    await usage(["plan", "decide", planKey, "x".repeat(501)], "at most 500");
+    await usage(["plan", "decide", planKey], "Missing <text>");
+    await usage(["plan", "decide", planKey, "Retry", "with", "backoff"], "Too many arguments");
+    await usage(["plan", "decide", "PLAN-0", "Retry"], "<plan> must be a Plan key");
+    await usage(["plan", "decide", planKey, "Retry", "--id", "nope"], "--id must be a uuid");
+    await usage(
+      ["plan", "decide", planKey, "Retry"],
+      "HIVEMIND_SESSION must be a Session id",
+      withSession("not-a-uuid"),
+    );
+    expect(coordinationRequests()).toHaveLength(before);
+
+    // 500 characters after trimming is the limit, not over it.
+    const longest = await json(["plan", "decide", planKey, ` ${"x".repeat(500)} `]);
+    expect(longest.data).toMatchObject({ created: true });
+    expect((await json(["plan", "decide", "PLAN-99", "Retry"])).code).toBe(4);
+  });
+
+  it("attributes the decision to --session, then HIVEMIND_SESSION", async () => {
+    const { planKey } = await activePlanWithTask();
+    const sessionId = await startSession();
+    const decided = await json(["plan", "decide", planKey, "Attributed"], withSession(sessionId));
+    expect(JSON.parse(coordinationRequests().at(-1)?.body ?? "{}").sessionId).toBe(sessionId);
+    expect(decided.data).toMatchObject({ event: { actorSessionId: sessionId } });
+    await json(["plan", "decide", planKey, "Plain"]);
+    expect(JSON.parse(coordinationRequests().at(-1)?.body ?? "{}").sessionId).toBeUndefined();
+  });
+
+  it("explains itself in --help", async () => {
+    const help = await run(["plan", "decide", "--help"]);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain("hivemind plan decide <plan> <text>");
+    expect(help.stdout).toContain("Decisions panel");
   });
 });
 
