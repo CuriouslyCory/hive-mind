@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-10-05
 ---
 
@@ -7,7 +7,7 @@ date: 2026-10-05
 
 ## Context
 
-Under ADR-0001, a new ADR takes the next free number on `main`, so two open PRs can pick the same number and the second to merge must renumber. Agents in different worktrees write ADRs at the same time, so this happens. [#1](https://github.com/CuriouslyCory/hive-mind/issues/1) recommends keeping ADRs as repo files with hive-mind handing out their numbers and showing their content. [#19](https://github.com/CuriouslyCory/hive-mind/issues/19), the M4 plan, builds both. This ADR is proposed until the PR that closes #19 merges; that PR accepts it.
+Under ADR-0001, a new ADR takes the next free number on `main`, so two open PRs can pick the same number and the second to merge must renumber. Agents in different worktrees write ADRs at the same time, so this happens. [#1](https://github.com/CuriouslyCory/hive-mind/issues/1) recommends keeping ADRs as repo files with hive-mind handing out their numbers and showing their content. [#19](https://github.com/CuriouslyCory/hive-mind/issues/19), the M4 plan, builds both. The PR that closes #19 implements and accepts it.
 
 The constraints:
 
@@ -73,6 +73,7 @@ The constraints:
 - hive-mind trusts the commit and content that a Member or Project key reports. That is the trust already given to Plan writes, and every sync is attributed in an Event. Checking commits against GitHub is future work.
 - Removed ADRs keep their rows, and uploaded content that no sync uses is kept. Cleaning it up is retention work for M7.
 - The schema change is expand-only, so a deployment from before M4 that has the reader still runs on the new schema.
+- Verified by tests: five concurrent reservations get distinct consecutive numbers; a reservation racing a first sync gets a number past the synced files in either order; of two syncs on one base exactly one applies; a refused sync changes no row, Event, counter or commit pointer; every ADR in `docs/adr/` uploads and syncs, ADR-0014 included, while a 17 KiB Plan body still gets 413; and a seeded property test requires every file the parser accepts to upload and read back without an error (`apps/web/test/adr-parser-consistency.test.ts`). Removing the Project lock, moving the number out of the replay check or skipping the compare-and-set each fails these tests.
 
 ## Alternatives considered
 
