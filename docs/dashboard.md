@@ -51,7 +51,7 @@ The list views (`view=plans`, `view=sessions`) read only the rail, their table a
 | Lease ending | A usable claim's lease ends within 120 s (`LEASE_ENDING_SECONDS`). | Soonest first |
 | Claim lapsed | Within the last hour (`LAPSED_CLAIM_WINDOW_SECONDS`), a claim stopped being usable (its lease expired or its holder is no longer live) and nothing has reconciled it yet, or the Task's latest claim change was a time-driven `task.released` (`lease_expired`, `session_stale`, `session_abandoned`) and the Task is still unclaimed and not done. The Task's Plan is open. | Most recent first |
 | Blocked Task | A Task has status `blocked` in an open Plan. Shows its reason and `task.blocked_at`. | Most recently blocked first |
-| Unclaimed Plan | An `active` Plan with open Tasks has no usable claim, and for 24 hours (`UNCLAIMED_PLAN_SECONDS`) has had no update, no `task.claimed` or `task.released`, and no Task holding a usable claim. | Most recently idle first |
+| Unclaimed Plan | An `active` Plan with open Tasks has no usable claim, and for 24 hours (`UNCLAIMED_PLAN_SECONDS`) has had no update, no `task.claimed`, `task.released` or `task.done`, and no Task holding a usable claim. | Most recently idle first |
 | Paused Plan | A `paused` Plan still has open Tasks. Shows `plan.paused_at`. | Most recently paused first |
 
 `blocked_at` and `paused_at` are set when the status changes and cleared when it changes back. Rows that were already blocked or paused before the columns existed were backfilled from their latest matching Event; one with no such Event shows no time. Status changes made by a deployment without the columns leave them unchanged (Known limitations).

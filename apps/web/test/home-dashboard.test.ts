@@ -511,7 +511,7 @@ describeDb("home dashboard", () => {
       expect((await ids("active")).ids).toEqual([live]);
     });
 
-    it("counts a Plan as unclaimed from its last usable claim or release, not its last claim", async () => {
+    it("counts a Plan as unclaimed from its last usable claim, release or finished Task, not its last claim", async () => {
       const { user: someone, projectId } = await ownProject();
       const sessionId = await startSession(someone.token, projectId, { intent: "Long run" });
       /** An active Plan with one Task claimed through `sessionId`, last updated two days ago. */
@@ -550,6 +550,17 @@ describeDb("home dashboard", () => {
         sessionId,
       });
       await ageClaim(released.taskId, "2 days");
+      // Claimed two days ago and finished just now; its other Task is open.
+      const finished = await claimedPlan("Just finished");
+      await addTask(someone.token, projectId, finished.plan.key, "Next");
+      await ok(someone.token, `/projects/${projectId}/tasks/${finished.taskId}/done`, {
+        sessionId,
+      });
+      await ageClaim(finished.taskId, "2 days");
+      await sql(
+        "update plan set updated_at = clock_timestamp() - interval '2 days' where id = $1",
+        [finished.plan.id],
+      );
       // Claimed three days ago; its lease expired two days ago.
       const longIdle = await claimedPlan("Long idle");
       await ageClaim(longIdle.taskId, "3 days");

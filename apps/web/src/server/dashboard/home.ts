@@ -1039,14 +1039,14 @@ async function readAttention(
       .where(and(eq(task.planId, plan.id), ne(task.status, "done"))),
   );
   // When the Plan was last worked on: the latest of its last update, its
-  // last claim or release, and the last moment any of its Tasks still held a
+  // last claim, release or finished Task, and the last moment any of its Tasks still held a
   // usable claim (a lapsed claim nothing has released yet stopped being
   // usable when its lease expired or its holder stopped being live). So a
   // long-held claim that just lapsed does not also make the Plan unclaimed.
   const idleSince = sql`greatest(
     ${plan.updatedAt},
     (select max(${event.effectiveAt}) from ${event}
-      where ${event.planId} = ${plan.id} and ${event.type} in ('task.claimed', 'task.released')),
+      where ${event.planId} = ${plan.id} and ${event.type} in ('task.claimed', 'task.released', 'task.done')),
     (select max(least(
         ${task.leaseExpiresAt},
         ${agentSession.endedAt},
