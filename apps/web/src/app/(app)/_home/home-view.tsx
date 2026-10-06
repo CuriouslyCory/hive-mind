@@ -416,7 +416,7 @@ function Overlaps({ dashboard }: { dashboard: HomeDashboard }) {
         );
         return (
           <Alert
-            key={`${overlap.projectId}:${overlap.session?.id ?? overlap.scope}:${overlap.otherSession?.id ?? overlap.otherScope}`}
+            key={`${overlap.projectId}:${overlap.session?.id ?? ""}:${overlap.scope}:${overlap.otherSession?.id ?? ""}:${overlap.otherScope}`}
             tone="warning"
             live={false}
             title={title}

@@ -162,6 +162,8 @@ export interface HomeOverlap {
 interface AttentionBase {
   projectId: string;
   projectName: string;
+  /** The Plan the item is about, or the Plan of its Task. */
+  planId: string;
   planKey: string;
 }
 
@@ -169,6 +171,7 @@ interface AttentionBase {
 export type AttentionItem =
   | (AttentionBase & {
       kind: "blocked_task";
+      taskId: string;
       taskTitle: string;
       reason: string;
       /** When the Task became blocked; null for a Task blocked before `blocked_at` existed and with no Event to say. */
@@ -176,12 +179,14 @@ export type AttentionItem =
     })
   | (AttentionBase & {
       kind: "lease_ending";
+      taskId: string;
       taskTitle: string;
       holder: SessionLabel | null;
       leaseExpiresAt: Date;
     })
   | (AttentionBase & {
       kind: "claim_lapsed";
+      taskId: string;
       taskTitle: string;
       /** The Session whose claim lapsed. */
       holder: SessionLabel | null;

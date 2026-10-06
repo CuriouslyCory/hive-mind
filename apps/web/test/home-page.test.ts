@@ -303,6 +303,7 @@ describe("home page text", () => {
       kind: "paused_plan" as const,
       projectId: PROJECT_A,
       projectName: "web-app",
+      planId: "a-plan-5",
       planKey: "PLAN-5",
       planTitle: "Settings",
       openTaskCount: 1,

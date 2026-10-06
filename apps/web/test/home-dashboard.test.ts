@@ -397,19 +397,32 @@ describeDb("home dashboard", () => {
       expect(ending).toMatchObject({
         projectId: projectA,
         projectName: "Alpha hive",
+        planId: planA.id,
         planKey: planA.key,
+        taskId: lease?.id,
         taskTitle: "Lease task",
         holder: { id: userSession, agent: "claude", status: "active" },
       });
       // The unreconciled lease expired a minute ago, the swept one five.
-      expect(lapsedA).toMatchObject({ taskTitle: "Expired task", holder: { id: userSession } });
-      expect(lapsedB).toMatchObject({ taskTitle: "Swept task", holder: { id: userSession } });
+      expect(lapsedA).toMatchObject({
+        taskId: expired?.id,
+        taskTitle: "Expired task",
+        holder: { id: userSession },
+      });
+      expect(lapsedB).toMatchObject({
+        taskId: swept?.id,
+        taskTitle: "Swept task",
+        holder: { id: userSession },
+      });
       expect(blocked).toMatchObject({
+        planId: planA.id,
+        taskId: wire?.id,
         taskTitle: "Wire API",
         reason: "Waiting on API keys",
         blockedAt: expect.any(Date),
       });
       expect(unclaimed).toMatchObject({
+        planId: idlePlan.id,
         planKey: idlePlan.key,
         planTitle: "Nobody home",
         openTaskCount: 1,

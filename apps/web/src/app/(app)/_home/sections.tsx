@@ -112,7 +112,7 @@ export function NeedsAttention({ dashboard }: { dashboard: HomeDashboard }) {
             const when = attentionWhen(item);
             return (
               <li
-                key={`${item.kind}:${item.projectId}:${item.planKey}:${attentionSubject(item)}`}
+                key={`${item.kind}:${"taskId" in item ? item.taskId : item.planId}`}
                 className="home-feed-item"
                 data-kind={item.kind}
               >

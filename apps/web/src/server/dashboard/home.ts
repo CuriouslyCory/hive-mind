@@ -877,9 +877,10 @@ async function readAttention(
     ATTENTION_LABELS[kind].toLowerCase().includes(q.toLowerCase());
   const limit = HOME_ATTENTION_LIMIT;
   const lapsedSince = new Date(now.getTime() - LAPSED_CLAIM_WINDOW_SECONDS * 1000);
-  const base = (projectId: string, number: number) => ({
+  const base = (projectId: string, planId: string, number: number) => ({
     projectId,
     projectName: projectName(projectId),
+    planId,
     planKey: planKey(number),
   });
   const taskMatches = (kind: AttentionKind) =>
@@ -964,7 +965,9 @@ async function readAttention(
   // and that are still unclaimed and not done.
   const latest = tx
     .selectDistinctOn([event.taskId], {
-      taskId: event.taskId,
+      // The joined Task's id, equal to `event.task_id` but never null.
+      taskId: task.id,
+      planId: task.planId,
       sessionId: event.sessionId,
       effectiveAt: event.effectiveAt,
       type: event.type,
@@ -992,6 +995,7 @@ async function readAttention(
   const releasedRows = await tx
     .select({
       taskId: latest.taskId,
+      planId: latest.planId,
       sessionId: latest.sessionId,
       effectiveAt: latest.effectiveAt,
       projectId: latest.projectId,
@@ -1007,6 +1011,8 @@ async function readAttention(
   const blockedRows = await tx
     .select({
       projectId: task.projectId,
+      taskId: task.id,
+      planId: task.planId,
       title: task.title,
       reason: task.blockReason,
       blockedAt: task.blockedAt,
@@ -1113,8 +1119,9 @@ async function readAttention(
   const pending: PendingAttention[] = [
     ...leaseEnding.map((row) => ({
       build: (label: (id: string | null) => SessionLabel | null): AttentionItem => ({
-        ...base(row.task.projectId, row.number),
+        ...base(row.task.projectId, row.task.planId, row.number),
         kind: "lease_ending",
+        taskId: row.task.id,
         taskTitle: row.task.title,
         holder: label(row.task.claimedBySessionId),
         leaseExpiresAt: row.task.leaseExpiresAt ?? now,
@@ -1124,6 +1131,8 @@ async function readAttention(
       expired.map((row) => ({
         at: lapsedAt(row.task.leaseExpiresAt ?? now, row.holder, now),
         projectId: row.task.projectId,
+        planId: row.task.planId,
+        taskId: row.task.id,
         number: row.number,
         title: row.task.title,
         holderId: row.task.claimedBySessionId,
@@ -1131,14 +1140,17 @@ async function readAttention(
       releasedRows.map((row) => ({
         at: row.effectiveAt,
         projectId: row.projectId,
+        planId: row.planId,
+        taskId: row.taskId,
         number: row.number,
         title: row.title,
         holderId: row.sessionId,
       })),
     ).map((row) => ({
       build: (label: (id: string | null) => SessionLabel | null): AttentionItem => ({
-        ...base(row.projectId, row.number),
+        ...base(row.projectId, row.planId, row.number),
         kind: "claim_lapsed",
+        taskId: row.taskId,
         taskTitle: row.title,
         holder: label(row.holderId),
         lapsedAt: row.at,
@@ -1146,8 +1158,9 @@ async function readAttention(
     })),
     ...blockedRows.map((row) => ({
       build: (): AttentionItem => ({
-        ...base(row.projectId, row.number),
+        ...base(row.projectId, row.planId, row.number),
         kind: "blocked_task",
+        taskId: row.taskId,
         taskTitle: row.title,
         reason: row.reason ?? "",
         blockedAt: row.blockedAt,
@@ -1155,7 +1168,7 @@ async function readAttention(
     })),
     ...unclaimedRows.map(({ plan: row, idleSince }) => ({
       build: (): AttentionItem => ({
-        ...base(row.projectId, row.number),
+        ...base(row.projectId, row.id, row.number),
         kind: "unclaimed_plan",
         planTitle: row.title,
         openTaskCount: openTasks(row.id),
@@ -1164,7 +1177,7 @@ async function readAttention(
     })),
     ...pausedRows.map(({ plan: row }) => ({
       build: (): AttentionItem => ({
-        ...base(row.projectId, row.number),
+        ...base(row.projectId, row.id, row.number),
         kind: "paused_plan",
         planTitle: row.title,
         openTaskCount: openTasks(row.id),
