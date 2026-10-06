@@ -154,21 +154,21 @@ Prerequisites:
 
 Until all three hold, the ADR item in #19 stays unchecked.
 
-### Sync ADR-0001 to ADR-0017
+### Sync ADR-0001 to ADR-0018
 
 ```bash
 git switch main && git pull --ff-only
 git fetch origin
 git rev-parse origin/HEAD || git remote set-head origin --auto   # adr sync reads origin/HEAD
-hivemind adr sync --check        # Checked 17 ADR files in docs/adr/: no errors, ...
-hivemind adr sync --dry-run      # Dry run: would sync commit <sha7> (first sync): 17 added, ...
+hivemind adr sync --check        # Checked 18 ADR files in docs/adr/: no errors, ...
+hivemind adr sync --dry-run      # Dry run: would sync commit <sha7> (first sync): 18 added, ...
 hivemind adr sync
 hivemind adr list --limit 100
 hivemind adr show ADR-0014
 ```
 
-- [ ] `adr sync` prints `Synced commit <sha7> (first sync): 17 added, 0 updated, 0 removed, 0 unchanged.`, and `<sha7>` is `main`'s commit. If more ADRs have merged since this was written, the count is higher.
-- [ ] `adr list` shows ADR-0001 to ADR-0017 as `published`, each with its status, and ends with `As of commit <sha7>, synced <time>.`
+- [ ] `adr sync` prints `Synced commit <sha7> (first sync): 18 added, 0 updated, 0 removed, 0 unchanged.`, and `<sha7>` is `main`'s commit. If more ADRs have merged since this was written, the count is higher.
+- [ ] `adr list` shows ADR-0001 to ADR-0018 as `published`, each with its status, and ends with `As of commit <sha7>, synced <time>.`
 - [ ] `adr show ADR-0014` prints the whole file. It is larger than 16 KiB, so it also proves the larger upload limit.
 - [ ] The dashboard's ADR list shows the same ADRs, with the banner naming the commit and you.
 - [ ] A second `hivemind adr sync` prints `Already synced at commit <sha7>.`
@@ -179,11 +179,11 @@ Do this for the next real decision, not a test ADR: the number is never handed o
 
 ```bash
 git switch -c docs/adr-<slug>
-hivemind adr new --title '<the decision>'   # prints docs/adr/0018-<slug>.md
+hivemind adr new --title '<the decision>'   # prints docs/adr/0019-<slug>.md
 hivemind adr list --state reserved
 ```
 
-- [ ] The number is above every ADR on `main` (ADR-0018 if none has merged since ADR-0017), and `adr list --state reserved` lists it.
+- [ ] The number is above every ADR on `main` (ADR-0019 if none has merged since ADR-0018), and `adr list --state reserved` lists it.
 - [ ] Write the ADR, open a PR and merge it. Then `git fetch origin && hivemind adr sync` reports it as added, and `adr list` shows it as `published`.
 - [ ] In the same PR or the next one, add a line to `AGENTS.md` telling agents to reserve ADR numbers with `hivemind adr new`, now that the repository is bound.
 
