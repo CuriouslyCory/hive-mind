@@ -56,7 +56,7 @@ The list views (`view=plans`, `view=sessions`) read only the rail, their table a
 
 `blocked_at` and `paused_at` are set when the status changes and cleared when it changes back. Rows that were already blocked or paused before the columns existed were backfilled from their latest matching Event; one with no such Event shows no time.
 
-**Throughput, Agents and Hot paths** (`home-analytics.ts`). Every boundary derives from the snapshot's database time. The range `24h` is 24 hourly buckets, `7d` and `30d` are 7 or 30 UTC days; the last bucket holds now and is partial, and each figure is compared with the same number of whole buckets before it.
+**Throughput, Agents and Hot paths** (`home-analytics.ts`). Every boundary derives from the snapshot's database time. The range `24h` is 24 hourly buckets, `7d` and `30d` are 7 or 30 UTC days; the last bucket holds now and is partial, and each figure is compared with the same elapsed time one range earlier, from the start of the range minus its length to now minus its length, so a steady rate compares as equal.
 
 - **Throughput:** `task.done` Events per bucket; Sessions started (`session.started`); Plans finished (`plan.status_changed` to `done`); and the median minutes from a Task's latest `task.claimed` before its `task.done` to that `task.done`.
 - **Agents:** grouped by the Sessions' agent name: their machines, Projects, Sessions started, `task.done` Events written through them, and active time. Active time sums the gaps between a Session's consecutive `session.started` and `session.heartbeat` Events that are shorter than 5 minutes (`ACTIVE_GAP_SECONDS`), clipped to the range; a longer gap counts as away. Most active first.

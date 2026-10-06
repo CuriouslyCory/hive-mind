@@ -30,7 +30,10 @@ export interface HomeAnalyticsInput {
 //
 // - The range is `count` buckets of one `unit` (an hour for 24h, a UTC day
 //   for 7d and 30d) ending with the bucket that holds `now`, so the last one
-//   is partial. The previous range is the `count` whole buckets before it.
+//   is partial. The previous range, which the stats compare against, covers
+//   the same elapsed time one range earlier: [cur_start − count·unit,
+//   now − count·unit). Comparing with `count` whole buckets instead would
+//   make a steady rate read as a drop (−14% at 01:00 UTC on 7d).
 //   Boundaries are computed in SQL with `date_trunc(unit, now, 'UTC')`.
 // - Throughput counts Events by type through
 //   `event_project_id_type_effective_at_idx`; a done Task's time is measured
@@ -74,7 +77,7 @@ interface QueryContext {
   projectNames: SQL;
   /** The ILIKE pattern for `q`, or null when there is no filter. */
   pattern: string | null;
-  /** A CTE body yielding one row: cur_start, cur_end, prev_start, step, n. */
+  /** A CTE body yielding one row: cur_start, cur_end, prev_start, prev_end, step, n. */
   bounds: SQL;
 }
 
@@ -85,12 +88,14 @@ function boundsSql(now: Date, unit: "hour" | "day", count: number): SQL {
       cur_start,
       cur_start + n * step as cur_end,
       cur_start - n * step as prev_start,
+      now - n * step as prev_end,
       step,
       n
     from (
       select
         date_trunc(${unit}, ${now.toISOString()}::timestamptz, 'UTC')
           - (${count}::int - 1) * ${step}::interval as cur_start,
+        ${now.toISOString()}::timestamptz as now,
         ${step}::interval as step,
         ${count}::int as n
     ) as shape
@@ -139,6 +144,7 @@ async function readThroughput(
         and e.type in ('task.done', 'session.started', 'plan.status_changed')
         and e.effective_at >= b.prev_start
         and e.effective_at < b.cur_end
+        and (e.effective_at >= b.cur_start or e.effective_at < b.prev_end)
     ),
     task_minutes as (
       select ev.cur, extract(epoch from ev.effective_at - claim.effective_at) / 60 as minutes

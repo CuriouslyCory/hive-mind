@@ -340,7 +340,9 @@ describeDb("home analytics", () => {
   });
 
   describe("throughput", () => {
-    it("counts 24 hourly buckets ending with the current hour, and the 24 hours before", async () => {
+    // The previous range is as long as the current one, so every previous
+    // figure below sits well inside it, wherever `now` falls in its hour.
+    it("counts 24 hourly buckets ending with the current hour, and the same span a day earlier", async () => {
       const { analytics, now } = await load({ range: "24h" });
       const { throughput } = analytics;
       expect(throughput).toMatchObject({ range: "24h", unit: "hour" });
@@ -359,7 +361,7 @@ describeDb("home analytics", () => {
       expect(throughput.medianTaskMinutes).toEqual({ value: 30, previous: 60 });
     });
 
-    it("counts UTC days for 7d, the last one partial, and the 7 days before", async () => {
+    it("counts UTC days for 7d, the last one partial, and the same span a week earlier", async () => {
       const { analytics, now } = await load({ range: "7d" });
       const { throughput } = analytics;
       expect(throughput).toMatchObject({ range: "7d", unit: "day" });
@@ -381,6 +383,34 @@ describeDb("home analytics", () => {
       expect(analytics.throughput.buckets).toHaveLength(30);
       expect(analytics.throughput.tasksDone).toEqual({ value: 5, previous: 0 });
       expect(analytics.throughput.medianTaskMinutes.previous).toBeNull();
+    });
+
+    it.each([
+      // 01:00 UTC: the current 7d range is 6 days and 1 hour long.
+      ["7d", "2026-01-08T01:00:00Z", 145],
+      // 01:20 UTC: the current 24h range is 23 hours and 20 minutes long.
+      ["24h", "2026-01-08T01:20:00Z", 23],
+    ] as const)("compares a steady rate as equal on %s at %s", async (range, at, expected) => {
+      // One of each counted Event every hour for 14 days, half an hour off
+      // the hour, in a Project of its own, read at a fixed `now`.
+      const now = new Date(at);
+      const steady = await api.createProject(owner);
+      await db().execute(sql`
+        insert into event (project_id, type, payload_version, payload, actor_kind, effective_at)
+        select ${steady}, kind.type, 1, kind.payload::jsonb, 'system',
+          ${now.toISOString()}::timestamptz - (h + 0.5) * interval '1 hour'
+        from generate_series(0, 14 * 24 - 1) as h
+          cross join (values
+            ('task.done', '{}'),
+            ('session.started', '{}'),
+            ('plan.status_changed', '{"to": "done"}')
+          ) as kind(type, payload)
+      `);
+      const { analytics } = await load({ range, now, projects: [{ id: steady, name: "Steady" }] });
+      const same = { value: expected, previous: expected };
+      expect(analytics.throughput.tasksDone).toEqual(same);
+      expect(analytics.throughput.sessionsStarted).toEqual(same);
+      expect(analytics.throughput.plansFinished).toEqual(same);
     });
   });
 
