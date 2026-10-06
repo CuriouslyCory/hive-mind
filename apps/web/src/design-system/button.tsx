@@ -8,11 +8,11 @@ export type ButtonVariant = "primary" | "honey" | "outline" | "quiet" | "danger"
 export type ButtonSize = "sm" | "lg";
 
 type ButtonOwnProps = {
-  /** Defaults to `outline`, as in the bundle. */
+  /** Defaults to `outline`. */
   variant?: ButtonVariant;
   /** Omit for the default 36px control. */
   size?: ButtonSize;
-  /** A glyph from the Icons group, drawn before the label at 20px. */
+  /** A glyph from the icon set (`iconNames`), drawn before the label at 20px. */
   icon?: IconName;
   className?: string;
   children?: ReactNode;

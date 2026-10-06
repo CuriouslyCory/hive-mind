@@ -2,9 +2,9 @@ import Image from "next/image";
 import { cx } from "./cx";
 
 /**
- * The logo files in apps/web/public/brand, downscaled from the design
- * system's originals (never redrawn, recoloured or cropped). Width and height
- * are the files' pixel sizes.
+ * The logo files in apps/web/public/brand, downscaled from the originals
+ * (ADR-0016) and never redrawn, recoloured or cropped. Width and height are
+ * the files' pixel sizes.
  */
 export const brandAssets = {
   mark: { src: "/brand/hivemind-mark.png", width: 122, height: 128 },
@@ -24,8 +24,9 @@ export type LogoProps = {
   /** Height of the wordmark in px; the mark is drawn 32/28 of it, as in the header. Defaults to 28. */
   height?: number;
   /**
-   * Sit the logo on the white logo tile. Defaults to true; the brand book
-   * keeps the logo on white over dark surfaces until a dark variant exists.
+   * Sit the logo on the white logo tile. Defaults to true; the logo stays on
+   * white over dark surfaces until a dark variant exists (docs/design-system.md
+   * → Rules → Logo).
    */
   tile?: boolean;
   /** `eager` for a logo above the fold (the header). Defaults to the browser's lazy loading. */

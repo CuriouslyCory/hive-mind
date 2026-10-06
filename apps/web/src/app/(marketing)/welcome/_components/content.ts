@@ -25,7 +25,7 @@ export type TerminalLine =
 
 const TASK_ID = "7a2e3d4c-5b6a-4f90-8b1c-2d3e4f5a6b7c";
 
-/** docs/cli.md → Coordination → A typical run, with the design's comments. */
+/** docs/cli.md → Coordination → A typical run, with explanatory comment lines. */
 export const TYPICAL_RUN: readonly TerminalLine[] = [
   { kind: "comment", text: "# one Session per agent run" },
   {

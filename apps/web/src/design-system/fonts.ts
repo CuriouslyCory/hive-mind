@@ -1,26 +1,29 @@
-import { JetBrains_Mono, Nunito_Sans, Sora } from "next/font/google";
+import localFont from "next/font/local";
 
-// The three faces from the brand book (docs/design-system.md → Type). Each
-// declares a CSS variable on the element that carries its class; tokens.css
-// reads those variables inside `.hm-fonts` to build --font-display,
-// --font-sans and --font-mono.
-const sora = Sora({
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
+// The three faces (docs/design-system.md → Fonts), vendored in ./fonts as the
+// latin subset of Google Fonts' variable files, each with its OFL licence.
+// They are local rather than next/font/google because Google answers
+// next/font's build-time request with a Nunito Sans file that renders a gap
+// after "t" (ADR-0016). Each declares a CSS variable on the element that
+// carries its class; tokens.css reads those variables inside `.hm-fonts` to
+// build --font-display, --font-sans and --font-mono.
+const sora = localFont({
+  src: "./fonts/sora-latin.woff2",
+  weight: "600 800",
   display: "swap",
   variable: "--hm-font-sora",
 });
 
-const nunitoSans = Nunito_Sans({
-  subsets: ["latin"],
-  weight: ["400", "600", "700"],
+const nunitoSans = localFont({
+  src: "./fonts/nunito-sans-latin.woff2",
+  weight: "400 700",
   display: "swap",
   variable: "--hm-font-nunito-sans",
 });
 
-const jetBrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const jetBrainsMono = localFont({
+  src: "./fonts/jetbrains-mono-latin.woff2",
+  weight: "400 500",
   display: "swap",
   variable: "--hm-font-jetbrains-mono",
 });

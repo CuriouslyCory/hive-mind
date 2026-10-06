@@ -12,8 +12,8 @@ import { Cell } from "../src/design-system/cell";
 import { Hexagon, hexagonPoints, Icon, iconNames } from "../src/design-system/icon";
 import { Input } from "../src/design-system/input";
 import { Logo, LogoLockup } from "../src/design-system/logo";
-import { Switch } from "../src/design-system/switch";
-import { Tabs } from "../src/design-system/tabs";
+import { Switch, switchToggle } from "../src/design-system/switch";
+import { Tabs, tabIndexForKey } from "../src/design-system/tabs";
 
 // createElement only sees the last overload of Button; JSX callers get both.
 const Button = OverloadedButton as (props: ButtonProps) => ReactElement;
@@ -213,6 +213,26 @@ describe("Switch", () => {
     expect(button?.["aria-checked"]).toBe("true");
     expect(button).toHaveProperty("disabled");
   });
+
+  it("flips the state on a click and stores it only when uncontrolled", () => {
+    expect(switchToggle({ on: false, controlled: false })).toEqual({
+      checked: true,
+      storeOwnState: true,
+    });
+    expect(switchToggle({ on: true, controlled: false })).toEqual({
+      checked: false,
+      storeOwnState: true,
+    });
+    expect(switchToggle({ on: true, controlled: true })).toEqual({
+      checked: false,
+      storeOwnState: false,
+    });
+  });
+
+  it("does nothing when disabled, controlled or not", () => {
+    expect(switchToggle({ on: false, controlled: false, disabled: true })).toBeNull();
+    expect(switchToggle({ on: true, controlled: true, disabled: true })).toBeNull();
+  });
 });
 
 describe("Tabs", () => {
@@ -247,6 +267,23 @@ describe("Tabs", () => {
       expect(panel?.["aria-labelledby"]).toBe(tab.id);
     });
     expect(panels.map((panel) => "hidden" in panel)).toEqual([true, true, false]);
+  });
+
+  it("moves with the arrow keys, wrapping at both ends", () => {
+    expect(tabIndexForKey("ArrowRight", 0, 3)).toBe(1);
+    expect(tabIndexForKey("ArrowRight", 2, 3)).toBe(0);
+    expect(tabIndexForKey("ArrowLeft", 1, 3)).toBe(0);
+    expect(tabIndexForKey("ArrowLeft", 0, 3)).toBe(2);
+    expect(tabIndexForKey("ArrowRight", 0, 1)).toBe(0);
+  });
+
+  it("jumps to the ends with Home and End, and ignores other keys", () => {
+    expect(tabIndexForKey("Home", 2, 3)).toBe(0);
+    expect(tabIndexForKey("End", 0, 3)).toBe(2);
+    for (const key of ["ArrowUp", "ArrowDown", "Enter", " ", "Tab", "a"]) {
+      expect(tabIndexForKey(key, 1, 3), key).toBeNull();
+    }
+    expect(tabIndexForKey("ArrowRight", 0, 0)).toBeNull();
   });
 
   it("selects the first item by default and omits aria-controls without panels", () => {
@@ -346,10 +383,15 @@ describe("Icon and Hexagon", () => {
     expect(svg).not.toHaveProperty("aria-hidden");
   });
 
-  it("computes the same hexagon as the Icons group frame", () => {
-    expect(hexagonPoints(12, 12, 9)).toBe(
-      "12.00,3.00 19.79,7.50 19.79,16.50 12.00,21.00 4.21,16.50 4.21,7.50",
-    );
+  it("computes the hexagons the icons draw", () => {
+    const pointsOf = (name: "hex" | "info" | "hive") =>
+      [...render(createElement(Icon, { name })).matchAll(/points="([^"]+)"/g)].map(
+        (match) => match[1],
+      );
+    // HEX_OUTLINE (hex, hive, settings), HEX_FRAME (info, alert) and hive's filled centre.
+    expect(pointsOf("hex")).toEqual([hexagonPoints(12, 12, 9)]);
+    expect(pointsOf("info")).toEqual([hexagonPoints(12, 12, 9.5)]);
+    expect(pointsOf("hive")).toEqual([hexagonPoints(12, 12, 9), hexagonPoints(12, 12, 3.5)]);
   });
 
   it("renders a sized hexagon, decorative only when empty", () => {
@@ -425,11 +467,101 @@ describe("theme tokens", () => {
     expect(systemDark).toEqual(dark);
   });
 
-  it("drives the bundle's dark overrides from tokens, not [data-theme] selectors", () => {
+  it("drives dark-only component rules from tokens, not [data-theme] selectors", () => {
     const components = read("components.css");
     expect(components).not.toMatch(/\[data-theme[^\]]*\]\s*\./);
     expect(dark.get("--hm-badge-success-ink")).toBe("var(--ink)");
     expect(dark.get("--hm-btn-primary-hover")).toBe("var(--honey-deep)");
     expect(light.get("--hm-btn-primary-hover")).toBe("var(--surface-hive)");
+  });
+  describe("inside the hive card", () => {
+    const hive = block(".hm-card-hive {");
+    const themes = { light, dark };
+
+    /** A token's value inside a hive card on `theme`, with var() references resolved. */
+    function resolve(name: string, theme: Map<string, string>): string {
+      const value = hive.get(name) ?? theme.get(name);
+      if (value === undefined) throw new Error(`${name} is not declared`);
+      const reference = /^var\((--[\w-]+)\)$/.exec(value)?.[1];
+      return reference ? resolve(reference, theme) : value;
+    }
+
+    function luminance(hex: string): number {
+      const channels = [1, 3, 5].map((start) => Number.parseInt(hex.slice(start, start + 2), 16));
+      const [r = 0, g = 0, b = 0] = channels.map((channel) => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+
+    function contrast(first: string, second: string): number {
+      const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a);
+      return ((high ?? 0) + 0.05) / ((low ?? 0) + 0.05);
+    }
+
+    it("re-points the tokens its controls read", () => {
+      for (const name of [
+        "--surface",
+        "--surface-raised",
+        "--surface-sunken",
+        "--ink",
+        "--ink-muted",
+        "--ink-faint",
+        "--line",
+        "--line-strong",
+        "--hive",
+        "--on-hive",
+        "--focus",
+        "--hive-tint",
+        "--honey-ink",
+        "--honey-tint",
+        "--success",
+        "--success-tint",
+        "--danger",
+        "--danger-tint",
+        "--info",
+        "--hm-color-scheme",
+        "--hm-btn-primary-hover",
+        "--hm-badge-success-ink",
+        "--hm-badge-danger-ink",
+      ]) {
+        expect(hive.has(name), name).toBe(true);
+      }
+      expect(hive.get("--ink")).toBe("var(--on-surface-hive)");
+      expect(hive.get("--surface")).toBe("var(--surface-hive)");
+      expect(hive.get("--focus")).toBe(hive.get("--hive"));
+    });
+
+    // [foreground, background, minimum]: text 4.5:1, borders and the focus ring 3:1.
+    const pairs: Array<[string, string, number]> = [
+      ["--ink", "--surface-hive", 4.5], // card text, outline and quiet buttons, inputs
+      ["--ink-muted", "--surface-hive", 4.5], // muted text, unselected tabs, help text
+      ["--ink-faint", "--surface-hive", 4.5], // placeholders
+      ["--honey", "--surface-hive", 4.5], // the hive card eyebrow
+      ["--danger", "--surface-hive", 4.5], // danger button text, error help
+      ["--on-hive", "--hive", 4.5], // primary button
+      ["--on-hive", "--hm-btn-primary-hover", 4.5],
+      ["--on-honey", "--honey", 4.5], // honey button
+      ["--on-honey", "--honey-deep", 4.5],
+      ["--ink", "--hive-tint", 4.5], // hovered buttons and tabs, neutral badge, info alert
+      ["--info", "--hive-tint", 4.5], // info badge
+      ["--honey-ink", "--honey-tint", 4.5], // honey badge, tab count
+      ["--ink", "--honey-tint", 4.5], // warning alert
+      ["--ink", "--success-tint", 4.5],
+      ["--ink", "--danger-tint", 4.5],
+      ["--danger", "--danger-tint", 4.5], // hovered danger button
+      ["--ink", "--surface-sunken", 4.5], // hm-code
+      ["--line-strong", "--surface-hive", 3], // outline button, input, switch track and thumb
+      ["--focus", "--surface-hive", 3], // the focus ring
+      ["--honey-ink", "--surface-hive", 3], // a focused input's border
+      ["--hive", "--surface-hive", 3], // a checked switch's track
+    ];
+
+    for (const [themeName, theme] of Object.entries(themes)) {
+      it.each(pairs)(`keeps %s on %s at %s:1 or more in the ${themeName} theme`, (fg, bg, min) => {
+        expect(contrast(resolve(fg, theme), resolve(bg, theme))).toBeGreaterThanOrEqual(min);
+      });
+    }
   });
 });

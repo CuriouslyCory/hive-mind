@@ -17,6 +17,24 @@ export type SwitchProps = Omit<
   label?: ReactNode;
 };
 
+/**
+ * What a click on the switch does: null when it is disabled (or the click
+ * was cancelled), else the new state, and whether the switch stores it
+ * itself. A controlled switch only reports the new state through onChange.
+ */
+export function switchToggle({
+  on,
+  controlled,
+  disabled,
+}: {
+  on: boolean;
+  controlled: boolean;
+  disabled?: boolean;
+}): { checked: boolean; storeOwnState: boolean } | null {
+  if (disabled) return null;
+  return { checked: !on, storeOwnState: !controlled };
+}
+
 /** An on/off setting, as `role="switch"` on a button. */
 export function Switch({
   checked,
@@ -41,9 +59,11 @@ export function Switch({
       className={cx("hm-switch", className)}
       onClick={(event) => {
         onClick?.(event);
-        if (disabled || event.defaultPrevented) return;
-        if (!controlled) setOwnChecked(!on);
-        onChange?.(!on);
+        if (event.defaultPrevented) return;
+        const toggle = switchToggle({ on, controlled, disabled });
+        if (!toggle) return;
+        if (toggle.storeOwnState) setOwnChecked(toggle.checked);
+        onChange?.(toggle.checked);
       }}
     >
       <span className="hm-switch-track">

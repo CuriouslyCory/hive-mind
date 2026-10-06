@@ -6,14 +6,18 @@ export type CardVariant = "default" | "hive";
 export type CardProps = Omit<HTMLAttributes<HTMLDivElement>, "title"> & {
   /** `hive` is the navy panel with light text. Defaults to `default`. */
   variant?: CardVariant;
-  /** Adds the pointer cursor and the floating shadow on hover. */
+  /**
+   * Adds the pointer cursor and the floating shadow on hover. It is styling
+   * only: the card stays a plain div with no role, tab stop or keys, so its
+   * action must be a real link or button inside it.
+   */
   interactive?: boolean;
   /** The selected edge and the honey glow. */
   selected?: boolean;
   /** The uppercase label above the title. */
   eyebrow?: ReactNode;
   title?: ReactNode;
-  /** Heading level of the title, to fit the page outline. Defaults to 3, as in the bundle. */
+  /** Heading level of the title, to fit the page outline. Defaults to 3. */
   headingLevel?: 2 | 3 | 4;
   /** A row of actions under the body. */
   footer?: ReactNode;

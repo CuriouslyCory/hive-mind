@@ -7,11 +7,23 @@ import {
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { config, proxy } from "../src/proxy";
+import { cursorParam, MAX_CURSOR_LENGTH } from "../src/server/dashboard/queries";
 
 // Next.js 16.3 documents `unstable_doesProxyMatch` but ships only the older
 // `unstable_doesMiddlewareMatch`, which applies the same matcher logic.
 function matches(url: string) {
   return unstable_doesMiddlewareMatch({ config, url });
+}
+
+/** Whether the proxy shows the landing page for a signed-out request to `url`. */
+function showsLanding(url: string): boolean {
+  return isRewrite(proxy(new NextRequest(url)));
+}
+
+/** `cursor` as the Projects page receives it in `searchParams`. */
+function pageCursor(url: string): string | string[] | undefined {
+  const values = new URL(url).searchParams.getAll("cursor");
+  return values.length > 1 ? values : values[0];
 }
 
 describe("proxy", () => {
@@ -35,6 +47,39 @@ describe("proxy", () => {
     expect(getRedirectUrl(response)).toBe(
       "https://hive-mind.example/sign-in?returnTo=%2F%3Fcursor%3Dabc",
     );
+  });
+
+  it.each([
+    ["an empty cursor", "/?cursor="],
+    ["a cursor without a value", "/?cursor"],
+    ["a repeated cursor", "/?cursor=a&cursor=b"],
+    ["an over-long cursor", `/?cursor=${"a".repeat(MAX_CURSOR_LENGTH + 1)}`],
+  ])("shows the landing page for %s, which the Projects list ignores", (_name, path) => {
+    const url = `https://hive-mind.example${path}`;
+    expect(showsLanding(url)).toBe(true);
+    expect(cursorParam(pageCursor(url))).toBeUndefined();
+  });
+
+  it("treats a cursor of the maximum length as a Projects page", () => {
+    const url = `https://hive-mind.example/?cursor=${"a".repeat(MAX_CURSOR_LENGTH)}`;
+    expect(showsLanding(url)).toBe(false);
+    expect(cursorParam(pageCursor(url))).toBeDefined();
+  });
+
+  it("agrees with the Projects list on which cursors name a page", () => {
+    for (const query of [
+      "",
+      "?cursor=abc",
+      "?cursor=",
+      "?cursor=a&cursor=a",
+      "?utm_source=x&cursor=abc",
+      `?cursor=${"b".repeat(MAX_CURSOR_LENGTH)}`,
+      `?cursor=${"b".repeat(MAX_CURSOR_LENGTH + 1)}`,
+      "?cursor=%20",
+    ]) {
+      const url = `https://hive-mind.example/${query}`;
+      expect(showsLanding(url), query).toBe(cursorParam(pageCursor(url)) === undefined);
+    }
   });
 
   it("redirects any other page without a login session cookie to /sign-in", () => {

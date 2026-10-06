@@ -1,9 +1,9 @@
-/* HiveMind components (docs/design-system.md), ported from the HiveMind
-   design system bundle. Every colour, length and radius is a token from
-   tokens.css. Fonts come from next/font (fonts.ts), not a Google Fonts
-   @import. The bundle's [data-theme="dark"] overrides are component tokens
-   in tokens.css, so they also apply when the theme follows the system and
-   inside a nested data-theme. */
+/* HiveMind components (docs/design-system.md; origin and deviations in
+   docs/adr/0016-hivemind-design-system-and-landing-page.md). Every colour,
+   length and radius is a token from tokens.css. Fonts come from next/font
+   (fonts.ts), not a Google Fonts @import. Rules that only apply in the dark
+   theme are component tokens in tokens.css, so they also apply when the
+   theme follows the system and inside a nested data-theme. */
 
 .hm-root,
 .hm-root * {
@@ -32,7 +32,12 @@
   padding: var(--space-4);
 }
 
-:where(.hm-btn, .hm-input, .hm-switch, .hm-tab):focus-visible {
+/* The focus ring. Inside .hm-root the second selector outranks unscoped
+   rules such as dashboard.css's `button:focus-visible`, which stays loaded
+   after a client navigation; elsewhere the first applies with no
+   specificity. */
+:where(.hm-btn, .hm-input, .hm-switch, .hm-tab):focus-visible,
+.hm-root :is(.hm-btn, .hm-input, .hm-switch, .hm-tab):focus-visible {
   outline: var(--border-focus) solid var(--focus);
   outline-offset: 2px;
 }
@@ -216,6 +221,8 @@ a.hm-btn {
   background: var(--surface-hive);
   color: var(--on-surface-hive);
   border-color: transparent;
+  /* tokens.css re-points the colour tokens for controls inside it. */
+  color-scheme: var(--hm-color-scheme);
 }
 .hm-card-title {
   font: 700 20px / 26px var(--font-display);
@@ -538,10 +545,11 @@ a.hm-btn {
   box-shadow: var(--shadow-glow);
 }
 
-/* Additions to the bundle (docs/design-system.md → Deviations). */
+/* Additions to the original design system (docs/design-system.md →
+   Deviations). */
 
-/* Type scale (tokens.json → type). One class per style; set the colour
-   separately. */
+/* Type scale (docs/design-system.md → Type scale). One class per style; set
+   the colour separately. */
 .hm-text-display-xl {
   font: 800 56px / 60px var(--font-display);
   letter-spacing: -0.02em;

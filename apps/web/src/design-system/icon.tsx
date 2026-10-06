@@ -1,9 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
 import { cx } from "./cx";
 
-// The Icons group from the design system (24px grid, 2px round strokes,
-// hexagon frames), inlined so every glyph takes `currentColor`. `up`, `down`
-// and `flat` are the small glyphs the bundle uses for Cell deltas.
+// The design system's icon set (docs/design-system.md → Rules → Icons; origin
+// in ADR-0016): a 24px grid, 2px round strokes and hexagon frames, inlined so
+// every glyph takes `currentColor`. `up`, `down` and `flat` are the small
+// glyphs for Cell deltas.
 
 const HEX_FRAME = "12.00,2.50 20.23,7.25 20.23,16.75 12.00,21.50 3.77,16.75 3.77,7.25";
 const HEX_OUTLINE = "12.00,3.00 19.79,7.50 19.79,16.50 12.00,21.00 4.21,16.50 4.21,7.50";
@@ -92,7 +93,7 @@ const glyphs = {
 
 export type IconName = keyof typeof glyphs;
 
-/** Every icon name, in the order of the Icons group. */
+/** Every icon name: the 16 glyphs of the icon set, then the Cell delta glyphs. */
 export const iconNames = Object.keys(glyphs) as IconName[];
 
 export type IconProps = {
@@ -146,12 +147,15 @@ export function Icon({ name, size = 24, title, className, style }: IconProps) {
   );
 }
 
-/** The hexagon clip path from the brand book, for elements styled outside components.css. */
+/** The hexagon clip path of `hm-hex` and `hm-cell-hex`, for elements styled outside components.css. */
 export const HEXAGON_CLIP_PATH = "polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%)";
 
 /**
  * The six corners of a pointy-top hexagon centred on (cx, cy), as an SVG
- * `points` string. The Icons group's frames use hexagonPoints(12, 12, 9).
+ * `points` string. HEX_OUTLINE (the `hex`, `hive` and `settings` icons) is
+ * hexagonPoints(12, 12, 9); HEX_FRAME (`info`, `alert`) is
+ * hexagonPoints(12, 12, 9.5); the filled centre of `hive` is
+ * hexagonPoints(12, 12, 3.5).
  */
 export function hexagonPoints(cx: number, cy: number, radius: number): string {
   return [-90, -30, 30, 90, 150, 210]

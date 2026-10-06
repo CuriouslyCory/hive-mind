@@ -1,9 +1,9 @@
-/* The landing page (page.tsx), ported from the design's page styles. Every
+/* The landing page (page.tsx), ported from its design (ADR-0016). Every
    rule is scoped under .hm-landing: Next keeps global stylesheets loaded
    after client navigation, and Cache Components keeps a visited page mounted
    but hidden, so an unscoped rule would reach /sign-in and the dashboard.
    Nothing here styles html or body, and nothing depends on their styles.
-   Breakpoints are the design's: 1024px and 720px. */
+   Breakpoints are 1024px and 720px. */
 
 /* The page root. It is positioned against the initial containing block, so
    it spans the viewport whatever margin or padding <body> has (the browser's
@@ -725,7 +725,7 @@
   }
 }
 
-/* Two Cells per row would be narrower than the design system's 184px, and
+/* Two Cells per row would be narrower than a Cell's 184px minimum, and
    the labels would run under the corner hexagon. */
 @media (max-width: 480px) {
   .hm-landing .lp-cells {

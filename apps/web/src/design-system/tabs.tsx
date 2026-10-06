@@ -31,9 +31,33 @@ export type TabsProps = {
 };
 
 /**
+ * The index a key moves the selection to from tab `index` of `count`, or
+ * null for a key the tablist does not handle. ArrowRight and ArrowLeft wrap
+ * around; Home and End jump to the ends.
+ */
+export function tabIndexForKey(key: string, index: number, count: number): number | null {
+  if (count <= 0) return null;
+  const last = count - 1;
+  switch (key) {
+    case "ArrowRight":
+      return index >= last ? 0 : index + 1;
+    case "ArrowLeft":
+      return index <= 0 ? last : index - 1;
+    case "Home":
+      return 0;
+    case "End":
+      return last;
+    default:
+      return null;
+  }
+}
+
+/**
  * Peer views. Follows the WAI-ARIA tabs pattern: one tab stop (the selected
  * tab), arrow keys move between tabs and select them, Home and End jump to
- * the ends.
+ * the ends. Panels are not tab stops (the WAI-ARIA pattern suggests one,
+ * but Biome's noNoninteractiveTabindex rule forbids tabIndex on them), so put
+ * at least one focusable element in a panel that needs keyboard access.
  */
 export function Tabs({
   items,
@@ -61,24 +85,8 @@ export function Tabs({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-    const last = items.length - 1;
-    let target: number;
-    switch (event.key) {
-      case "ArrowRight":
-        target = index === last ? 0 : index + 1;
-        break;
-      case "ArrowLeft":
-        target = index === 0 ? last : index - 1;
-        break;
-      case "Home":
-        target = 0;
-        break;
-      case "End":
-        target = last;
-        break;
-      default:
-        return;
-    }
+    const target = tabIndexForKey(event.key, index, items.length);
+    if (target === null) return;
     event.preventDefault();
     const item = items[target];
     if (!item) return;

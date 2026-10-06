@@ -1,5 +1,6 @@
-/* HiveMind design tokens (docs/design-system.md), imported from the HiveMind
-   design system file. No other stylesheet in apps/web declares these names.
+/* HiveMind design tokens (docs/design-system.md). This file is the source of
+   truth for their values (ADR-0016). No other stylesheet in apps/web
+   declares these names.
 
    Themes: data-theme="light" or "dark" on an element forces that theme for
    it and everything inside it. Elsewhere the tokens follow the operating
@@ -66,7 +67,8 @@
   --duration-base: 200ms;
   --duration-slow: 360ms;
 
-  /* Component tokens: the bundle's dark-theme overrides, as values. */
+  /* Component tokens: rules that differ only in the dark theme
+     (docs/design-system.md → Themes), as values. */
   --hm-color-scheme: light;
   --hm-btn-primary-hover: var(--surface-hive);
   --hm-badge-success-ink: var(--success);
@@ -153,18 +155,17 @@
   }
 }
 
-/* Not in the imported token file: the logo tile is always white (the marks
-   have no dark variant yet), and the settle curve is the brand book's
-   ease-out for panels and tile grids. */
+/* Added in the port (ADR-0016): the logo tile is always white (the marks
+   have no dark variant yet), and the settle curve is the ease-out for panels
+   and tile grids. */
 :root {
   --logo-tile: #ffffff;
   --ease-settle: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 /* Font stacks. They live outside the theme blocks so a nested data-theme
-   cannot reset them. The fallback stacks are the ones from the token file;
-   inside .hm-fonts (designSystemFontClassName in fonts.ts) the next/font
-   families come first. */
+   cannot reset them. Inside .hm-fonts (designSystemFontClassName in
+   fonts.ts) the vendored next/font/local families come first. */
 :root {
   --font-display: "Sora", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --font-sans: "Nunito Sans", "Avenir Next", "Segoe UI", system-ui, sans-serif;
@@ -175,4 +176,38 @@
   --font-display: var(--hm-font-sora), "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --font-sans: var(--hm-font-nunito-sans), "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --font-mono: var(--hm-font-jetbrains-mono), "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* The hive card (Card variant="hive") is a navy panel in both themes, so the
+   controls inside it read the dark palette, with the card's navy as their
+   surface: light text and borders, honey for the primary action and the
+   focus ring. Every pair meets WCAG 2.1 AA on both themes' --surface-hive
+   (text 4.5:1, borders and the focus ring 3:1), which
+   apps/web/test/design-system.test.ts computes from this file. Custom
+   properties resolve where they are declared, so the component tokens that
+   read --ink are declared again here. */
+.hm-card-hive {
+  --surface: var(--surface-hive);
+  --surface-raised: var(--surface-hive);
+  --surface-sunken: #070f1c;
+  --line: #2f4868;
+  --line-strong: #8092ae;
+  --ink: var(--on-surface-hive);
+  --ink-muted: #a9b5c8;
+  --ink-faint: #8392a8;
+  --hive: #f9c232;
+  --on-hive: #0c2337;
+  --honey-ink: #f9c232;
+  --honey-tint: #2e2a12;
+  --hive-tint: #243b5c;
+  --focus: #f9c232;
+  --success: #4fd38a;
+  --success-tint: #10301f;
+  --danger: #ff8a7e;
+  --danger-tint: #3a1612;
+  --info: #7db2ff;
+  --hm-color-scheme: dark;
+  --hm-btn-primary-hover: var(--honey-deep);
+  --hm-badge-success-ink: var(--ink);
+  --hm-badge-danger-ink: var(--ink);
 }
