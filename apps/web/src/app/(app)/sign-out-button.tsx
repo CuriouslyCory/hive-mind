@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { authClient } from "../../lib/auth-client";
 
-export function SignOutButton() {
+/** Signs out and goes to `/sign-in`. `className` styles the button. */
+export function SignOutButton({ className }: { className?: string } = {}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -28,7 +29,7 @@ export function SignOutButton() {
 
   return (
     <>
-      <button type="button" onClick={signOut} disabled={pending}>
+      <button type="button" className={className} onClick={signOut} disabled={pending}>
         Sign out
       </button>
       {failed && <p role="alert">Sign-out failed. Try again.</p>}
