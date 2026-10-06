@@ -11,6 +11,7 @@ import {
   planKey,
   progressOf,
   type ScopeOverlapItem,
+  SESSION_ABANDONED_AFTER_MS,
   SESSION_STALE_AFTER_MS,
   type SessionStatus,
   sessionState,
@@ -121,6 +122,7 @@ const OVERLAP_SESSION_LIMIT = MAX_PAGE_LIMIT;
 const OVERLAP_ITEM_LIMIT = MAX_PAGE_LIMIT;
 
 const TERMINAL_PLAN_STATUSES = ["done", "abandoned"] as const;
+const TERMINAL_SESSION_STATUSES = ["ended", "abandoned"] as const;
 const LAPSE_REASONS = ["lease_expired", "session_stale", "session_abandoned"];
 
 interface ScopeProject {
@@ -636,24 +638,70 @@ async function readSessionsSection(
     all,
   };
   const tab = tabOrActive(input.tab, counts.overlap);
-  const tabCondition: Record<SessionTab, SQL | undefined> = {
-    active: not(ended),
-    ended,
-    overlap: overlapping,
-    all: undefined,
-  };
-  const rows = await tx
+
+  // Rows: live (not effectively ended) first, by last heartbeat; then ended,
+  // by end time. Each part is its own query ordered by a stored column, not
+  // by the effective status, so the order can come from an index (live and
+  // unrecorded-abandoned Sessions by `last_heartbeat_at`) or a top-N sort of
+  // the Projects' terminal Sessions (by `ended_at`). The effective status
+  // rule is `effectiveSessionStatusSql`'s, written as plain conditions.
+  const condition = and(where, tab === "overlap" ? overlapping : undefined);
+  const abandonedBefore = new Date(now.getTime() - SESSION_ABANDONED_AFTER_MS);
+  const live =
+    tab === "ended"
+      ? []
+      : await tx
+          .select()
+          .from(agentSession)
+          .where(
+            and(
+              condition,
+              notInArray(agentSession.status, [...TERMINAL_SESSION_STATUSES]),
+              gt(agentSession.lastHeartbeatAt, abandonedBefore),
+            ),
+          )
+          .orderBy(desc(agentSession.lastHeartbeatAt), desc(agentSession.id))
+          .limit(input.limit);
+  const remaining = input.limit - live.length;
+  const endedRows =
+    tab === "active" || remaining <= 0
+      ? []
+      : await readEndedSessions(tx, { condition, abandonedBefore, limit: remaining });
+  return { counts, buzzing: row?.buzzing ?? 0, tab, rows: [...live, ...endedRows] };
+}
+
+/**
+ * Effectively ended Sessions matching `condition`, newest end first: those
+ * stored as ended or abandoned (by `ended_at`, which the status check
+ * requires for them) merged with those whose heartbeat crossed the abandoned
+ * threshold before the sweep recorded it (by `last_heartbeat_at`).
+ */
+async function readEndedSessions(
+  tx: Transaction,
+  input: { condition: SQL | undefined; abandonedBefore: Date; limit: number },
+): Promise<AgentSession[]> {
+  const recorded = await tx
     .select()
     .from(agentSession)
-    .where(and(where, tabCondition[tab]))
-    // Live first, by last heartbeat; then ended, by end time.
-    .orderBy(
-      sql`${ended} asc`,
-      sql`case when ${ended} then coalesce(${agentSession.endedAt}, ${agentSession.lastHeartbeatAt}) else ${agentSession.lastHeartbeatAt} end desc`,
-      desc(agentSession.id),
-    )
+    .where(and(input.condition, inArray(agentSession.status, [...TERMINAL_SESSION_STATUSES])))
+    .orderBy(desc(agentSession.endedAt), desc(agentSession.id))
     .limit(input.limit);
-  return { counts, buzzing: row?.buzzing ?? 0, tab, rows };
+  const unrecorded = await tx
+    .select()
+    .from(agentSession)
+    .where(
+      and(
+        input.condition,
+        notInArray(agentSession.status, [...TERMINAL_SESSION_STATUSES]),
+        lte(agentSession.lastHeartbeatAt, input.abandonedBefore),
+      ),
+    )
+    .orderBy(desc(agentSession.lastHeartbeatAt), desc(agentSession.id))
+    .limit(input.limit);
+  const endOf = (row: AgentSession) => (row.endedAt ?? row.lastHeartbeatAt).getTime();
+  return [...recorded, ...unrecorded]
+    .sort((a, b) => endOf(b) - endOf(a) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+    .slice(0, input.limit);
 }
 
 /** Sessions of the Projects in scope by id. */

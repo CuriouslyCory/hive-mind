@@ -452,4 +452,50 @@ describeDb("home dashboard", () => {
       }
     });
   });
+
+  // Each test here signs up its own User with its own Project, so the shared
+  // fixture's counts above are unaffected.
+  describe("in a Project of their own", () => {
+    async function ownProject() {
+      const someone = await api.signUp();
+      const projectId = await api.createProject(someone);
+      return { user: someone, projectId };
+    }
+
+    it("orders ended Sessions by end time, including abandoned ones the sweep has not recorded", async () => {
+      const { user: someone, projectId } = await ownProject();
+      const start = () => startSession(someone.token, projectId, { intent: "Run" });
+      const end = (id: string) =>
+        ok(someone.token, `/projects/${projectId}/sessions/${id}/end`, { summary: "Done" });
+      const live = await start();
+      const endedEarly = await start();
+      const endedLate = await start();
+      const silent = await start();
+      await end(endedEarly);
+      await end(endedLate);
+      await sql(
+        "update agent_session set ended_at = clock_timestamp() - interval '2 hours' where id = $1",
+        [endedEarly],
+      );
+      await sql(
+        "update agent_session set ended_at = clock_timestamp() - interval '30 minutes' where id = $1",
+        [endedLate],
+      );
+      // Still stored as active, but its heartbeat is past the abandoned threshold.
+      await sql(
+        "update agent_session set last_heartbeat_at = clock_timestamp() - interval '1 hour' where id = $1",
+        [silent],
+      );
+      const ids = async (sessionTab: HomeParams["sessionTab"]) => {
+        const home = await load(someone.id, { view: "sessions", sessionTab });
+        return { counts: home.sessions.counts, ids: home.sessions.rows.map((row) => row.id) };
+      };
+      expect(await ids("all")).toEqual({
+        counts: { active: 1, ended: 3, overlap: 0, all: 4 },
+        ids: [live, endedLate, silent, endedEarly],
+      });
+      expect((await ids("ended")).ids).toEqual([endedLate, silent, endedEarly]);
+      expect((await ids("active")).ids).toEqual([live]);
+    });
+  });
 });
