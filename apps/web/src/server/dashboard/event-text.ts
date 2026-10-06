@@ -1,4 +1,9 @@
-import { UNAVAILABLE_EVENT_TYPE } from "@hivemind/contract";
+import {
+  formatAdrNumber,
+  MAX_ADR_NUMBER,
+  MIN_ADR_NUMBER,
+  UNAVAILABLE_EVENT_TYPE,
+} from "@hivemind/contract";
 
 // Plain-text descriptions of Events for the dashboard (issue #11, "Shared
 // content"). Callers pass Events through the shared projection first
@@ -136,11 +141,35 @@ export function describeEvent(type: string, rawPayload: unknown): EventText {
         `Touched-path coverage became incomplete${reason ? ` (${reason.replaceAll("_", " ")})` : ""}`,
       );
     }
+    case "adr.reserved":
+      return text(`Reserved ${adrKey(num(payload, "number"))}${quoted(str(payload, "title"))}`);
+    case "adr.synced": {
+      const commit = str(payload, "commitSha");
+      const counts = (["added", "updated", "removed"] as const)
+        .map((key) => {
+          const count = num(payload, key);
+          return count === null ? null : `${count} ${key}`;
+        })
+        .filter((part) => part !== null);
+      return text(
+        `Synced ADRs${commit ? ` at ${commit.slice(0, 7)}` : ""}${counts.length > 0 ? `: ${counts.join(", ")}` : ""}${payload.forced === true ? " (forced)" : ""}`,
+      );
+    }
     case UNAVAILABLE_EVENT_TYPE:
       return text("Event details unavailable");
     default:
       return text(`Event ${type}`);
   }
+}
+
+/** `ADR-0017` for 17, or "an ADR" when the number is missing or not an ADR number. */
+function adrKey(number: number | null): string {
+  return number !== null &&
+    Number.isInteger(number) &&
+    number >= MIN_ADR_NUMBER &&
+    number <= MAX_ADR_NUMBER
+    ? formatAdrNumber(number)
+    : "an ADR";
 }
 
 function capitalize(value: string): string {

@@ -55,7 +55,7 @@ Rejected options and why. Omit when the rejection was obvious.
 
 ## Consequences
 
-- All twelve M0 numbers (0001–0012) were allocated in one PR, so they cannot collide. Until M4 allocates numbers on the server, a new ADR takes the next free number on `main`; two open PRs can pick the same number, and the second to merge must renumber.
+- All twelve M0 numbers (0001–0012) were allocated in one PR, so they cannot collide. Until M4 allocates numbers on the server, a new ADR takes the next free number on `main`; two open PRs can pick the same number, and the second to merge must renumber. Amended 2026-10-05 by M4, [#19](https://github.com/CuriouslyCory/hive-mind/issues/19): in a repository bound to a Project, numbers now come from `hivemind adr new`, which reserves them in hive-mind (ADR-0017). The next-free-number rule and renumbering apply only to files that bypass it, and to this repository until it is bound.
 - M4 can find ADRs with the glob `docs/adr/[0-9][0-9][0-9][0-9]-*.md` and read status and supersedes links from frontmatter without parsing prose.
 - Adding a frontmatter key or a status value is a change to M4's parser and needs a new ADR that supersedes this one.
 - ADRs go through the same PR review as code, so a decision and the change that implements it can land together.

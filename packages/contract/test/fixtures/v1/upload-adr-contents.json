@@ -1,0 +1,28 @@
+{
+  "files": [
+    {
+      "sha256": "51bd5459be6e68d1851c2a4e3faa477a65e80e823e2f594f950a45ae1c6e47c0",
+      "valid": true,
+      "created": true,
+      "errors": [],
+      "warnings": [
+        {
+          "code": "ADR_SECTION_MISSING",
+          "message": "The file has no `## Consequences` section."
+        }
+      ]
+    },
+    {
+      "sha256": "f9c2a4be6298fd3a6e769fd1ec18b47872442e13f8885057bf4d946fd51bc1e5",
+      "valid": false,
+      "created": false,
+      "errors": [
+        {
+          "code": "ADR_TITLE_MISSING",
+          "message": "The file has no title: add an H1 line, `# Title`, outside any code block."
+        }
+      ],
+      "warnings": []
+    }
+  ]
+}

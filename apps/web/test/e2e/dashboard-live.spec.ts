@@ -11,9 +11,13 @@ import {
   coordinationApi,
   eventStreamText,
   expectInert,
+  expectLive,
+  expectNotReloaded,
   HOSTILE,
   insertFutureEvent,
+  LIVE,
   loginSessionToken,
+  openLive,
   personalOrganizationId,
   removeMember,
   revokeLoginSession,
@@ -29,9 +33,6 @@ import {
 // loss from removing a membership or a login session while a page is open.
 // Events written by a newer deployment arrive as unavailable (issue #15).
 
-/** Long enough for a 1-second poll, the refresh and a reconnect backoff or two. */
-const LIVE = { timeout: 20_000 };
-
 /** The browser's Event stream, for every Project. */
 const STREAM = "**/api/dashboard/projects/*/events/stream";
 
@@ -46,25 +47,6 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await pool?.end();
 });
-
-async function expectLive(page: Page) {
-  await expect(page.getByTestId("live-status")).toHaveAttribute("data-state", "live", LIVE);
-}
-
-/** Opens `path` and marks the document, so a spec can tell it was never reloaded. */
-async function openLive(page: Page, path: string) {
-  await page.goto(path);
-  await expectLive(page);
-  await page.evaluate(() => {
-    (window as unknown as { __notReloaded?: boolean }).__notReloaded = true;
-  });
-}
-
-async function expectNotReloaded(page: Page) {
-  expect(
-    await page.evaluate(() => (window as unknown as { __notReloaded?: boolean }).__notReloaded),
-  ).toBe(true);
-}
 
 /** When each of the page's Event stream connections was opened (epoch ms). */
 function watchStreamConnections(page: Page): number[] {

@@ -8,6 +8,8 @@ import { createFileStore } from "../src/credentials/file.ts";
 import { createCredentialManager } from "../src/credentials/manager.ts";
 import { type RunResult, runAsync, shippedBinary } from "./helpers/binaries.ts";
 import { type FakeBackend, ORG_A, startFakeBackend, USER_TOKEN } from "./helpers/fake-backend.ts";
+import { adrText, gitFixture } from "./helpers/git-fixture.ts";
+import { expectGolden as expectFixtureShape } from "./helpers/golden.ts";
 
 /**
  * The shipped binary as scripts see it: no TTY, `--json`, a private HOME and
@@ -296,6 +298,55 @@ describe("compiled binary --json contract", () => {
     const logout = await run(["logout"]);
     expectGolden(logout, "cli.logout.json");
     expect(logout).toMatchObject({ data: { removed: true, revoked: true } });
+  });
+
+  it("matches the golden v1 fixtures for adr new/list/show/status/supersede/sync", async () => {
+    // A real repository with a bare origin: adr sync reads a commit with git.
+    const box = sandbox();
+    await storeLogin(box);
+    const project = api.addProject(ORG_A.id, "adr-json");
+    const repos = gitFixture(box.home).origin(
+      {
+        "docs/adr/0001-a.md": adrText("A"),
+        "docs/adr/0002-b.md": adrText("B"),
+        "docs/adr/0003-c.md": adrText("C", { status: "proposed" }),
+      },
+      { projectId: project.id },
+    );
+    const inRepo = { ...box, cwd: repos.work };
+    const run = async (argv: string[], status = 0, env: NodeJS.ProcessEnv = {}) => {
+      const { result, argv: full } = await hivemind(inRepo, argv, env);
+      expect(result.status, result.stderr).toBe(status);
+      return envelopeOf(result, full);
+    };
+
+    // CI syncs with a Project key, as the fixture shows.
+    const created = await hivemind(inRepo, ["key", "create", "--name", "ci"]);
+    const secret = [...api.keys.values()].at(-1)?.secret ?? "";
+    envelopeOf(created.result, created.argv, [secret]);
+    expectFixtureShape(
+      await run(["adr", "sync"], 0, { HIVEMIND_TOKEN: secret }),
+      "cli.adr-sync.json",
+    );
+    expectFixtureShape(await run(["adr", "new", "--title", "Use queues"]), "cli.adr-new.json");
+    expectFixtureShape(await run(["adr", "list"]), "cli.adr-list.json");
+    writeFileSync(join(repos.work, "docs/adr/0002-b.md"), adrText("B", { status: "deprecated" }));
+    const shown = await run(["adr", "show", "ADR-0002"]);
+    expectFixtureShape(shown, "cli.adr-show.json");
+    expect(shown).toMatchObject({ data: { local: { match: "differs" } } });
+    expectFixtureShape(await run(["adr", "status", "3", "accepted"]), "cli.adr-status.json");
+    expectFixtureShape(await run(["adr", "supersede", "1", "--by", "3"]), "cli.adr-supersede.json");
+
+    // 4: not in the copy. 2: the server refuses the reservation. 3: no login.
+    expect(await run(["adr", "show", "99"], 4)).toMatchObject({ error: { code: "NOT_FOUND" } });
+    api.coordination.adrs.reserveConflict = "The floor is too high. Run `hivemind adr sync` first.";
+    expect(await run(["adr", "new", "--title", "Refused"], 2)).toMatchObject({
+      error: { code: "CONFLICT" },
+    });
+    const anonymous = { ...sandbox(), cwd: repos.work };
+    const { result, argv } = await hivemind(anonymous, ["adr", "new", "--title", "Anonymous"]);
+    expect(result.status).toBe(3);
+    expect(envelopeOf(result, argv)).toMatchObject({ error: { code: "UNAUTHORIZED" } });
   });
 
   it("exit 1 for an unreadable binding, never falling back to an ancestor", async () => {

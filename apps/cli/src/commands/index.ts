@@ -1,4 +1,5 @@
 import type { CommandDefinition } from "../command.ts";
+import { adrList, adrNew, adrShow, adrStatus, adrSupersede, adrSync } from "./adr.ts";
 import { init } from "./init.ts";
 import { keyCreate, keyList, keyRevoke } from "./key.ts";
 import { login } from "./login.ts";
@@ -58,4 +59,10 @@ export const COMMANDS: readonly CommandDefinition[] = [
   scopeRemove,
   scopeList,
   scopeCheck,
+  adrNew,
+  adrList,
+  adrShow,
+  adrStatus,
+  adrSupersede,
+  adrSync,
 ];

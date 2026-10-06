@@ -1,0 +1,37 @@
+[
+  {
+    "procedure": "projects.adrs.list",
+    "operationId": "listAdrs",
+    "method": "GET",
+    "path": "/projects/{id}/adrs",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.adrs.reserve",
+    "operationId": "reserveAdr",
+    "method": "POST",
+    "path": "/projects/{id}/adrs",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.adrs.get",
+    "operationId": "getAdr",
+    "method": "GET",
+    "path": "/projects/{id}/adrs/{number}",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.adrs.contents",
+    "operationId": "uploadAdrContents",
+    "method": "POST",
+    "path": "/projects/{id}/adrs/contents",
+    "successStatus": 200
+  },
+  {
+    "procedure": "projects.adrs.sync",
+    "operationId": "syncAdrs",
+    "method": "POST",
+    "path": "/projects/{id}/adrs/sync",
+    "successStatus": 200
+  }
+]

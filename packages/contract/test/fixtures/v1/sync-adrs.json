@@ -1,0 +1,51 @@
+{
+  "changed": true,
+  "lastSync": {
+    "commitSha": "3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39",
+    "syncedAt": "2026-10-05T12:00:00.000Z",
+    "syncedBy": {
+      "kind": "project_key",
+      "keyId": "4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8"
+    }
+  },
+  "previousCommitSha": "8e7d6c5b4a3928170f6e5d4c3b2a19087f6e5d4c",
+  "forced": false,
+  "added": 2,
+  "updated": 1,
+  "removed": 0,
+  "unchanged": 15,
+  "changes": [
+    {
+      "number": 4,
+      "change": "updated",
+      "path": "docs/adr/0004-neon-postgres-and-drizzle.md",
+      "statusFrom": "accepted",
+      "statusTo": "superseded"
+    },
+    {
+      "number": 17,
+      "change": "added",
+      "path": "docs/adr/0017-adr-numbers-and-repo-sync.md",
+      "statusFrom": null,
+      "statusTo": "proposed"
+    },
+    {
+      "number": 18,
+      "change": "added",
+      "path": "docs/adr/0018-cache-adr-pages.md",
+      "statusFrom": null,
+      "statusTo": "accepted"
+    }
+  ],
+  "warnings": {
+    "items": [
+      {
+        "number": 18,
+        "path": "docs/adr/0018-cache-adr-pages.md",
+        "code": "ADR_RESERVATION_TAKEN",
+        "message": "ADR-0018 was reserved for \"Use keyset pages for ADR lists\" (use-keyset-pages-for-adr-lists), but docs/adr/0018-cache-adr-pages.md took the number. The reserved ADR needs a new number: run hivemind adr new for it."
+      }
+    ],
+    "complete": true
+  }
+}

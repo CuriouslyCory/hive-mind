@@ -13,6 +13,7 @@ import { createFileStore } from "../src/credentials/file.ts";
 import { createCredentialManager } from "../src/credentials/manager.ts";
 import { shippedBinary } from "./helpers/binaries.ts";
 import { type FakeBackend, ORG_A, startFakeBackend, USER_TOKEN } from "./helpers/fake-backend.ts";
+import { adrText, gitFixture } from "./helpers/git-fixture.ts";
 import { expectGolden } from "./helpers/golden.ts";
 
 /**
@@ -50,10 +51,15 @@ interface Result {
 }
 
 /** Runs the binary with stdin left open; `input`, when given, is written but stdin is still not closed. */
-function hivemind(args: string[], env: NodeJS.ProcessEnv = {}, input?: Buffer): Promise<Result> {
+function hivemind(
+  args: string[],
+  env: NodeJS.ProcessEnv = {},
+  input?: Buffer,
+  dir = cwd,
+): Promise<Result> {
   return new Promise((resolve, reject) => {
     const child = spawn(shippedBinary(), [...args, "--json"], {
-      cwd,
+      cwd: dir,
       timeout: 10_000,
       env: {
         PATH: "/usr/bin:/bin",
@@ -154,5 +160,25 @@ describe("compiled binary coordination commands", () => {
     expect(log.data.items[1]).toEqual(
       unavailableEventSchema.parse(JSON.parse(JSON.stringify(stored))),
     );
+  });
+
+  it("runs the adr commands without waiting on an open stdin or prompting", async () => {
+    const repos = gitFixture(base).origin(
+      { "docs/adr/0001-a.md": adrText("A"), "docs/adr/0002-b.md": adrText("B") },
+      { projectId },
+    );
+    const missingTitle = await hivemind(["adr", "new"], {}, undefined, repos.work);
+    expect(envelope(missingTitle)).toMatchObject({ ok: false, error: { code: "USAGE_ERROR" } });
+    const created = await hivemind(["adr", "new", "--title", "Piped"], {}, undefined, repos.work);
+    expect(envelope(created)).toMatchObject({ ok: true, data: { file: { status: "created" } } });
+    const synced = await hivemind(["adr", "sync", "--force"], {}, undefined, repos.work);
+    expect(envelope(synced)).toMatchObject({ ok: true, data: { outcome: "synced", forced: true } });
+    const superseded = await hivemind(
+      ["adr", "supersede", "1", "--by", "2"],
+      {},
+      undefined,
+      repos.work,
+    );
+    expect(envelope(superseded)).toMatchObject({ ok: true, data: { changed: true } });
   });
 });

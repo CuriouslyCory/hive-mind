@@ -1,6 +1,6 @@
-# Dogfooding M2
+# Dogfooding M2 and M4
 
-M2 ([#12](https://github.com/CuriouslyCory/hive-mind/issues/12)) is done only when this repository's own development is tracked with hive-mind: a committed Project binding, a Plan, Tasks, and Sessions with Scopes, heartbeats, progress logs and end summaries, recorded with the CLI built from `main`. This runbook produces that evidence. Commands and exit codes are in [cli.md](cli.md#coordination-plans-tasks-sessions-and-scopes).
+M2 ([#12](https://github.com/CuriouslyCory/hive-mind/issues/12)) is done only when this repository's own development is tracked with hive-mind: a committed Project binding, a Plan, Tasks, and Sessions with Scopes, heartbeats, progress logs and end summaries, recorded with the CLI built from `main`. This runbook produces that evidence. Commands and exit codes are in [cli.md](cli.md#coordination-plans-tasks-sessions-and-scopes). M4's ADR steps are in [section 10](#10-adrs).
 
 ## Prerequisites
 
@@ -141,3 +141,54 @@ Keep UUIDs, Plan keys and timestamps: they let a reader check the transcript aga
 ## 9. Close out
 
 In #12, check the dogfooding item and link the binding PR, the transcript and the Plan key. If deployment or #8 is still blocking, leave the item unchecked and say which.
+
+## 10. ADRs
+
+M4 ([#19](https://github.com/CuriouslyCory/hive-mind/issues/19)) is done only when this repository's ADRs are synced to its Project and a later ADR number came from `hivemind adr new`. Commands and exit codes are in [cli.md](cli.md#adrs).
+
+Prerequisites:
+
+- [ ] The M4 PR is merged and deployed to production, and the deployment passes [setup.md](setup.md) H6.
+- [ ] The repository is bound (step 2), and `.hivemind.json` is on `main`.
+- [ ] The CLI is built from the deployed `main` commit and logged in (step 1).
+
+Until all three hold, the ADR item in #19 stays unchecked.
+
+### Sync ADR-0001 to ADR-0017
+
+```bash
+git switch main && git pull --ff-only
+git fetch origin
+git rev-parse origin/HEAD || git remote set-head origin --auto   # adr sync reads origin/HEAD
+hivemind adr sync --check        # Checked 17 ADR files in docs/adr/: no errors, ...
+hivemind adr sync --dry-run      # Dry run: would sync commit <sha7> (first sync): 17 added, ...
+hivemind adr sync
+hivemind adr list --limit 100
+hivemind adr show ADR-0014
+```
+
+- [ ] `adr sync` prints `Synced commit <sha7> (first sync): 17 added, 0 updated, 0 removed, 0 unchanged.`, and `<sha7>` is `main`'s commit. If more ADRs have merged since this was written, the count is higher.
+- [ ] `adr list` shows ADR-0001 to ADR-0017 as `published`, each with its status, and ends with `As of commit <sha7>, synced <time>.`
+- [ ] `adr show ADR-0014` prints the whole file. It is larger than 16 KiB, so it also proves the larger upload limit.
+- [ ] The dashboard's ADR list shows the same ADRs, with the banner naming the commit and you.
+- [ ] A second `hivemind adr sync` prints `Already synced at commit <sha7>.`
+
+### Reserve the next ADR
+
+Do this for the next real decision, not a test ADR: the number is never handed out again.
+
+```bash
+git switch -c docs/adr-<slug>
+hivemind adr new --title '<the decision>'   # prints docs/adr/0018-<slug>.md
+hivemind adr list --state reserved
+```
+
+- [ ] The number is above every ADR on `main` (ADR-0018 if none has merged since ADR-0017), and `adr list --state reserved` lists it.
+- [ ] Write the ADR, open a PR and merge it. Then `git fetch origin && hivemind adr sync` reports it as added, and `adr list` shows it as `published`.
+- [ ] In the same PR or the next one, add a line to `AGENTS.md` telling agents to reserve ADR numbers with `hivemind adr new`, now that the repository is bound.
+
+Once [setup.md](setup.md) H10 is done, the CI workflow runs `adr sync` on each push to `main`, and the manual sync is needed only for the first one.
+
+### Transcript and close out
+
+Keep a redacted transcript of these commands as in step 8. Keep commit hashes, ADR numbers and the reservation id; remove tokens and email addresses. In #19, check the ADR item and link the transcript and the PR with the reserved ADR. If deployment or the binding is still missing, leave the item unchecked and say which.

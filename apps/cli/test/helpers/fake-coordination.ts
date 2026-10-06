@@ -10,6 +10,7 @@ import {
   touchedPathsContentHash,
 } from "@hivemind/contract";
 import { sendJson, sendOrpcError } from "./api-server.ts";
+import { createFakeAdrs, type FakeAdrs } from "./fake-adrs.ts";
 
 /**
  * In-memory coordination routes for the fake backend (fake-backend.ts):
@@ -123,6 +124,8 @@ export interface FakeCoordination {
   scopes: Map<string, ScopeRow>;
   collections: Map<string, CollectionRow>;
   events: EventRow[];
+  /** ADR reservations, content and syncs (fake-adrs.ts). */
+  adrs: FakeAdrs;
   handle(request: CoordinationRequest, response: ServerResponse): void | Promise<void>;
 }
 
@@ -258,6 +261,7 @@ export function createFakeCoordination(): FakeCoordination {
     }
     return stored === fingerprint ? "replay" : "conflict";
   };
+  const adrs = createFakeAdrs(replay);
 
   const handle = (request: CoordinationRequest, response: ServerResponse): void | Promise<void> => {
     const { method, projectId, parts, query, body, owner } = request;
@@ -285,6 +289,7 @@ export function createFakeCoordination(): FakeCoordination {
     };
 
     const [group, ref, sub, subId, action] = parts;
+    if (group === "adrs") return adrs.handle(request, response);
 
     // ---- Plans ----------------------------------------------------------
     if (group === "plans" && ref === undefined) {
@@ -883,5 +888,5 @@ export function createFakeCoordination(): FakeCoordination {
     return notFound();
   };
 
-  return { plans, tasks, sessions, scopes, collections, events, handle };
+  return { plans, tasks, sessions, scopes, collections, events, adrs, handle };
 }

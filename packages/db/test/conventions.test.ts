@@ -67,9 +67,12 @@ describe("schemaConventionViolations", () => {
 });
 
 describe("table names and Project ownership", () => {
-  // The M2 coordination tables (issue #12). Each stores the Project it
-  // belongs to, so composite foreign keys can keep references within it.
+  // The M2 coordination tables (issue #12) and M4's ADR tables (issue #19).
+  // Each stores the Project it belongs to, so composite foreign keys can keep
+  // references within it.
   const coordinationTables = [
+    "adr",
+    "adr_content",
     "agent_session",
     "event",
     "plan",
@@ -98,6 +101,29 @@ describe("table names and Project ownership", () => {
       })
       .map(({ name }) => name);
     expect(missing).toEqual([]);
+  });
+
+  it("keeps every reference between Project-owned tables inside one Project", () => {
+    // References to project itself and to user carry no project_id.
+    const references = schemaTables()
+      .map((table) => getTableConfig(table))
+      .filter((config) => coordinationTables.includes(config.name))
+      .flatMap((config) =>
+        config.foreignKeys.map((foreignKey) => ({ table: config.name, foreignKey })),
+      )
+      .filter(({ foreignKey }) =>
+        coordinationTables.includes(getTableConfig(foreignKey.reference().foreignTable).name),
+      )
+      .map(({ table, foreignKey }) => ({
+        name: `${table}: ${foreignKey.getName()}`,
+        scoped: foreignKey
+          .reference()
+          .columns.some((column) => column.name === "projectId" || column.name === "project_id"),
+      }));
+    expect(references.map((reference) => reference.name)).toEqual(
+      expect.arrayContaining(["adr: adr_content_sha256_fk", "adr: adr_reserved_session_fk"]),
+    );
+    expect(references.filter((reference) => !reference.scoped)).toEqual([]);
   });
 });
 

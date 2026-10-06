@@ -1,11 +1,13 @@
+import { formatAdrNumber } from "@hivemind/contract";
 import type { Route } from "next";
 import Link from "next/link";
 import { ProjectLivePage } from "../../../components/dashboard/project-live-updates";
 import type { OverlapView, ProjectOverview, SessionLabel } from "../../../server/dashboard/queries";
+import { adrStatusText } from "./adr-format";
 import { AttributionText, Optional, ProgressText, SessionStatusText, Timestamp } from "./format";
 import { SessionFocus, SessionTable } from "./lists";
 import { Pager } from "./pager";
-import { type CursorParams, planPath, sessionPath } from "./paths";
+import { adrListPath, adrPath, type CursorParams, planPath, sessionPath } from "./paths";
 import { ProjectHeading } from "./project-heading";
 
 /** The Project overview's content, from one snapshot. */
@@ -192,6 +194,33 @@ export function ProjectOverviewView({
           nextCursor={overview.recentSessions.nextCursor}
           label="recent Sessions"
         />
+      </section>
+
+      <section aria-labelledby="recent-adrs" data-testid="recent-adrs">
+        <h2 id="recent-adrs">Recent ADRs</h2>
+        {overview.recentAdrs.length === 0 ? (
+          <p>No ADRs synced yet.</p>
+        ) : (
+          <ul>
+            {overview.recentAdrs.map((adr) => (
+              <li key={adr.number}>
+                <Link href={adrPath(project.id, adr.number)}>
+                  {formatAdrNumber(adr.number)}: {adr.title}
+                </Link>
+                {adr.status !== null && ` (${adrStatusText(adr.status)})`}
+                {adr.syncedAt !== null && (
+                  <>
+                    {", synced "}
+                    <Timestamp date={adr.syncedAt} asOf={asOf} />
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p>
+          <Link href={adrListPath(project.id)}>All ADRs</Link>
+        </p>
       </section>
     </div>
   );

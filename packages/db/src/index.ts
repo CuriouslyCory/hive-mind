@@ -18,6 +18,47 @@ export function createDb(pool: pg.Pool) {
 export type Db = ReturnType<typeof createDb>;
 
 export {
+  type AdrContentInput,
+  type AdrSyncEntry,
+  type AdrSyncedFile,
+  type AdrSyncNotice,
+  type AdrSyncNoticeCode,
+  type AdrSyncProblem,
+  type AdrSyncProblemReason,
+  type AdrSyncReservation,
+  type AdrSyncState,
+  type AdrSyncSummary,
+  type AdrWriter,
+  MAX_ADR_FLOOR_ADVANCE,
+  MAX_ADR_PATH_LENGTH,
+  MAX_ADR_SYNC_ENTRIES,
+  type ReserveAdrInput,
+  type ReserveAdrOutcome,
+  reserveAdr,
+  type StoreAdrContentsOutcome,
+  type SyncAdrsInput,
+  type SyncAdrsOutcome,
+  storeAdrContents,
+  syncAdrs,
+} from "./adr.ts";
+export {
+  type AdrDetail,
+  type AdrLink,
+  type AdrPage,
+  type AdrReservation,
+  type AdrView,
+  type AdrWithChain,
+  getAdr,
+  type ListAdrsInput,
+  listAdrs,
+  MAX_ADR_CHAIN_DEPTH,
+  readAdr,
+  readAdrItems,
+  readAdrSyncState,
+  readAdrs,
+  readRecentAdrs,
+} from "./adr-read.ts";
+export {
   createClient,
   createPool,
   describeConnectionError,
@@ -44,6 +85,7 @@ export {
   createOnce,
 } from "./creation.ts";
 export {
+  type AdrSyncChange,
   type CoverageLostReason,
   EVENT_PAYLOAD_VERSIONS,
   type EventInput,
@@ -52,6 +94,7 @@ export {
   type EventType,
   encodedJsonBytes,
   insertEvent,
+  MAX_ADR_SYNC_EVENT_CHANGES,
   MAX_EVENT_DTO_BYTES,
   MAX_EVENT_PAYLOAD_BYTES,
 } from "./event.ts";
@@ -158,6 +201,19 @@ export {
   type DbOrTransaction,
   type ProjectInput,
 } from "./project.ts";
+export {
+  ADR_STATES,
+  ADR_STATUSES,
+  type Adr,
+  type AdrContent,
+  type AdrContentWarning,
+  type AdrState,
+  type AdrStatus,
+  MAX_ADR_CONTENT_BYTES,
+  MAX_ADR_NUMBER,
+  MAX_ADR_SUPERSEDES,
+  MAX_ADR_TITLE_LENGTH,
+} from "./schema/adr.ts";
 export {
   type AgentSession,
   CREATOR_KINDS,

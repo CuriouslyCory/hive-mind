@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  ADR_SLUG_PATTERN,
+  ADR_STATUSES,
+  MAX_ADR_NUMBER,
+  MAX_ADR_SLUG_LENGTH,
+  MAX_ADR_TITLE_LENGTH,
+  MIN_ADR_NUMBER,
+} from "./adr.ts";
 import { actorSchema } from "./auth.ts";
 import {
   countSchema,
@@ -7,6 +15,7 @@ import {
   markdownSchema,
   pageSchema,
   paginationInputShape,
+  textSchema,
   timestampSchema,
 } from "./common.ts";
 import {
@@ -18,7 +27,12 @@ import {
   targetPlanStatusSchema,
 } from "./plan.ts";
 import { MAX_COLLECTION_BATCH_PATHS, scopeValueSchema } from "./scope.ts";
-import { agentNameSchema, sessionIntentSchema, sessionStatusSchema } from "./session.ts";
+import {
+  agentNameSchema,
+  gitCommitSchema,
+  sessionIntentSchema,
+  sessionStatusSchema,
+} from "./session.ts";
 import { blockReasonSchema, taskStatusSchema, taskTitleSchema } from "./task.ts";
 
 /**
@@ -70,6 +84,53 @@ export const SESSION_UPDATE_FIELDS = [
   "gitCommit",
   "status",
 ] as const;
+
+/**
+ * How one ADR's synced copy changed in an `adr.synced` Event: published for
+ * the first time (`added`), published again after a sync removed it
+ * (`restored`), changed in content or path (`updated`), or absent from the
+ * synced commit (`removed`).
+ */
+export const ADR_SYNC_CHANGE_KINDS = ["added", "restored", "updated", "removed"] as const;
+
+/** At most this many changes are listed in one `adr.synced` Event; the counts cover all. */
+export const MAX_ADR_SYNC_EVENT_CHANGES = 100;
+
+// ADR identity as `adr.*` payloads carry it. An ADR Event affects no Plan,
+// Task or Session, so the ADR is named in the payload rather than in a new
+// Event column (issue #19). The bounds are adr.ts's; adr-api.ts imports this
+// module, so its schemas are not reused here.
+const adrNumberSchema = z.int().min(MIN_ADR_NUMBER).max(MAX_ADR_NUMBER);
+const adrStatusSchema = z.enum(ADR_STATUSES);
+const adrTitleSchema = textSchema(MAX_ADR_TITLE_LENGTH);
+const adrSlugSchema = z
+  .string()
+  .max(MAX_ADR_SLUG_LENGTH)
+  .regex(ADR_SLUG_PATTERN, "Must be lowercase words joined by hyphens.");
+
+const adrSyncChangeKindSchema = z.enum(ADR_SYNC_CHANGE_KINDS);
+
+/** One ADR in an `adr.synced` Event. A status is null where no published copy exists. */
+const adrSyncChangeSchema = z.discriminatedUnion("change", [
+  z.strictObject({
+    number: adrNumberSchema,
+    change: adrSyncChangeKindSchema.extract(["added", "restored"]),
+    statusFrom: z.null(),
+    statusTo: adrStatusSchema,
+  }),
+  z.strictObject({
+    number: adrNumberSchema,
+    change: adrSyncChangeKindSchema.extract(["updated"]),
+    statusFrom: adrStatusSchema,
+    statusTo: adrStatusSchema,
+  }),
+  z.strictObject({
+    number: adrNumberSchema,
+    change: adrSyncChangeKindSchema.extract(["removed"]),
+    statusFrom: adrStatusSchema,
+    statusTo: z.null(),
+  }),
+]);
 
 // Payloads, version 1, by Event type. They hold what changed, not whole
 // records or requests, and never credentials.
@@ -172,6 +233,35 @@ const eventPayloads = {
     reason: coverageLostReasonSchema,
     pathCount: countSchema.nullable(),
   }),
+  /**
+   * An ADR number was reserved. `floor` is the highest ADR number the client
+   * saw locally and on the default branch, 0 when it saw none.
+   */
+  "adr.reserved": z.strictObject({
+    adrId: idSchema,
+    number: adrNumberSchema,
+    title: adrTitleSchema,
+    slug: adrSlugSchema,
+    floor: z.int().min(0).max(MAX_ADR_NUMBER),
+  }),
+  /**
+   * The ADRs were synced from `commitSha`. `previousCommitSha` is the commit
+   * synced before, null for the first sync; `forced` means the client skipped
+   * its ancestry check. The counts cover every change (`added` includes
+   * `restored`); `changes` lists the first `MAX_ADR_SYNC_EVENT_CHANGES` in
+   * number order, and `truncated` says whether there were more. No titles or
+   * content.
+   */
+  "adr.synced": z.strictObject({
+    commitSha: gitCommitSchema,
+    previousCommitSha: gitCommitSchema.nullable(),
+    forced: z.boolean(),
+    added: countSchema,
+    updated: countSchema,
+    removed: countSchema,
+    changes: z.array(adrSyncChangeSchema).max(MAX_ADR_SYNC_EVENT_CHANGES),
+    truncated: z.boolean(),
+  }),
 } as const;
 
 export type EventType = keyof typeof eventPayloads;
@@ -238,6 +328,8 @@ export const knownEventSchema = z.discriminatedUnion("type", [
   eventVariant("scope.touched"),
   eventVariant("scope.collection_finalized"),
   eventVariant("scope.coverage_lost"),
+  eventVariant("adr.reserved"),
+  eventVariant("adr.synced"),
 ]);
 
 export type KnownEvent = z.infer<typeof knownEventSchema>;

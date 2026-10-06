@@ -93,6 +93,11 @@ export function planNotFound() {
   return apiError("NOT_FOUND", "Plan not found.");
 }
 
+/** The 404 for an ADR number the path's Project has neither reserved nor synced. */
+export function adrNotFound() {
+  return apiError("NOT_FOUND", "ADR not found.");
+}
+
 /** The 404 for a Session that is absent or not in the path's Project. */
 export function sessionNotFound() {
   return apiError("NOT_FOUND", "Session not found.");

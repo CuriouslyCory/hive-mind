@@ -31,6 +31,8 @@ export const CLI_ERROR_CODES = {
   credentialStore: "CREDENTIAL_STORE_ERROR",
   /** A local file could not be read or written (other than `.hivemind.json` parse errors). */
   io: "IO_ERROR",
+  /** An ADR file fails the parser (`adr status`, `adr supersede`, `adr sync`, `adr sync --check`). */
+  adrInvalid: "ADR_INVALID",
   /** `login`: the device code expired before it was approved. */
   loginExpired: "LOGIN_EXPIRED",
   /** `login`: the server ended the device flow for another reason (unknown client, code already used). */

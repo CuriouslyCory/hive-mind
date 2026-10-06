@@ -71,8 +71,16 @@ _Avoid_: API token, service account, API key (bare)
 ### Decisions
 
 **ADR**:
-An architecture decision record: one numbered decision with a status (`proposed`, `accepted`, `superseded` or `deprecated`), stored as `docs/adr/NNNN-slug.md`. The repo file is the source of truth. An ADR can supersede earlier ADRs.
-_Avoid_: decision doc, design doc, RFC
+An architecture decision record: one numbered decision with a status (`proposed`, `accepted`, `superseded` or `deprecated`), stored in the Project's repository as `docs/adr/NNNN-slug.md` and cited as `ADR-NNNN`. The repo file is the source of truth; hive-mind keeps a read-only copy made by ADR sync and never edits the repository. An ADR can supersede earlier ADRs.
+_Avoid_: decision doc, design doc, RFC, draft ADR (`draft` is a Plan status)
+
+**ADR reservation**:
+A number hive-mind has handed out for one new ADR in a Project, with the title it was reserved for (`hivemind adr new`). A number is never handed out twice, so a reservation whose ADR is never merged leaves a gap. A reservation has no status; it becomes an ADR when ADR sync finds its file. See ADR-0017.
+_Avoid_: claim (a Session's hold on a Task), lock, allocation, pending ADR
+
+**ADR sync**:
+Copying a repository's ADR files, as of one commit, into hive-mind with `hivemind adr sync`, usually from the default branch. hive-mind records the commit it read; its copy is only as current as the last sync. See ADR-0017.
+_Avoid_: import, publish, push, index (M5's search index), collection (a Session's upload of touched paths)
 
 ## Naming rules
 

@@ -9,6 +9,8 @@ import { os, withEventMeta } from "@orpc/server";
 import { decodeEventMessage, encodeEventMessage } from "@orpc/standard-server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  affectsAdr,
+  affectsAdrList,
   affectsPlan,
   affectsSession,
   isKnownEventType,
@@ -908,6 +910,10 @@ describe("live update filters", () => {
       false,
     );
     expect(affectsPlan(asStream({ type: "brand.new" }), scope)).toBe(true);
+    // ADR Events name their ADR in the payload and change nothing on a Plan page.
+    for (const type of ["adr.reserved", "adr.synced"]) {
+      expect(affectsPlan(asStream({ type, actorSessionId: sessionId }), scope)).toBe(false);
+    }
   });
 
   it("refreshes a Session page for Events it acted through or that affected it", () => {
@@ -924,6 +930,54 @@ describe("live update filters", () => {
       affectsSession(asStream({ type: "session.started", sessionId: randomUUID() }), scope),
     ).toBe(false);
     expect(affectsSession(asStream({ type: "brand.new" }), scope)).toBe(true);
+    // An ADR reserved through the Session is in its timeline; other ADR Events are not.
+    expect(
+      affectsSession(asStream({ type: "adr.reserved", actorSessionId: sessionId }), scope),
+    ).toBe(true);
+    expect(affectsSession(asStream({ type: "adr.reserved" }), scope)).toBe(false);
+    expect(affectsSession(asStream({ type: "adr.synced" }), scope)).toBe(false);
+  });
+
+  it("refreshes the ADR list for every ADR Event, and an ADR page for its number and every sync", () => {
+    const planScope = { kind: "plan", planId, taskIds: [taskId], sessionIds: [] } as const;
+    const sessionScope = { kind: "session", sessionId, taskId } as const;
+    const reserved = (number: number, overrides: Record<string, unknown> = {}) =>
+      asStream({ type: "adr.reserved", payload: { number, title: "T", slug: "t" }, ...overrides });
+    const synced = (changes: { number: number; change: string }[], truncated = false) =>
+      asStream({
+        type: "adr.synced",
+        payload: { added: changes.length, updated: 0, removed: 0, changes, truncated },
+      });
+    // [Event, ADR list, ADR 2's page, Plan page, Session page]
+    const table: [StreamEvent, boolean, boolean, boolean, boolean][] = [
+      [reserved(2), true, true, false, false],
+      [reserved(7), true, false, false, false],
+      // Reserved through the Session: it is in that Session's timeline.
+      [reserved(7, { actorSessionId: sessionId }), true, false, false, true],
+      [synced([{ number: 2, change: "updated" }]), true, true, false, false],
+      // ADR 9 may supersede ADR 2, which the payload cannot say.
+      [synced([{ number: 9, change: "added" }]), true, true, false, false],
+      [synced([], true), true, true, false, false],
+      [asStream({ type: "plan.updated", planId }), false, false, true, false],
+      [asStream({ type: "brand.new" }), true, true, true, true],
+      [asStream({ type: UNAVAILABLE_EVENT_TYPE, payload: {} }), true, true, true, true],
+    ];
+    for (const [event, list, adr, plan, session] of table) {
+      expect(affectsAdrList(event), event.type).toBe(list);
+      expect(shouldRefreshFor({ kind: "adrs" }, event), event.type).toBe(list);
+      expect(affectsAdr(event, { number: 2 }), event.type).toBe(adr);
+      expect(shouldRefreshFor({ kind: "adr", number: 2 }, event), event.type).toBe(adr);
+      expect(shouldRefreshFor(planScope, event), event.type).toBe(plan);
+      expect(shouldRefreshFor(sessionScope, event), event.type).toBe(session);
+      expect(shouldRefreshFor({ kind: "project" }, event), event.type).toBe(true);
+    }
+    // A number in another form, or a payload without one, is not this ADR's reservation.
+    expect(
+      affectsAdr(asStream({ type: "adr.reserved", payload: { number: "2" } }), { number: 2 }),
+    ).toBe(false);
+    expect(affectsAdr(asStream({ type: "adr.reserved", payload: null }), { number: 2 })).toBe(
+      false,
+    );
   });
 
   it("refreshes every page for event.unavailable, including the Plan a Session left", () => {

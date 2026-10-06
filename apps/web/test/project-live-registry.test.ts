@@ -39,6 +39,16 @@ const sessionPage = (xid: number): LivePage => ({
   cursor: cursorAt(xid, 0),
   scope: { kind: "session", sessionId: SESSION },
 });
+const adrList = (xid: number): LivePage => ({
+  projectId: PROJECT,
+  cursor: cursorAt(xid, 0),
+  scope: { kind: "adrs" },
+});
+const adrPage = (xid: number, number = 2): LivePage => ({
+  projectId: PROJECT,
+  cursor: cursorAt(xid, 0),
+  scope: { kind: "adr", number },
+});
 
 function streamEvent(overrides: Partial<StreamEvent> = {}): StreamEvent {
   return {
@@ -185,6 +195,32 @@ describe("createProjectLiveRegistry", () => {
     expect(stream.deliver(streamEvent(), cursorAt(104, 1))).toBe(false);
     registry.register("session", sessionPage(105));
     expect(stream.deliver(streamEvent({ sessionId: SESSION }), cursorAt(106, 1))).toBe(true);
+    expect(streams).toHaveLength(1);
+  });
+
+  it("keeps the stream and its cursor from a Plan page to the ADR pages, filtering for each", () => {
+    const { registry, streams, current } = setup();
+    registry.attach();
+    registry.register("plan", planPage(100));
+    const stream = current();
+    const reserved = (number: number) =>
+      streamEvent({ type: "adr.reserved", planId: null, payload: { number } });
+    expect(stream.deliver(reserved(2), cursorAt(101, 1))).toBe(false);
+
+    registry.unregister("plan");
+    registry.register("adr", adrPage(102));
+    expect(streams).toHaveLength(1);
+    expect(stream.closed).toBe(false);
+    expect(registry.getSnapshot()?.cursor).toBe(cursorAt(101, 1));
+    expect(stream.invalidations).toBe(0);
+    expect(stream.deliver(reserved(3), cursorAt(103, 1))).toBe(false);
+    expect(stream.deliver(reserved(2), cursorAt(103, 2))).toBe(true);
+    expect(stream.deliver(streamEvent({ planId: PLAN }), cursorAt(103, 3))).toBe(false);
+
+    registry.unregister("adr");
+    registry.register("list", adrList(104));
+    expect(stream.invalidations).toBe(0);
+    expect(stream.deliver(reserved(3), cursorAt(105, 1))).toBe(true);
     expect(streams).toHaveLength(1);
   });
 
@@ -492,6 +528,15 @@ describe("liveUpdateScopeKey", () => {
     expect(a).not.toBe(liveUpdateScopeKey({ kind: "plan", planId: PLAN, taskIds: ["a"] }));
     expect(liveUpdateScopeKey({ kind: "project" })).not.toBe(
       liveUpdateScopeKey({ kind: "session", sessionId: SESSION }),
+    );
+    const adrs = liveUpdateScopeKey({ kind: "adrs" });
+    expect(adrs).not.toBe(liveUpdateScopeKey({ kind: "adr", number: 2 }));
+    expect(adrs).not.toBe(liveUpdateScopeKey({ kind: "project" }));
+    expect(liveUpdateScopeKey({ kind: "adr", number: 2 })).toBe(
+      liveUpdateScopeKey({ kind: "adr", number: 2 }),
+    );
+    expect(liveUpdateScopeKey({ kind: "adr", number: 2 })).not.toBe(
+      liveUpdateScopeKey({ kind: "adr", number: 3 }),
     );
   });
 });

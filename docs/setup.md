@@ -1,6 +1,6 @@
 # Setup
 
-One-time setup of the Vercel project, the Neon project, the GitHub OAuth apps, the CLI releases and the coordination sweep. Only the repo owner can do these steps. Do them in order: each step needs the ones before it. H5 is optional and can be done at any time. H6 is the check to run after deploying. H7 sets up CLI releases and needs a production deployment that passed H6. H8 sets up the coordination sweep's Cron job; set its secret before the first production deployment that includes M2. H9 is not setup: it is the check to make before rolling production back to an older deployment.
+One-time setup of the Vercel project, the Neon project, the GitHub OAuth apps, the CLI releases, the coordination sweep and this repository's ADR sync. Only the repo owner can do these steps. Do them in order: each step needs the ones before it. H5 is optional and can be done at any time. H6 is the check to run after deploying. H7 sets up CLI releases and needs a production deployment that passed H6. H8 sets up the coordination sweep's Cron job; set its secret before the first production deployment that includes M2. H9 is not setup: it is the check to make before rolling production back to an older deployment. H10 sets up this repository's ADR sync from CI; it needs a production deployment that includes M4.
 
 Values in this guide are the current ones for the `hive-mind-web` Vercel project in the `curiouslycorys-projects` team.
 
@@ -228,4 +228,55 @@ Events are never changed after they are written, so a rollback leaves in the dat
 4. If it does not, do not promote it. Create a branch from the target commit, apply the reader to it (for example by cherry-picking the commit on `main` that added `event-projection.ts`, found with `git log --diff-filter=A --format=%H origin/main -- apps/web/src/server/event-projection.ts`, and resolving conflicts), and deploy that build to production instead. This applies to every deployment from before the reader, including those that already write #14's `stolen` reason.
 5. After the rollback, open a Plan page with recent activity and run `hivemind plan log <plan>`. An Event the build cannot read shows as "Event details unavailable" on the page and as `event.unavailable` in the CLI; neither returns an error.
 
+M4's `adr.reserved` and `adr.synced` Events are covered by this rule like any other Event type.
+
 Never delete, edit or backfill Events to make an older build read them. This check covers Event reads only: the target must also run on the current database schema, which is why every schema change is expand/contract (`AGENTS.md`, "Schema changes").
+
+## H10. ADR sync from CI
+
+**Not done yet; tracked by [#26](https://github.com/CuriouslyCory/hive-mind/issues/26).** This repository has no `.github/workflows/adr-sync.yml`, because the workflow needs a Project key secret that only the owner can create. Until it exists, ADRs are synced by hand ([docs/dogfooding.md](dogfooding.md#10-adrs)).
+
+The workflow runs `hivemind adr sync --ref HEAD` on each push to `main` that changes `docs/adr/`, so hive-mind's copy of this repository's ADRs follows `main` ([docs/cli.md](cli.md#syncing-from-ci), ADR-0017). It needs M4 deployed to production (H6).
+
+- [ ] Bind the repository to its Project if it is not bound yet: `hivemind init`, then merge `.hivemind.json` ([docs/dogfooding.md](dogfooding.md) step 2). The workflow reads the Project from that file.
+- [ ] Create a Project key, with your user login as an owner of the Project's organization:
+
+  ```bash
+  hivemind key create --name adr-sync > key.txt
+  ```
+
+  The key holds `adr:read` and `adr:write` with the other Project key permissions. Without `--expires-in-days` it never expires; with it, the workflow fails with exit 3 once the key expires, and you repeat this step and the next.
+- [ ] Add the key as a repository secret named `HIVEMIND_ADR_SYNC_TOKEN`, then delete the file:
+
+  ```bash
+  gh secret set HIVEMIND_ADR_SYNC_TOKEN < key.txt
+  rm key.txt
+  ```
+
+- [ ] Add `.github/workflows/adr-sync.yml` from the recipe in [docs/cli.md](cli.md#syncing-from-ci), with one change: build the CLI from the checked-out commit instead of running the install script. The install script needs public releases (H7) and a release that includes the `adr` commands (any after 0.1.0). Replace the recipe's last two steps with:
+
+  ```yaml
+        - name: Set up pnpm and Node, install dependencies
+          uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+          with:
+            node-version-file: .nvmrc
+            cache: true
+            require-lockfile: true
+
+        - name: Build the CLI
+          run: pnpm --filter @hivemind/cli build
+
+        - name: Sync ADRs
+          run: apps/cli/dist/hivemind adr sync --ref HEAD
+          env:
+            HIVEMIND_TOKEN: ${{ secrets.HIVEMIND_ADR_SYNC_TOKEN }}
+  ```
+
+  Merge it through a PR.
+
+No pull request step is needed: `ci.yml` already runs `packages/contract/test/adr.test.ts`, which parses every file in `docs/adr/` and checks the set, failing on warnings too, so it is stricter than `hivemind adr sync --check`.
+
+**Verify** after the next push to `main` that changes an ADR:
+
+- [ ] The workflow run's log shows `Synced commit <sha7> (was <sha7>): …` or, if the change was synced by hand first, `Already synced at commit <sha7>.`
+- [ ] `hivemind adr list` ends with `As of commit <sha7>, …`, naming that push's commit, and the dashboard's ADR banner says it was synced by the `adr-sync` key.

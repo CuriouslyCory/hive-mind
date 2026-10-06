@@ -198,7 +198,11 @@ function tempPathFor(path: string): string {
   return join(dirname(path), `.${basename(path)}.${randomBytes(6).toString("hex")}.tmp`);
 }
 
-async function writeTemp(path: string, contents: string, mode: number): Promise<string> {
+/**
+ * Writes `contents` to a new temporary file beside `path` (`.<name>.<hex>.tmp`)
+ * and returns its path, for callers that rename it into place themselves.
+ */
+export async function writeTemp(path: string, contents: string, mode: number): Promise<string> {
   const temp = tempPathFor(path);
   // "wx": exclusive create, never follows or reuses an existing path, and the
   // mode applies from creation (narrowed by the umask, never widened), so a
@@ -216,7 +220,8 @@ async function writeTemp(path: string, contents: string, mode: number): Promise<
   return temp;
 }
 
-async function syncDir(dir: string): Promise<void> {
+/** Flushes a directory after renames in it; best effort. */
+export async function syncDir(dir: string): Promise<void> {
   // Makes the rename itself durable. Not every platform/file system allows
   // fsync on a directory; durability is best effort there.
   try {

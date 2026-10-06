@@ -1,6 +1,6 @@
 # The hivemind CLI
 
-`hivemind` is the command-line client for hive-mind. It logs in to a hive-mind server, binds a repository to a Project and manages Project keys (M1), and records Plans, Tasks, Sessions and Scopes for the agents working in that Project (M2, see [Coordination](#coordination-plans-tasks-sessions-and-scopes)).
+`hivemind` is the command-line client for hive-mind. It logs in to a hive-mind server, binds a repository to a Project and manages Project keys (M1), records Plans, Tasks, Sessions and Scopes for the agents working in that Project (M2, see [Coordination](#coordination-plans-tasks-sessions-and-scopes)), and reserves ADR numbers and syncs the repository's ADRs into hive-mind (M4, see [ADRs](#adrs)).
 
 ## Supported platforms
 
@@ -187,7 +187,7 @@ hivemind init                                          # choose interactively
 
 ## Project keys
 
-A Project key is an organization credential bound to one Project, for CI and headless agents. It can identify itself (`whoami`), read and link its own Project, and use every coordination command in that Project: each key holds all coordination permissions, including keys created before M2 (ADR-0014). It cannot list organizations, create Projects or manage keys. A key belongs to the organization, not to the User who created it: it keeps working after that User leaves the organization, until it is revoked or expires.
+A Project key is an organization credential bound to one Project, for CI and headless agents. It can identify itself (`whoami`), read and link its own Project, and use every coordination and ADR command in that Project: each key holds all coordination permissions and `adr:read` and `adr:write`, including keys created before M2 or M4 (ADR-0014, ADR-0017). It cannot list organizations, create Projects or manage keys. A key belongs to the organization, not to the User who created it: it keeps working after that User leaves the organization, until it is revoked or expires.
 
 Only organization owners can create, list and revoke keys, and only with a user login. The key commands act on the Project given by `--project <id>`, or else the one in the nearest `.hivemind.json`; with neither they fail with `USAGE_ERROR`.
 
@@ -237,7 +237,7 @@ unset HIVEMIND_SESSION
 The CLI never picks a Session from the server's list of live Sessions. A value that is not a UUID, from either source, is `USAGE_ERROR` (exit 1) before any request.
 
 - **Required** by `task claim`, `release`, `start`, `block` and `done`; `session heartbeat`, `update`, `attach` and `end`; and every `scope` command. Without a Session they fail with `USAGE_ERROR`.
-- **Optional attribution** on `plan create`, `plan edit`, `plan status`, `plan log --message` and `task add`: when a Session is set, the Event names it as the actor Session. It must then be one of your Sessions and not ended or abandoned, so unset `HIVEMIND_SESSION` after `session end`; otherwise these commands fail with `CONFLICT` (exit 2).
+- **Optional attribution** on `plan create`, `plan edit`, `plan status`, `plan log --message`, `task add`, `adr new` and `adr sync`: when a Session is set, the Event names it as the actor Session. It must then be one of your Sessions and not ended or abandoned, so unset `HIVEMIND_SESSION` after `session end`; otherwise these commands fail with `CONFLICT` (exit 2).
 - `status` uses the Session only to fill `myClaims`. `session show`, `session claims` and `session log` take the Session as an argument or from these two sources.
 
 Your Sessions are the ones started by the same principal: the same User (through any of that User's logins) or the same Project key. A Session started with a Project key cannot be used with a user login, and the reverse.
@@ -403,6 +403,7 @@ List commands return one page: `{ items, nextCursor }`. `--limit` takes 1 to 100
 | `session claims [sessionId]` | oldest claim first; the cursor stops working once its claim ends |
 | `session list [--status <s>]` | newest Session first; `<s>` is `live`, `terminal`, `active`, `idle`, `stale`, `ended` or `abandoned` |
 | `scope list` | oldest Scope first |
+| `adr list [--status <s>] [--state <s>]` | highest ADR number first. `--status` leaves out reservations, which have no status. Each page also carries `lastSync` (see [ADRs](#adrs)) |
 
 `session show` and `status` return only the first page or the first 20 entries of each section; `nextCursor` and `complete` say whether more exist. Page through a Session's claims with `session claims <sessionId> --cursor <claims.nextCursor>`, older Events with `session log <sessionId> --cursor <events.nextCursor>` and its Scopes with `scope list --session <sessionId> --cursor <scopes.nextCursor>`; `session show` prints these commands when more exist. If a claims cursor returns `BAD_REQUEST` because its claim was released, stolen or expired, start again without `--cursor`.
 
@@ -415,7 +416,7 @@ List commands return one page: `{ items, nextCursor }`. `--limit` takes 1 to 100
 
 ### Lost answers and retries
 
-The CLI never retries a write. `plan create`, `plan log --message`, `task add` and `session start` generate the new record's UUID once per run. Unless the server rejected the request with a documented 4xx code (`BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`) or the CLI stopped before sending it, the record may exist anyway. That covers a timeout, a lost connection, a cancel, an unreadable answer and any 5xx: a gateway timeout or a failed output check can come after the server committed. The error says so and names the generated id (on stderr in `--json` mode too):
+The CLI never retries a write. `plan create`, `plan log --message`, `task add`, `session start` and `adr new` generate the new record's UUID once per run. Unless the server rejected the request with a documented 4xx code (`BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`) or the CLI stopped before sending it, the record may exist anyway. That covers a timeout, a lost connection, a cancel, an unreadable answer and any 5xx: a gateway timeout or a failed output check can come after the server committed. The error says so and names the generated id (on stderr in `--json` mode too):
 
 ```text
 The Plan may have been created anyway with id 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b. Check with 'hivemind plan show 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b' before retrying, and retry only with --id 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b.
@@ -424,8 +425,9 @@ The Plan may have been created anyway with id 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a
 - Inspect first, with the command the message names.
 - If the record is missing, rerun the same command with `--id <id>`. If the first request did arrive, the server returns that record with `created: false` and writes no second Event, even if the record was edited since.
 - `--id` with different input is `CONFLICT`. For `session start` the input includes the hostname and the git branch and commit, so retry from the same worktree before committing.
+- **`adr new`** names the ADR reservation's id and `hivemind adr list --state reserved` as the check. A retry with `--id` returns the same number instead of reserving another, then writes the template if the file is missing. Its input is the title, slug, git branch and Session, so retry from the same branch; the floor (see [`adr new`](#adr-new)) is not part of it. If the number was reserved but the file could not be written, the error also names `--id <id>`.
 
-The other writes are safe to repeat once you have checked the state: a repeat of `task claim`, `start`, `block` (same reason), `done` or `release`, `scope add`, `plan status` or `session end` (same summary) is a no-op.
+The other writes are safe to repeat once you have checked the state: a repeat of `task claim`, `start`, `block` (same reason), `done` or `release`, `scope add`, `plan status` or `session end` (same summary) is a no-op. `adr sync` needs no `--id`: after a lost answer, run it again. If the first request was applied, the rerun finds the copy at that commit and reports `Already synced at commit <sha7>.`
 
 ### Recovery examples
 
@@ -506,6 +508,185 @@ The schemas of these `data` objects are the `/api/v1` output schemas in `package
 
 An Event the server finds corrupt rather than newer fails the whole read with `INTERNAL_SERVER_ERROR` (exit 1).
 
+## ADRs
+
+An ADR is a file in the repository, `docs/adr/NNNN-slug.md`, in the format ADR-0001 fixes. The file is the source of truth. hive-mind hands out ADR numbers (an ADR reservation, `adr new`) and keeps a read-only copy of the ADR files as of one commit (ADR sync, `adr sync`), which `adr list`, `adr show` and the [dashboard](dashboard.md#pages) read. It never edits the repository. The terms are defined in `CONTEXT.md`; the design is ADR-0017.
+
+### Recording a decision
+
+```bash
+hivemind adr new --title 'Use keyset pages for ADR lists'   # prints docs/adr/0018-use-keyset-pages-for-adr-lists.md
+# write the decision in that file, open a PR, review and merge it
+git fetch origin
+hivemind adr sync                                           # copies the default branch's ADRs into hive-mind
+hivemind adr show ADR-0018
+```
+
+`adr status` and `adr supersede` change local files the same way: commit the change, merge it, then sync. In CI, a workflow syncs on every push to the default branch (see [Syncing from CI](#syncing-from-ci)).
+
+### Identifiers and the ADR directory
+
+- **Identifiers.** An ADR is named by its number: `ADR-0015`, `0015` or `15` (`adr-0015` and `ADR-15` work too). Anything else is `USAGE_ERROR`. Human output prints `ADR-0015`; `--json` uses the integer `number`.
+- **The ADR directory** is `docs/adr/` in the directory that holds `.hivemind.json` (see [Discovery](#binding-a-repository-hivemindjson)). It is not configurable.
+- `adr new` and `adr sync` need `.hivemind.json` and act on its Project; they take no `--project`. Without one they fail with `USAGE_ERROR`.
+- The local-only commands, `adr status`, `adr supersede` and `adr sync --check`, fall back to `docs/adr/` at the git worktree root when no `.hivemind.json` applies, so they also work in an unbound repository and in pull request CI. `adr show` uses the same rule to compare the local file. Outside both a binding and a git repository, the local-only commands fail with `USAGE_ERROR`.
+- **ADR files** are the entries directly in the ADR directory whose names end in `.md`. Each must be a valid ADR file name (`0001` to `9999`, a hyphen, a slug of lowercase letters and digits joined by hyphens, then `.md`): ADR-0001 allows no other `.md` files there. Subdirectories and other extensions are ignored.
+- **Paths.** `--json` paths are repository-relative POSIX paths, as the API returns them. Human output prints paths relative to the current directory, so they can be opened as printed.
+
+### ADR commands
+
+`adr list` and `adr show` take `--project <id>`. "Session" is optional attribution, as in [Which Session a command uses](#which-session-a-command-uses).
+
+| Command | Options and arguments | `--json` `data` |
+|---|---|---|
+| `adr new` | `--title` (required), `--slug`, `--id`, Session optional | `{ adr, created, file: { path, status: "created" \| "unchanged" } }`; human output is the file's path |
+| `adr list` | `--status proposed\|accepted\|superseded\|deprecated`, `--state reserved\|published\|removed`, `--limit`, `--cursor` | `{ items, nextCursor, lastSync }` of ADR summaries, without content |
+| `adr show <adr>` | none | `{ adr, lastSync, local }`; `adr` includes `content`, `supersededBy` and `warnings` |
+| `adr status <adr> <status>` | `<status>` is `proposed`, `accepted` or `deprecated` | `{ number, path, status, previousStatus, date, changed }` |
+| `adr supersede <old> --by <new>` | `--by` (required) | `{ superseded: { number, path, status, previousStatus, date, changed }, superseding: { number, path, supersedes, changed }, changed }` |
+| `adr sync` | `--ref <rev>`, `--force`, `--dry-run`, Session optional; or `--check` without the first three | `{ outcome, ref, commitSha, baseCommitSha, forced, fileCount, uploadedFileCount, added, updated, removed, unchanged, changes, warnings: { items, complete } }` |
+
+- `state` says where a number is in hive-mind's copy: `reserved` (handed out by `adr new`, no file synced yet), `published` (the last synced commit has the file) or `removed` (an earlier sync found a file and a later one did not; the last copy is kept). It is never the ADR's status. A reservation's `status`, `path`, `date` and `content` are null.
+- `lastSync` is `{ commitSha, syncedAt, syncedBy }` for the last ADR sync, or `null` before the first one. Human output of `adr list` and `adr show` ends with `As of commit <sha7>, synced <time>.`, or `No ADRs synced yet. Run 'hivemind adr sync' on the default branch.`
+- `reservationTaken` is true when a file that bypassed `adr new` took a number reserved for another ADR. The file keeps the number; the reserved ADR needs a new one. `adr list` adds `(reserved for '<title>': needs a new number)` to that line.
+- `local` compares the working tree's file with the copy: `{ match: "same" | "differs" | "missing" | "ambiguous", path }`, with `path` null for `missing` and `ambiguous` (more than one local file has the number), or `null` when no ADR directory applies. A reservation's file always `differs`, since the copy has no content for it. Human output says `The local file <path> differs from this copy.`, `No local file has ADR-NNNN.` or `More than one local file has ADR-NNNN.`
+- The schemas are the `/api/v1` output schemas in `packages/contract/src/adr-api.ts`, with golden examples in `packages/contract/test/fixtures/v1/cli.adr-*.json`.
+
+### `adr new`
+
+`adr new --title <title>` reserves the Project's next ADR number, then writes ADR-0001's template to `docs/adr/NNNN-<slug>.md` with `status: proposed` and today's date. stdout is the path; stderr says `Reserved ADR-0018 (<id>).`, or `Found existing reservation ADR-0018 (<id>).` on a retry with `--id`.
+
+- **Title and slug.** The title is 1 to 200 characters on one line, without leading or trailing spaces or a closing `#`. The slug defaults to the title in lowercase ASCII words joined by hyphens, cut at a word boundary to at most 60 characters. Pass `--slug` (lowercase letters and digits joined by single hyphens, at most 100 characters) when the title has no such letters or you want a shorter name.
+- **Numbers.** Numbers come from a counter in hive-mind, run from 1 to 9999 and are never handed out twice, so two agents never get the same number. A reservation whose ADR is never merged leaves a gap; reservations do not expire and cannot be released.
+- **The floor.** The CLI also sends the highest ADR number in the local `docs/adr/` and in `origin/HEAD`'s tree, and hive-mind reserves a number above it. A floor more than 100 past the next number hive-mind would reserve is refused with `CONFLICT`, so in a repository whose ADR numbers already go past 100, run `adr sync` before the first `adr new`.
+- **No overwrite.** An identical existing file (a rerun) counts as success, with `file.status: "unchanged"`. A different file at that path, or another local file with the number, is `CONFLICT` (exit 2) and left as it is; the error names the `--id` to rerun with once it is moved aside.
+- **No offline fallback.** If hive-mind cannot be reached, `adr new` fails. It never takes the local highest number + 1.
+- **Symlinks.** If `docs`, `docs/adr` or another part of the ADR directory is a symbolic link that leads outside the directory holding `.hivemind.json`, `adr new` fails with `IO_ERROR` (exit 1) before it reserves a number, and writes nothing. A link that stays inside is followed.
+- A lost answer is retried with `--id`; see [Lost answers and retries](#lost-answers-and-retries).
+
+### `adr status` and `adr supersede`
+
+Both commands edit local files only and make no server call. A change on the server would disagree with the default branch, and the next sync would undo it. hive-mind's copy changes when you commit the change, merge it to the default branch and run `adr sync`; the output says so.
+
+- **`adr status <adr> <status>`** rewrites `status` and `date` (today) in the frontmatter and keeps the rest of the file byte for byte. The current status is a no-op (`changed: false`, date kept). `superseded` is `USAGE_ERROR`: use `adr supersede`.
+- **`adr supersede <old> --by <new>`** adds `<old>` to `<new>`'s `supersedes` list (`<new>`'s date is unchanged), then sets `<old>` to `superseded` with today's date. It first parses every local ADR file. It refuses with `CONFLICT` (exit 2) when `<new>` is itself superseded, when another ADR already supersedes `<old>`, or when the change would make a supersedes cycle. Both files are written to temporary files before either is renamed, `<new>` first, so a rerun after an interruption finishes the job. Running it again when both files are already done is a no-op.
+- Errors: no local file with the number is `NOT_FOUND` (exit 4); more than one is `CONFLICT`; a file the parser rejects is `ADR_INVALID` (exit 1), with each problem listed as `<path>: <CODE>: <message>`. A symlinked ADR file, or an ADR directory that a symbolic link leads outside its base directory (as for `adr new`), is `IO_ERROR` (exit 1), and nothing is written.
+
+### `adr sync`
+
+`adr sync` copies the ADR files of one commit into hive-mind.
+
+- **One commit, never the working tree.** It reads the commit's tree with git, so unmerged branches and uncommitted edits are never synced. The default is `refs/remotes/origin/HEAD`, the remote's default branch as last fetched. `adr sync` never fetches: run `git fetch origin` first. `--ref <rev>` reads another commit, such as `HEAD` in a CI job on a push to the default branch. A clone without `origin/HEAD` gets `USAGE_ERROR`; run `git remote set-head origin --auto` or pass `--ref`.
+- **Checked before anything is sent.** Every file in the commit is parsed first. Two files with one number are `CONFLICT` (exit 2); any invalid file is `ADR_INVALID` (exit 1). Either refuses the whole commit and lists every problem. Warnings (missing or out-of-order sections, a `supersedes` entry naming a missing ADR, `superseded` with no superseding ADR, an ADR superseded by two others, a cycle) are reported and do not stop the sync.
+- **Commit order.** The CLI reads the commit hive-mind last synced and compares it with the one it read:
+
+  | The copy's commit | Result |
+  |---|---|
+  | none yet, or an ancestor of the commit | sync |
+  | the same commit | exit 0, `Already synced at commit <sha7>.`, nothing sent |
+  | a descendant of the commit | exit 0, `Already synced past this commit: the copy is at <sha7>, which contains <sha7>.`, nothing sent. This happens when two CI jobs finish out of order |
+  | not in this clone | `CONFLICT`: fetch the full history (in CI, `fetch-depth: 0`), or pass `--force` after a force-push |
+  | on another line of history | `CONFLICT`: if the default branch was force-pushed, rerun with `--force` |
+
+  `--force` skips these checks, so it can also sync an older commit; use it only after a force-push. The `adr.synced` Event records that the sync was forced.
+- **Two phases.** First the CLI uploads the content of each file the copy does not have yet, in batches. Then it sends the manifest: the commit, the commit it expects hive-mind to have synced last, and each file's name and sha256. hive-mind applies the manifest in one transaction: it updates the copy, marks ADRs missing from the commit `removed` (never deleted), moves the number counter past the highest synced number and writes one `adr.synced` Event. If another sync finished in between, it answers `CONFLICT`, and the CLI reads the copy once more (it never retries the sync): a copy now at this commit with the same files is `Already synced at commit <sha7>.` and a copy at a descendant (without `--force`) is `Already synced past this commit: …`, both exit 0. Otherwise the `CONFLICT` stands (exit 2) with the hint to run `adr sync` again. If the copy already holds this commit with different files (for example synced from another ADR directory), the hint says so: neither a rerun nor `--force` replaces a synced commit, so sync a later commit. An interrupted sync applies nothing, and a rerun uploads only what is still missing.
+- **A file that takes a reserved number.** If a file that bypassed `adr new` uses a number reserved for another ADR, the file keeps the number. The sync prints a warning, and `adr show` and the dashboard say the reserved ADR needs a new number: reserve one for it with `adr new`.
+- **`--dry-run`** reads the copy and prints the changes the sync would make, then `Nothing was sent.` It needs a credential and runs the same checks.
+- **`--check`** parses the working tree's `docs/adr/` instead of a commit, makes no server call and needs no credential or `.hivemind.json`. It cannot be combined with `--ref`, `--force` or `--dry-run`. See [Checking ADRs in pull requests](#checking-adrs-in-pull-requests).
+
+Human output of a sync:
+
+```text
+Synced commit 3f2a9c1 (was 8e7d6c5): 1 added, 1 updated, 0 removed, 15 unchanged.
+  ADR-0017 added (proposed)
+  ADR-0004 updated (accepted -> superseded)
+```
+
+`(first sync)` replaces `(was …)` on the first sync, and `(forced)` follows it with `--force`. In `--json` `data`, `outcome` is `synced`, `up_to_date`, `already_synced_past`, `dry_run` or `checked`; `changes` lists `{ number, change, path, statusFrom, statusTo }` with `change` one of `added`, `updated`, `removed` and `restored` (`added` counts both `added` and `restored`); `warnings.items` lists at most 500 `{ number, path, code, message }`, and `complete` is false when there were more.
+
+### Syncing from CI
+
+Sync from a workflow that runs on every push to the default branch, with a Project key as `HIVEMIND_TOKEN`:
+
+1. Commit `.hivemind.json` (`hivemind init`).
+2. As an organization owner, create a Project key: `hivemind key create --name adr-sync > key.txt`. It holds `adr:read` and `adr:write`.
+3. Add the key as a repository secret, for example `HIVEMIND_ADR_SYNC_TOKEN`, then delete `key.txt`.
+4. Add `.github/workflows/adr-sync.yml`:
+
+```yaml
+name: ADR sync
+
+on:
+  push:
+    branches: [main]          # the default branch
+    paths: ["docs/adr/**"]
+
+# One sync at a time. A newer push replaces a waiting one, and its commit
+# contains the older one's.
+concurrency:
+  group: adr-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  adr-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0      # the ancestry check needs the history
+          persist-credentials: false
+
+      - name: Install hivemind
+        run: |
+          curl -fsSL https://github.com/CuriouslyCory/hive-mind/releases/latest/download/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Sync ADRs
+        run: hivemind adr sync --ref HEAD
+        env:
+          HIVEMIND_TOKEN: ${{ secrets.HIVEMIND_ADR_SYNC_TOKEN }}
+```
+
+- `--ref HEAD` is the pushed commit. `fetch-depth: 0` fetches the full history; with a shallow checkout the copy's commit is usually missing and the sync fails with `CONFLICT`.
+- `paths` skips pushes that change no ADR. Every sync writes an `adr.synced` Event, even when no ADR changed, so without the filter each push adds one. Adjust the path if `.hivemind.json` is below the repository root.
+- The `adr` commands need a CLI release later than 0.1.0. Pin one with `sh -s -- --version <v>` (see [Install script](#install-script)).
+- The CLI talks to `https://hivemind.curiouslycory.com` unless `HIVEMIND_URL` is set in the step's `env`.
+- Run the first sync by hand (`git fetch origin && hivemind adr sync`), or let the first push that changes an ADR do it.
+
+### Checking ADRs in pull requests
+
+`hivemind adr sync --check` parses the ADR files in the working tree with the same parser and checks the set: it fails with `ADR_INVALID` (exit 1) for an invalid file and `CONFLICT` (exit 2) for two files with one number, and prints warnings without failing. It needs no login, no secret and no `.hivemind.json`, so it also runs on pull requests from forks and in unbound repositories:
+
+```yaml
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Install hivemind as in the sync workflow, then:
+      - run: hivemind adr sync --check
+```
+
+```text
+Checked 17 ADR files in docs/adr/: no errors, 0 warnings.
+```
+
+### ADR limits
+
+| Limit | Value |
+|---|---|
+| ADR file | 64 KiB (65,536 bytes) of UTF-8, with no C0 control characters other than tab, LF and CR, and no DEL |
+| Title | 200 characters |
+| Slug | 100 characters |
+| ADR numbers | 1 to 9999 |
+| Files per sync | 1,000 |
+| Upload request (`.../adrs/contents` and `.../adrs/sync`) | 256 KiB; every other `/api/v1` request stays at 16 KiB. The CLI splits uploads into requests of at most 50 files that fit |
+| `supersedes` | 64 numbers per ADR |
+
+A file over the size limit, or with a title over 200 characters, fails the parser, so `adr sync` and `adr sync --check` report it as `ADR_INVALID`. hive-mind checks the `supersedes` limit when the content is uploaded, and `adr sync` then fails with `ADR_INVALID` before anything is synced. A commit with more than 1,000 ADR files is refused with `BAD_REQUEST` (exit 1) before anything is uploaded.
+
 ## Command reference
 
 Global options, accepted anywhere on the command line:
@@ -527,11 +708,11 @@ Global options, accepted anywhere on the command line:
 | `key list` | `--project <id>` | `{ projectId, items, nextCursor }` |
 | `key revoke <keyId>` | `--project <id>` | `{ id, projectId, revoked: true }` |
 
-The coordination commands are listed in [Coordination commands](#coordination-commands).
+The coordination commands are listed in [Coordination commands](#coordination-commands), and the ADR commands in [ADR commands](#adr-commands).
 
 `whoami` also shows the origin, where the credential came from and the bound Project, in human output only. `key list` fetches up to 2,000 keys; `nextCursor` is non-null if there are more.
 
-Environment variables: `HIVEMIND_URL` (backend origin), `HIVEMIND_TOKEN` (credential; an empty value counts as unset), `HIVEMIND_SESSION` (the Session coordination commands act through; an empty value counts as unset), `HIVEMIND_DEBUG=1` (print the redacted stack of an internal error).
+Environment variables: `HIVEMIND_URL` (backend origin), `HIVEMIND_TOKEN` (credential; an empty value counts as unset), `HIVEMIND_SESSION` (the Session coordination commands act through, and that `adr new` and `adr sync` attribute their change to; an empty value counts as unset), `HIVEMIND_DEBUG=1` (print the redacted stack of an internal error).
 
 ## Output
 
@@ -558,7 +739,7 @@ With `--json`, stdout carries exactly one JSON object, for success and failure a
 | Exit | Meaning | Error codes |
 |---|---|---|
 | 0 | success | |
-| 1 | any other failure | `BAD_REQUEST`, `PAYLOAD_TOO_LARGE`, `INTERNAL_SERVER_ERROR`, `USAGE_ERROR`, `INVALID_SERVER`, `NETWORK_ERROR`, `TIMEOUT`, `UNEXPECTED_REDIRECT`, `INVALID_RESPONSE`, `CREDENTIAL_STORE_ERROR`, `IO_ERROR`, `CANCELLED`, `INTERNAL_ERROR`, `LOGIN_EXPIRED`, `LOGIN_FAILED`, `REVOCATION_FAILED`, `TERMINAL_REQUIRED`, `CONFIG_TOO_LARGE`, `CONFIG_INVALID_JSON`, `CONFIG_UNSUPPORTED_VERSION`, `CONFIG_INVALID` |
+| 1 | any other failure | `BAD_REQUEST`, `PAYLOAD_TOO_LARGE`, `INTERNAL_SERVER_ERROR`, `USAGE_ERROR`, `INVALID_SERVER`, `NETWORK_ERROR`, `TIMEOUT`, `UNEXPECTED_REDIRECT`, `INVALID_RESPONSE`, `CREDENTIAL_STORE_ERROR`, `IO_ERROR`, `CANCELLED`, `INTERNAL_ERROR`, `LOGIN_EXPIRED`, `LOGIN_FAILED`, `REVOCATION_FAILED`, `TERMINAL_REQUIRED`, `CONFIG_TOO_LARGE`, `CONFIG_INVALID_JSON`, `CONFIG_UNSUPPORTED_VERSION`, `CONFIG_INVALID`, `ADR_INVALID` |
 | 2 | conflict | `CONFLICT` |
 | 3 | not authenticated or not allowed | `UNAUTHORIZED`, `FORBIDDEN` |
 | 4 | not found | `NOT_FOUND` |
@@ -571,7 +752,7 @@ The exit code always follows from `error.code`, and any code not listed here als
 - Each request to the server times out after 30 seconds (`TIMEOUT`). During `login`, the device-code request and each poll time out after 15 seconds.
 - The CLI reads at most 4 MiB of a response. A larger answer fails with `INVALID_RESPONSE`.
 - Only device-login polling is retried. After a timeout, a network error, a 429 or a 5xx answer, `login` prints a warning, waits (the polling interval doubled for each failure in a row, up to 60 seconds) and polls again until the code expires.
-- No other request is retried. Creating a Project or a key is not idempotent, so a write that times out, loses its connection, is cancelled or gets an unreadable answer fails with a message saying that the server may still have completed it, and how to check. Coordination creates can be repeated safely with `--id`; see [Lost answers and retries](#lost-answers-and-retries).
+- No other request is retried. Creating a Project or a key is not idempotent, so a write that times out, loses its connection, is cancelled or gets an unreadable answer fails with a message saying that the server may still have completed it, and how to check. Coordination creates and `adr new` can be repeated safely with `--id`; see [Lost answers and retries](#lost-answers-and-retries).
 
 ## The API
 

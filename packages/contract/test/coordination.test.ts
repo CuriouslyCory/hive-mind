@@ -4,6 +4,7 @@ import { type AnyContractRouter, isContractProcedure } from "@orpc/contract";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  ADR_SYNC_CHANGE_KINDS,
   addSessionScopeInputSchema,
   addTaskInputSchema,
   apiContract,
@@ -32,6 +33,7 @@ import {
   knownEventSchema,
   listPlansInputSchema,
   listSessionsInputSchema,
+  MAX_ADR_SYNC_EVENT_CHANGES,
   MAX_COLLECTION_BATCH_PATHS,
   MAX_CONFLICT_INTENT_LENGTH,
   MAX_EVENT_BYTES,
@@ -246,7 +248,7 @@ describe("coordination CLI envelopes", () => {
 });
 
 describe("Project key permissions", () => {
-  it("grants the coordination permissions and keeps project:read", () => {
+  it("grants the coordination and ADR permissions and keeps project:read", () => {
     expect([...PROJECT_KEY_PERMISSIONS]).toEqual([
       "project:read",
       "plan:read",
@@ -258,6 +260,8 @@ describe("Project key permissions", () => {
       "scope:read",
       "scope:write",
       "event:read",
+      "adr:read",
+      "adr:write",
     ]);
   });
 
@@ -596,6 +600,28 @@ const MAXIMAL_PAYLOADS: Record<EventType, unknown> = {
     reason: "unrepresentable_paths",
     pathCount: Number.MAX_SAFE_INTEGER,
   },
+  "adr.reserved": {
+    adrId: UUID,
+    number: 9999,
+    title: WIDE.repeat(200),
+    slug: "a".repeat(100),
+    floor: 9999,
+  },
+  "adr.synced": {
+    commitSha: "f".repeat(64),
+    previousCommitSha: "f".repeat(64),
+    forced: true,
+    added: Number.MAX_SAFE_INTEGER,
+    updated: Number.MAX_SAFE_INTEGER,
+    removed: Number.MAX_SAFE_INTEGER,
+    changes: Array.from({ length: MAX_ADR_SYNC_EVENT_CHANGES }, (_, i) => ({
+      number: 9999 - i,
+      change: "updated",
+      statusFrom: "deprecated",
+      statusTo: "superseded",
+    })),
+    truncated: true,
+  },
 };
 
 function maximalEvent(type: EventType): unknown {
@@ -641,6 +667,57 @@ describe("Events", () => {
     expect(accepts(schema, { ...event, payloadVersion: 2 })).toBe(false);
     expect(accepts(schema, { ...event, payload: MAXIMAL_PAYLOADS["task.claimed"] })).toBe(false);
     expect(accepts(schema, { ...event, extra: "x" })).toBe(false);
+  });
+
+  it("bounds ADR Events: numbers, the change list and statuses that match each change", () => {
+    const reserved = maximalEvent("adr.reserved") as { payload: Record<string, unknown> };
+    const reserve = (payload: Record<string, unknown>) =>
+      accepts(knownEventSchema, { ...reserved, payload: { ...reserved.payload, ...payload } });
+    expect(reserve({ number: 1, floor: 0 })).toBe(true);
+    expect(reserve({ number: 0 })).toBe(false);
+    expect(reserve({ number: 10000 })).toBe(false);
+    expect(reserve({ floor: -1 })).toBe(false);
+    expect(reserve({ floor: null })).toBe(false);
+    expect(reserve({ title: WIDE.repeat(201) })).toBe(false);
+    expect(reserve({ slug: "Not-A-Slug" })).toBe(false);
+    expect(reserve({ slug: "a".repeat(101) })).toBe(false);
+
+    const synced = maximalEvent("adr.synced") as { payload: Record<string, unknown> };
+    const sync = (payload: Record<string, unknown>) =>
+      accepts(knownEventSchema, { ...synced, payload: { ...synced.payload, ...payload } });
+    const one = (change: Record<string, unknown>) => sync({ changes: [change] });
+    expect(sync({ changes: [], truncated: false, previousCommitSha: null })).toBe(true);
+    expect(sync({ commitSha: "f".repeat(39) })).toBe(false);
+    expect(sync({ commitSha: "F".repeat(40) })).toBe(false);
+    const tooMany = Array.from({ length: MAX_ADR_SYNC_EVENT_CHANGES + 1 }, (_, i) => ({
+      number: i + 1,
+      change: "removed",
+      statusFrom: "accepted",
+      statusTo: null,
+    }));
+    expect(sync({ changes: tooMany })).toBe(false);
+    for (const change of ["added", "restored"]) {
+      expect(one({ number: 1, change, statusFrom: null, statusTo: "proposed" })).toBe(true);
+      expect(one({ number: 1, change, statusFrom: "proposed", statusTo: "proposed" })).toBe(false);
+    }
+    expect(one({ number: 1, change: "updated", statusFrom: "proposed", statusTo: null })).toBe(
+      false,
+    );
+    expect(one({ number: 1, change: "removed", statusFrom: "accepted", statusTo: null })).toBe(
+      true,
+    );
+    expect(one({ number: 1, change: "renamed", statusFrom: null, statusTo: null })).toBe(false);
+    // Every listed kind has a variant.
+    for (const change of ADR_SYNC_CHANGE_KINDS) {
+      const statusFrom = change === "added" || change === "restored" ? null : "accepted";
+      const statusTo = change === "removed" ? null : "accepted";
+      expect(one({ number: 1, change, statusFrom, statusTo })).toBe(true);
+    }
+    expect(one({ number: 1, change: "added", statusFrom: null, statusTo: "draft" })).toBe(false);
+    // No titles or content in a sync Event.
+    expect(
+      one({ number: 1, change: "added", statusFrom: null, statusTo: "accepted", title: "x" }),
+    ).toBe(false);
   });
 
   it("types the actor as a User, a Project key or the system", () => {

@@ -14,7 +14,9 @@ M2 (Plans, Tasks and Sessions) is implemented and awaiting review: Plans with lo
 
 M3 (dashboard) is implemented and awaiting review: read-only Project, Plan and Session pages that update live from the Event feed over SSE. See [The dashboard](#the-dashboard) and [docs/dashboard.md](docs/dashboard.md); its plan is [#11](https://github.com/CuriouslyCory/hive-mind/issues/11).
 
-Next come M4 (ADRs), M5 (search), M6 (agent skills and hooks) and M7 (hardening). The full plan is in [#1](https://github.com/CuriouslyCory/hive-mind/issues/1); M0's plan is in [#2](https://github.com/CuriouslyCory/hive-mind/issues/2) and M1's in [#3](https://github.com/CuriouslyCory/hive-mind/issues/3).
+M4 (ADRs) is implemented and awaiting review: `hivemind adr new` reserves ADR numbers so that agents working at the same time never pick the same one, `hivemind adr sync` copies the ADR files of one commit on the default branch into hive-mind, and the dashboard lists them with their status and supersedes chain. See [Recording decisions](#recording-decisions) and ADR-0017. M4 is done once it is deployed and this repository's own ADRs are synced, with a later ADR number reserved by `adr new` ([docs/dogfooding.md](docs/dogfooding.md#10-adrs)); its plan is [#19](https://github.com/CuriouslyCory/hive-mind/issues/19).
+
+Next come M5 (search), M6 (agent skills and hooks) and M7 (hardening). The full plan is in [#1](https://github.com/CuriouslyCory/hive-mind/issues/1); M0's plan is in [#2](https://github.com/CuriouslyCory/hive-mind/issues/2) and M1's in [#3](https://github.com/CuriouslyCory/hive-mind/issues/3).
 
 ## Workspaces
 
@@ -97,7 +99,7 @@ apps/cli/dist/hivemind --server http://localhost:3000 whoami
 Tests beyond the four checks below:
 
 - **CLI tests** run as part of `pnpm test`. They need no database; many of them build and run the compiled binary.
-- **Browser tests** (Playwright against `next dev`: the device approval page, the CLI flow from `login` to `logout`, two compiled CLIs coordinating a Plan from two worktrees, the dashboard pages, and their live updates through the real Event stream, including reconnects and lost access):
+- **Browser tests** (Playwright against `next dev`: the device approval page, the CLI flow from `login` to `logout`, two compiled CLIs coordinating a Plan from two worktrees, two compiled CLIs reserving ADR numbers from two worktrees and syncing them, the dashboard pages, and their live updates through the real Event stream, including reconnects and lost access):
 
   ```bash
   pnpm --filter @hivemind/web exec playwright install chromium   # once
@@ -144,9 +146,26 @@ unset HIVEMIND_SESSION
 
 ## The dashboard
 
-With `pnpm dev` running, sign in at http://localhost:3000 and open `/`. It lists the Projects of your Organizations; a new User has none until `hivemind init` creates one (see [Coordinating agents](#coordinating-agents)). Open a Project to see its Plans, live Sessions and overlaps, and leave the page open while you run CLI commands: it updates within a few seconds. Plan and Session pages are linked from the overview.
+With `pnpm dev` running, sign in at http://localhost:3000 and open `/`. It lists the Projects of your Organizations; a new User has none until `hivemind init` creates one (see [Coordinating agents](#coordinating-agents)). Open a Project to see its Plans, live Sessions and overlaps, and leave the page open while you run CLI commands: it updates within a few seconds. Plan and Session pages and the ADR list are linked from the overview.
 
 [docs/dashboard.md](docs/dashboard.md) covers authorization, the initial snapshot, how live updates refresh the page, the stream's bounds and the known limitations.
+
+## Recording decisions
+
+Architecture decisions are ADR files in the repository, `docs/adr/NNNN-slug.md` ([ADR-0001](docs/adr/0001-record-architecture-decisions.md)). In a repository bound to a Project, hive-mind hands out their numbers and keeps a read-only copy that the dashboard shows. The files stay the source of truth.
+
+```bash
+hivemind adr new --title 'Cache ADR pages'   # reserves the next number; prints docs/adr/NNNN-cache-adr-pages.md
+# write the decision in that file, open a PR, merge it
+git fetch origin
+hivemind adr sync                           # copies the default branch's ADRs into hive-mind
+```
+
+- `adr new` never hands out a number twice, even to two agents at once, so a merged ADR no longer needs renumbering.
+- `adr sync` reads one commit (by default `origin/HEAD`), never the working tree, so only merged ADRs reach hive-mind. A CI workflow can run it on every push to the default branch, and `adr sync --check` validates `docs/adr/` in pull requests without a login.
+- `adr status` and `adr supersede` edit local files only. Commit, merge and sync to update hive-mind's copy.
+
+[docs/cli.md](docs/cli.md#adrs) has every command, the CI workflow and the limits; [ADR-0017](docs/adr/0017-adr-numbers-and-repo-sync.md) records the design. This repository is not bound to a Project yet, so its own new ADRs still take the next free number on `main`, as ADR-0001 describes.
 
 ## Checks
 
@@ -170,7 +189,7 @@ CI also runs the installer tests and the browser tests on every PR. A PR that to
 - [docs/cli.md](docs/cli.md): installing and using the `hivemind` CLI.
 - [docs/dashboard.md](docs/dashboard.md): the dashboard pages, their authorization and the live Event stream.
 - [docs/setup.md](docs/setup.md): one-time Vercel, Neon, GitHub OAuth, release and Cron setup, and the post-deploy checklist.
-- [docs/dogfooding.md](docs/dogfooding.md): tracking this repository's own development with hive-mind after M2 is deployed.
+- [docs/dogfooding.md](docs/dogfooding.md): tracking this repository's own development and ADRs with hive-mind after M2 and M4 are deployed.
 - [docs/adr/](docs/adr/): architecture decision records.
 - [CONTEXT.md](CONTEXT.md): the domain glossary and naming rules.
 - [AGENTS.md](AGENTS.md): rules for coding agents working in this repo.

@@ -1,6 +1,6 @@
 # The dashboard
 
-The dashboard is the read-only web view of coordination state. A signed-in User sees the Projects of every Organization they are a Member of, opens a Project, follows a Plan or a Session, and sees changes arrive without reloading. It edits nothing: Plans, Tasks, claims and Sessions change only through the CLI and `/api/v1` (ADR-0014).
+The dashboard is the read-only web view of coordination state. A signed-in User sees the Projects of every Organization they are a Member of, opens a Project, follows a Plan or a Session, and sees changes arrive without reloading. It edits nothing: Plans, Tasks, claims and Sessions change only through the CLI and `/api/v1` (ADR-0014), and ADRs change only in the repository (ADR-0017).
 
 The design is in [#11](https://github.com/CuriouslyCory/hive-mind/issues/11) and ADR-0010. This page describes what the code does.
 
@@ -9,9 +9,13 @@ The design is in [#11](https://github.com/CuriouslyCory/hive-mind/issues/11) and
 | Route | Shows |
 |---|---|
 | `/` | Signed out: the public landing page (`/welcome`), which `apps/web/src/proxy.ts` serves at `/` by a rewrite. Signed in: the Projects of every Organization the User is a Member of, oldest first, 20 per page, each with its Organization's name and its slug. A User with no Projects sees how to create one with `hivemind init` ([docs/cli.md](cli.md)). |
-| `/projects/[projectId]` | Active Plans with Task progress (20 per page); overlap warnings (advisory, up to 20); live Sessions (up to 20) with agent, status, owner, machine and branch, focus (Plan or Task), last heartbeat and declared Scope; recent ended or abandoned Sessions (20 per page). |
+| `/projects/[projectId]` | Active Plans with Task progress (20 per page); overlap warnings (advisory, up to 20); live Sessions (up to 20) with agent, status, owner, machine and branch, focus (Plan or Task), last heartbeat and declared Scope; recent ended or abandoned Sessions (20 per page); recent ADRs (the 5 published ADRs a sync changed most recently) and a link to the ADR list. |
 | `/projects/[projectId]/plans/[planKey]` | The Plan's status, progress, creator and owner; its body as sanitized markdown; its Tasks in order with their claim holders (20 per page); the Sessions attached to it; its activity (Events, 50 per page). `planKey` is the Plan's key, such as `PLAN-3`. |
 | `/projects/[projectId]/sessions/[sessionId]` | The Session's agent, intent, status, owner, machine, branch and commit, focus, start, last heartbeat and end; its end summary as sanitized markdown; its declared and touched Scope; its Event timeline (newest first, 50 per page). |
+| `/projects/[projectId]/adrs` | The ADR list: published ADRs with number (`ADR-0003`), title and status, highest number first (20 per page), filtered by `?status=`; numbers reserved with `hivemind adr new` and not in a synced commit yet, under "Reserved, not merged yet" (20 per page); ADRs a later sync no longer found, under "Removed from the repository" (shown only when there are some). |
+| `/projects/[projectId]/adrs/[number]` | One ADR: its status, date, file path, the commit its copy came from, and its reservation, if it was reserved; a note when a hand-numbered file took a number reserved for another ADR, which then needs a new number; the ADRs it supersedes and the ones that supersede it, each followed up to 10 links, with a number that has no synced file marked "not found"; the file after its frontmatter as sanitized markdown. `number` is `3`, `0003` or `ADR-0003`. |
+
+Every ADR page starts with what the copy is as of: "Copied from `docs/adr/` at commit `<sha7>`, synced `<time>` by `<User or Project key>`. The files in the repository are the source of truth." Before the first sync it says: "No ADRs synced yet. Run `hivemind adr sync` on the default branch." The ADR list's status filter is a row of plain links (All, Proposed, Accepted, Superseded, Deprecated) that set `?status=`; a value that is not an ADR status shows every status. Reservations have no status, so they are listed under any filter. An ADR's state (reserved, published, removed) is never shown as a status.
 
 A Session or Event started with a Project key is attributed to the key, never to the key's creator. Task progress, usable claims, effective Session status and overlaps come from M2's read functions in `@hivemind/db`, judged at the database time of the page's snapshot; the dashboard does not recompute them from timestamps. Lists are keyset-paged with opaque cursors in the URL's search parameters; a cursor that does not decode shows the first page.
 
@@ -21,7 +25,7 @@ Every page checks access itself, at request time, inside a Suspense boundary (AD
 
 - **Fresh login session.** `requireFreshLoginSession()` (`apps/web/src/server/login-session.ts`) looks the login session up in the database with better-auth's cookie cache disabled, so a revoked or expired login session is refused on the next navigation or refresh. Without one, the page redirects to `/sign-in` with a return path.
 - **Membership on every read.** The page's loader (`apps/web/src/server/dashboard/queries.ts`) first checks that the User is a current Member of the Project's Organization, inside the same transaction as the rest of the page's reads. `activeOrganizationId` is never consulted (ADR-0007).
-- **A foreign child is an absent child.** A Plan or Session is always looked up together with its Project. A child of another Project, an absent child, an absent Project and a Project the User cannot read all render the same not-found page.
+- **A foreign child is an absent child.** A Plan, Session or ADR is always looked up together with its Project. A child of another Project, an absent child, a malformed Plan key, Session id or ADR number, an absent Project and a Project the User cannot read all render the same not-found page.
 - No authenticated data is put in a shared cache.
 
 ## Initial render
@@ -38,7 +42,7 @@ One subscription runs per open Project (`createProjectEventStream` in `apps/web/
 
 The browser never renders Event content from the stream. An Event is only an invalidation:
 
-1. **Filter.** `apps/web/src/lib/project-event-filters.ts` decides whether the Event affects the current page. The overview counts every Event. A Plan page counts Events of the Plan, its Tasks and the Sessions it shows. A Session page counts Events that affected the Session or that it acted through, and Events of its Task. It shows only its Plan's key, which never changes, so `plan.*` Events do not refresh it. An Event type this build does not know, `event.unavailable` included, refreshes every page (see [Events the server cannot read](#events-the-server-cannot-read)).
+1. **Filter.** `apps/web/src/lib/project-event-filters.ts` decides whether the Event affects the current page. The overview counts every Event. A Plan page counts Events of the Plan, its Tasks and the Sessions it shows; `adr.*` Events change nothing on it. A Session page counts Events that affected the Session or that it acted through, and Events of its Task. It shows only its Plan's key, which never changes, so `plan.*` Events do not refresh it; an `adr.reserved` Event refreshes it only when the Session acted through it, since that Event is in its timeline. The ADR list counts every `adr.*` Event. An ADR page counts `adr.reserved` for its own number (`payload.number`) and every `adr.synced`: a sync's Event lists at most 100 changes, and an ADR added by the sync can supersede the page's ADR without the payload saying so. An Event type this build does not know, `event.unavailable` included, refreshes every page (see [Events the server cannot read](#events-the-server-cannot-read)).
 2. **Deduplicate.** The ids of the last 2048 Events are remembered, and a redelivered Event is dropped.
 3. **Record, then advance.** An accepted Event marks the page dirty, and only then does the cursor move to the Event's position. The cursor never moves backwards.
 4. **Refresh.** Dirty marks are coalesced into `router.refresh()`, which re-reads the page from the server through the same authorization and snapshot as the initial render. At most one refresh runs at a time. A dirty-generation counter records marks that arrive while a refresh is running, and they cause exactly one more refresh after it. A refresh that has not finished after 20 seconds is treated as done.
@@ -125,7 +129,7 @@ A corrupt Event (invalid metadata or payload version, or a stored payload over t
 
 ## Markdown and untrusted text
 
-Plan bodies, Plan log entries and Session end summaries are written by agents and Users, so they are untrusted. One server renderer, `SafeMarkdown` in `apps/web/src/server/dashboard/markdown.tsx`, renders all of them with react-markdown and remark-gfm:
+Plan bodies, Plan log entries, Session end summaries and ADR files are written by agents and Users, so they are untrusted. One server renderer, `SafeMarkdown` in `apps/web/src/server/dashboard/markdown.tsx`, renders all of them with react-markdown and remark-gfm:
 
 - Raw HTML in the source is dropped (`skipHtml`), never parsed.
 - The output is sanitized with rehype-sanitize using GitHub's schema without `img`, after every other step.
@@ -133,7 +137,9 @@ Plan bodies, Plan log entries and Session end summaries are written by agents an
 - Images are never loaded; each renders as `[image: alt text]`.
 - Headings are shifted down so a document's `#` does not compete with the page's headings.
 
-Labels, intents and Event text are not markdown. They render as plain React text, and Event text is built only from known payload fields of projected Events (`apps/web/src/server/dashboard/event-text.ts`), never by spreading a payload into HTML or props.
+An ADR page renders only the part of the file after its frontmatter (`parseAdrContent(...).adr.body` from `@hivemind/contract`); the status, date and supersedes list come from the stored copy and render as plain text. A later `---` block in the body is a rule and a heading, never metadata. Links between ADRs in the repository are relative (`[ADR-0004](0004-x.md)`), so under the rules above they render as plain text, not links; the page's supersedes and superseded-by links point to the other ADR pages instead. The ADR's title is plain text.
+
+Labels, intents, ADR titles and Event text are not markdown. They render as plain React text, and Event text is built only from known payload fields of projected Events (`apps/web/src/server/dashboard/event-text.ts`), never by spreading a payload into HTML or props.
 
 ## Known limitations
 
@@ -149,6 +155,7 @@ Labels, intents and Event text are not markdown. They render as plain React text
 - `packages/db/test/event-feed.test.ts`: the horizon with concurrent writers, the snapshot fence, rollback gaps, several batches, integers above `Number.MAX_SAFE_INTEGER`, and a seq-only cursor shown to lose an Event.
 - `packages/contract/test/event-stream.test.ts`: cursors, frames and bounds.
 - `apps/web/test/event-stream.test.ts`: both routes' statuses, access loss during a stream, resume, withheld delivery, rotation, abort while paused, slow consumers and cleanup.
-- `apps/web/test/project-event-stream.test.ts`: the browser engine's decoding, deduplication, refresh coalescing, reconnects and terminal states.
-- `apps/web/test/dashboard-queries.test.ts` and `apps/web/test/markdown.test.ts`: page reads, cross-Project children, attribution and hostile markdown.
+- `apps/web/test/project-event-stream.test.ts`: the browser engine's decoding, deduplication, refresh coalescing, reconnects and terminal states, and which Events refresh which page, ADR pages included.
+- `apps/web/test/project-live-registry.test.ts`: one stream across a Project's pages, its cursor when the page changes (from a Plan page to the ADR pages, for example), lost access and hidden layouts.
+- `apps/web/test/dashboard-queries.test.ts` and `apps/web/test/markdown.test.ts`: page reads, cross-Project children, attribution and hostile markdown. For ADRs: membership, malformed and foreign numbers, the status filter, reservations and removed ADRs listed apart, a taken reservation, supersedes chains with missing targets, cycles and the depth bound, the banner's last sync by a User or a Project key, the overview's recent ADRs, and ADR bodies with their frontmatter removed, hostile HTML dropped and relative links shown as text.
 - `apps/web/test/event-projection.test.ts`: the shared projection, with a pinned reader from before #14's `stolen` reason, unreadable details, corrupt rows and sanitized errors. The stream, page and browser tests above also cover Events a newer deployment wrote (ADR-0015).

@@ -1,3 +1,4 @@
+import { parseAdrContent } from "@hivemind/contract";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -175,6 +176,48 @@ describe("SafeMarkdown", () => {
     expect(html).not.toContain('class="status"');
   });
 
+  it("renders hostile ADR bodies inert, and relative ADR links as text", () => {
+    const contents = [
+      "---",
+      "status: accepted",
+      "date: 2026-10-01",
+      "---",
+      "",
+      "# Use <img src=x onerror=alert(1)>",
+      "",
+      "## Context",
+      "",
+      "<script>alert(1)</script>",
+      "",
+      '<img src="x" onerror="alert(1)">',
+      "",
+      "[x](javascript:alert(1)) and [ADR-0004](0004-x.md) and [up](../README.md)",
+      "",
+      "---",
+      "status: superseded",
+      "---",
+    ].join("\n");
+    // What the ADR page renders: the file after its frontmatter.
+    const parsed = parseAdrContent(contents);
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+    const html = render(parsed.adr.body);
+    expectInert(html);
+    expect(html).not.toContain("<a");
+    expect(html).not.toContain('href="0004-x.md"');
+    expect(html).not.toContain("../README.md");
+    expect(html).toContain("<span>ADR-0004</span>");
+    expect(html).toContain("<span>up</span>");
+    // The real frontmatter is not in the body; a later `---` block is a rule
+    // and a heading, never metadata.
+    expect(html).not.toContain("2026-10-01");
+    expect(html).toContain("<hr/>");
+    expect(html).toContain("<h4>status: superseded</h4>");
+    // The title as the page shows it: plain text.
+    expect(renderToStaticMarkup(createElement("h1", null, parsed.adr.title))).toBe(
+      "<h1>Use &lt;img src=x onerror=alert(1)&gt;</h1>",
+    );
+  });
+
   it("renders autolinked URLs only with allowed schemes", () => {
     const html = render("see https://example.com and www.example.org and javascript:alert(1)");
     expect(html).toContain('<a href="https://example.com/" rel="noopener noreferrer nofollow">');
@@ -239,6 +282,39 @@ describe("describeEvent", () => {
       text: "Event details unavailable",
       markdown: null,
     });
+  });
+
+  it("names ADRs by number, quotes a reserved title as text and counts a sync", () => {
+    const hostile = '<img src=x onerror="alert(1)">';
+    const reserved = describeEvent("adr.reserved", {
+      adrId: "00000000-0000-4000-8000-000000000000",
+      number: 17,
+      title: hostile,
+      slug: "x",
+      floor: 16,
+    });
+    expect(reserved).toEqual({ text: `Reserved ADR-0017 "${hostile}"`, markdown: null });
+    expect(renderToStaticMarkup(createElement("p", null, reserved.text))).toBe(
+      "<p>Reserved ADR-0017 &quot;&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&quot;</p>",
+    );
+    const synced = {
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      previousCommitSha: null,
+      forced: false,
+      added: 2,
+      updated: 1,
+      removed: 0,
+      changes: [],
+      truncated: false,
+    };
+    expect(describeEvent("adr.synced", synced).text).toBe(
+      "Synced ADRs at 0123456: 2 added, 1 updated, 0 removed",
+    );
+    expect(describeEvent("adr.synced", { ...synced, forced: true }).text).toBe(
+      "Synced ADRs at 0123456: 2 added, 1 updated, 0 removed (forced)",
+    );
+    expect(describeEvent("adr.reserved", { number: "17", title: 1 }).text).toBe("Reserved an ADR");
+    expect(describeEvent("adr.synced", null).text).toBe("Synced ADRs");
   });
 
   it("hands Plan log entries to the markdown renderer", () => {
