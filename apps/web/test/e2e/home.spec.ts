@@ -6,10 +6,14 @@ import { e2eDatabaseUrl } from "./e2e-env";
 import {
   type CoordinationApi,
   coordinationApi,
+  expectInert,
+  HOSTILE,
   organizationName,
+  PWNED_GLOBAL,
   personalOrganizationId,
   signedInPage,
   testUsers,
+  watchDialogs,
 } from "./support";
 
 // The signed-in home page, `/` (docs/dashboard.md → Home page), rendered from
@@ -219,4 +223,89 @@ test("a signed-out link to a home-page view goes to sign-in and keeps the view a
   await page.goto("/?view=plans");
   await expect(page).toHaveURL(`/sign-in?${new URLSearchParams({ returnTo: "/?view=plans" })}`);
   await expect(page.getByRole("button", { name: "Sign in with GitHub" })).toBeVisible();
+});
+
+test("hostile Session intents, Plan titles and decisions render as literal text on the home page", async ({
+  browser,
+}) => {
+  const { user, page } = await signedInPage(browser, users);
+  const dialogs = watchDialogs(page);
+  const api = await coordinationApi(users, user.id);
+  const organizationId = await personalOrganizationId(pool, user.id);
+  const project = await api.createProject(
+    organizationId,
+    `Hostile home ${randomUUID().slice(0, 6)}`,
+  );
+  const sessionId = await api.startSession(project.id, {
+    agent: "hostile-agent",
+    intent: HOSTILE.label,
+  });
+  const title = `**${HOSTILE.label}** [click me](javascript:alert(1))`;
+  const plan = await api.createPlan(project.id, { title, body: HOSTILE.markdown, sessionId });
+  const decision = `<script>window.${PWNED_GLOBAL}='decision'</script> _not italic_ [raw](javascript:alert(2))`;
+  await api.recordDecision(project.id, plan.key, decision, sessionId);
+  await api.appendLog(project.id, plan.key, HOSTILE.markdown, sessionId);
+
+  await page.goto("/");
+  const main = page.locator("main");
+  await expect(sessionsTable(page).getByRole("link", { name: HOSTILE.label })).toBeVisible();
+  await expect(plansTable(page).getByRole("link", { name: title })).toBeVisible();
+  await expect(
+    page.getByTestId("home-decisions").getByText(decision, { exact: true }),
+  ).toBeVisible();
+  // The markdown links are text inside the Plan's own link, never links.
+  await expect(main.getByRole("link", { name: "click me", exact: true })).toHaveCount(0);
+  await expect(main.getByRole("link", { name: "raw", exact: true })).toHaveCount(0);
+  await expectInert(main);
+
+  // The filter is shown as typed, in the heading and in the field.
+  await page.goto(`/?view=sessions&q=${encodeURIComponent(HOSTILE.label)}`);
+  await expect(page.locator(".home-meta")).toHaveText(
+    `1 active Session in all Projects matching “${HOSTILE.label}”.`,
+  );
+  await expect(page.getByRole("searchbox", { name: "Filter Plans and Sessions" })).toHaveValue(
+    HOSTILE.label,
+  );
+  await expect(sessionsTable(page).getByRole("link", { name: HOSTILE.label })).toBeVisible();
+  await expectInert(page.locator("main"));
+  expect(dialogs).toEqual([]);
+
+  await page.context().close();
+});
+
+test("the Sessions tabs move focus with the arrow keys and load a tab only when it is chosen", async ({
+  browser,
+}) => {
+  const { user, page } = await signedInPage(browser, users);
+  const api = await coordinationApi(users, user.id);
+  const organizationId = await personalOrganizationId(pool, user.id);
+  await seedTwoProjects(api, organizationId);
+
+  await page.goto("/");
+  const tabs = page.getByRole("tablist", { name: "Session status" });
+  const active = tabs.getByRole("tab", { name: /^Active/ });
+  const ended = tabs.getByRole("tab", { name: /^Ended/ });
+  await expect(active).toHaveAttribute("aria-selected", "true");
+  // The tab reads its count after a separator ("Active, 2", where the
+  // browser may add a space before the comma: the chip is a flex item), and
+  // controls the table's panel.
+  await expect(active).toHaveAccessibleName(/^Active ?, 2$/);
+  await expect(active).toHaveAttribute("aria-controls", "home-sessions-panel");
+
+  await active.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(ended).toBeFocused();
+  await expect(active).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL("/");
+
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL("/?sessions=ended");
+  await expect(ended).toHaveAttribute("aria-selected", "true");
+  const endedId = await ended.getAttribute("id");
+  await expect(page.locator("#home-sessions-panel")).toHaveAttribute(
+    "aria-labelledby",
+    endedId ?? "",
+  );
+
+  await page.context().close();
 });
