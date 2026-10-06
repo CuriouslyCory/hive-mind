@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { chmod, mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   ADR_DIRECTORY,
@@ -36,6 +36,8 @@ import { findProjectConfig } from "./project-resolution.ts";
 export interface AdrLocation {
   /** Absolute path of the ADR directory (it may not exist yet). */
   dir: string;
+  /** The directory `dir` is under: the applicable `.hivemind.json`'s, or the worktree root. */
+  base: string;
   /**
    * The ADR directory as a repository-relative POSIX path: `docs/adr`, or
    * `<sub>/docs/adr` when `.hivemind.json` is below the repository root.
@@ -80,6 +82,7 @@ export async function locateAdrs(
   if (outside) below = "";
   return {
     dir: join(base, ...ADR_DIRECTORY.split("/")),
+    base,
     directory: below === "" ? ADR_DIRECTORY : `${posix(below)}/${ADR_DIRECTORY}`,
     root: outside ? null : root,
     top: outside || root === null ? base : root,
@@ -363,11 +366,59 @@ export async function replaceFiles(
   return { replaced };
 }
 
-/** Creates the ADR directory (and its parents) if needed. */
+function isInside(parent: string, path: string): boolean {
+  const below = relative(parent, path);
+  return below === "" || (!below.startsWith("..") && !isAbsolute(below));
+}
+
+/**
+ * Refuses (IO_ERROR, as for a symlinked ADR file) when `docs`, `docs/adr` or
+ * any other existing part of the ADR directory resolves outside its base
+ * directory, so a symlink cannot make the write commands create or replace
+ * files elsewhere. A link that stays inside the base is followed. Parts that
+ * do not exist yet are fine: `mkdir` creates real directories.
+ */
+export async function assertAdrDirectoryInside(location: AdrLocation): Promise<void> {
+  let base: string;
+  try {
+    base = await realpath(location.base);
+  } catch (error) {
+    throw ioError(`Cannot resolve ${location.base}: ${(error as Error).message}`, error);
+  }
+  let path = location.base;
+  for (const part of relative(location.base, location.dir).split(sep)) {
+    path = join(path, part);
+    try {
+      await lstat(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw ioError(`Cannot read ${path}: ${(error as Error).message}`, error);
+    }
+    const target = await realpath(path).catch(() => null);
+    if (target === null || !isInside(base, target)) {
+      const refusal = new UnsafeFileError(
+        path,
+        target === null
+          ? `${path} is a symbolic link that leads nowhere, which hivemind does not follow when writing ADR files`
+          : `${path} is a symbolic link to ${target}, outside ${location.base}, which hivemind does not follow when writing ADR files`,
+        `Replace it with a real directory inside ${location.base}.`,
+      );
+      throw ioError(refusal.message, refusal, refusal.hint);
+    }
+  }
+}
+
+/**
+ * Creates the ADR directory (and its parents) if needed, after checking that
+ * no existing part of it leads outside its base directory, and checks again
+ * once it exists.
+ */
 export async function ensureAdrDirectory(location: AdrLocation): Promise<void> {
+  await assertAdrDirectoryInside(location);
   try {
     await mkdir(location.dir, { recursive: true });
   } catch (error) {
     throw ioError(`Cannot create ${location.dir}: ${(error as Error).message}`, error);
   }
+  await assertAdrDirectoryInside(location);
 }

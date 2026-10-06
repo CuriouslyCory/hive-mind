@@ -11,6 +11,7 @@ import {
   MAX_ADR_CONTENT_BATCH_FILES,
   MAX_ADR_FILE_BYTES,
   MAX_ADR_NUMBER,
+  MAX_ADR_SYNC_ENTRIES,
   MAX_ADR_UPLOAD_BODY_BYTES,
   MAX_PAGE_LIMIT,
   MIN_ADR_NUMBER,
@@ -29,6 +30,7 @@ import {
   type AdrNotice,
   type AdrSource,
   adrInvalidError,
+  assertAdrDirectoryInside,
   boundedWarnings,
   checkAdrSet,
   duplicateNumbersError,
@@ -156,6 +158,13 @@ async function localAdrs(context: CommandContext): Promise<AdrLocation> {
   return location;
 }
 
+/** `localAdrs` for the commands that write: refuses an ADR directory that a symlink leads outside its base. */
+async function writableAdrs(context: CommandContext): Promise<AdrLocation> {
+  const location = await localAdrs(context);
+  await assertAdrDirectoryInside(location);
+  return location;
+}
+
 /** The one local file with `number`: NOT_FOUND without one, CONFLICT with several. */
 async function oneLocalFile(
   location: AdrLocation,
@@ -276,6 +285,9 @@ export const adrNew: CommandDefinition = {
     const sessionId = optionalSessionOf(context);
     const location = (await locateAdrs(context, { binding: true })) as AdrLocation;
     const projectId = location.projectId as string;
+    // Checked before reserving, so a directory the file could not be written
+    // to does not use up a number.
+    await assertAdrDirectoryInside(location);
     const floor = await adrFloor(context, location);
     const { branch } = await gitMetadata(context.cwd, context.env);
     const api = await context.api();
@@ -527,7 +539,7 @@ export const adrStatus: CommandDefinition = {
       throw usageError("Use 'hivemind adr supersede <old> --by <new>' to mark an ADR superseded.");
     }
     const status = choiceOf(target, SETTABLE_STATUSES, "<status>");
-    const location = await localAdrs(context);
+    const location = await writableAdrs(context);
     const display = await pathDisplay(context.cwd);
     const file = await oneLocalFile(location, number, display);
     const bytes = await readLocalAdr(file);
@@ -600,7 +612,7 @@ export const adrSupersede: CommandDefinition = {
     const oldName = adrName(oldNumber);
     const newName = adrName(newNumber);
     if (oldNumber === newNumber) throw usageError(`${oldName} cannot supersede itself.`);
-    const location = await localAdrs(context);
+    const location = await writableAdrs(context);
     const display = await pathDisplay(context.cwd);
 
     // The graph check needs every ADR, so every file must parse.
@@ -1142,6 +1154,15 @@ export const adrSync: CommandDefinition = {
         "Fix them on the default branch, then sync again.",
       );
     }
+    // The manifest is one request with a bounded entry list; refuse here,
+    // before anything is uploaded, rather than after every upload.
+    if (check.adrs.length > MAX_ADR_SYNC_ENTRIES) {
+      throw new CliError(
+        "BAD_REQUEST",
+        `ADR sync refused: commit ${short(commitSha)} has ${check.adrs.length} ADR files in ${location.directory}/; one sync takes at most ${MAX_ADR_SYNC_ENTRIES}.`,
+        { hint: "Nothing was sent." },
+      );
+    }
 
     const api = await context.api();
     const { base, items } = await readCopy(api, projectId);
@@ -1155,21 +1176,19 @@ export const adrSync: CommandDefinition = {
       ...noChanges(),
       ...rest,
     });
+    const upToDate = (copyAt: string | null) => ({
+      data: result("up_to_date", { baseCommitSha: copyAt }),
+      human: [`Already synced at commit ${short(commitSha)}.`],
+    });
+    const syncedPast = (copyAt: string) => ({
+      data: result("already_synced_past", { baseCommitSha: copyAt }),
+      human: [
+        `Already synced past this commit: the copy is at ${short(copyAt)}, which contains ${short(commitSha)}.`,
+      ],
+    });
     const position = await compareWithCopy(context, root, base, commitSha, force);
-    if (position === "up_to_date") {
-      return {
-        data: result("up_to_date"),
-        human: [`Already synced at commit ${short(commitSha)}.`],
-      };
-    }
-    if (position === "already_synced_past") {
-      return {
-        data: result("already_synced_past"),
-        human: [
-          `Already synced past this commit: the copy is at ${short(base ?? "")}, which contains ${short(commitSha)}.`,
-        ],
-      };
-    }
+    if (position === "up_to_date") return upToDate(base);
+    if (position === "already_synced_past") return syncedPast(base ?? "");
 
     if (dryRun) {
       const data = result("dry_run", {
@@ -1232,10 +1251,33 @@ export const adrSync: CommandDefinition = {
     } catch (error) {
       if (!isCliError(error)) throw error;
       if (error.code === "CONFLICT") {
-        throw new CliError(error.code, error.message, {
-          hint: "Another ADR sync finished first; run 'hivemind adr sync' again.",
-          cause: error,
-        });
+        // Another sync may have finished after this run read the copy (two CI
+        // jobs finishing out of order). Read the copy once more: at this
+        // commit with these files, or at a descendant of it, there is nothing
+        // to do. Otherwise the CONFLICT stands, with a hint for what the copy
+        // is now; nothing is retried here.
+        const now = await readCopy(api, projectId).catch(() => null);
+        let hint: string | undefined;
+        if (now === null) {
+          hint = "Run 'hivemind adr sync' again; it reads the copy afresh.";
+        } else if (now.base === commitSha) {
+          if (plannedChanges(check.adrs, now.items).changes.length === 0) {
+            return upToDate(now.base);
+          }
+          // The server refuses a second, different manifest for one commit
+          // (--force included); only a later commit replaces it.
+          hint = `hive-mind's copy of commit ${short(commitSha)} has different files than this run read from ${location.directory}/. Sync a later commit of the default branch to replace it; --force does not.`;
+        } else if (now.base !== base) {
+          if (
+            !force &&
+            now.base !== null &&
+            (await gitIsAncestor(root, context.env, commitSha, now.base)) === true
+          ) {
+            return syncedPast(now.base);
+          }
+          hint = "Another ADR sync finished first; run 'hivemind adr sync' again.";
+        }
+        throw new CliError(error.code, error.message, { hint, cause: error });
       }
       if (isUncertainOutcome(error)) {
         throw new CliError(error.code, error.message, {

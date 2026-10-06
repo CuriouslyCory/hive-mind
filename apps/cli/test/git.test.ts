@@ -1,12 +1,25 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAX_COLLECTION_PATHS } from "@hivemind/contract";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   collectTouchedPaths,
+  gitHasCommit,
+  gitIsAncestor,
   gitMetadata,
+  gitReadBlob,
   gitWorktreeRoot,
   parsePorcelainZ,
   selectTouchedPaths,
@@ -177,5 +190,59 @@ describe("parsePorcelainZ and selectTouchedPaths", () => {
 
   it("lists an untracked nested repository as its directory", () => {
     expect(parsePorcelainZ(bytes("?? vendor/lib/\0")).paths).toEqual(["vendor/lib"]);
+  });
+});
+
+describe("commit reads for ADR sync", () => {
+  /** A `git` that answers yes to everything and logs each argument on its own line. */
+  function yesGit(): { env: { PATH: string; HOME: string }; argv: () => string[] } {
+    const bin = join(scratch, `yes-git-${counter++}`);
+    mkdirSync(bin);
+    const log = join(bin, "argv.log");
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nfor arg in "$@"; do printf '%s\\n' "$arg" >> ${JSON.stringify(log)}; done\nexit 0\n`,
+    );
+    chmodSync(join(bin, "git"), 0o755);
+    return {
+      env: { PATH: bin, HOME: scratch },
+      argv: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []),
+    };
+  }
+
+  it("never passes a revision or object id starting with - to git as an option", async () => {
+    const fake = yesGit();
+    const a = "a".repeat(40);
+    const b = "b".repeat(64);
+    expect(await gitIsAncestor(scratch, fake.env, "--output=x", a)).toBeNull();
+    expect(await gitIsAncestor(scratch, fake.env, a, "-x")).toBeNull();
+    expect(await gitHasCommit(scratch, fake.env, "--all")).toBe(false);
+    expect((await gitReadBlob(scratch, fake.env, "--batch", 10)).ok).toBe(false);
+    expect(fake.argv()).not.toContain("--output=x");
+    expect(fake.argv()).not.toContain("-x");
+    expect(fake.argv()).not.toContain("--all");
+    expect(fake.argv()).not.toContain("--batch");
+
+    // Full hashes reach git after --end-of-options.
+    expect(await gitIsAncestor(scratch, fake.env, a, b)).toBe(true);
+    expect(fake.argv().slice(-5)).toEqual([
+      "merge-base",
+      "--is-ancestor",
+      "--end-of-options",
+      a,
+      b,
+    ]);
+  });
+
+  it("answers ancestry from a real repository", async () => {
+    const root = repo();
+    const first = git(root, "rev-parse", "HEAD").trim();
+    git(root, "commit", "-q", "--allow-empty", "-m", "second");
+    const second = git(root, "rev-parse", "HEAD").trim();
+    expect(await gitIsAncestor(root, env, first, second)).toBe(true);
+    expect(await gitIsAncestor(root, env, second, first)).toBe(false);
+    expect(await gitIsAncestor(root, env, "c".repeat(40), first)).toBeNull();
+    expect(await gitHasCommit(root, env, second)).toBe(true);
+    expect(await gitHasCommit(root, env, "c".repeat(40))).toBe(false);
   });
 });

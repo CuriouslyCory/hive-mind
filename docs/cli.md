@@ -561,6 +561,7 @@ hivemind adr show ADR-0018
 - **The floor.** The CLI also sends the highest ADR number in the local `docs/adr/` and in `origin/HEAD`'s tree, and hive-mind reserves a number above it. A floor more than 100 past the next number hive-mind would reserve is refused with `CONFLICT`, so in a repository whose ADR numbers already go past 100, run `adr sync` before the first `adr new`.
 - **No overwrite.** An identical existing file (a rerun) counts as success, with `file.status: "unchanged"`. A different file at that path, or another local file with the number, is `CONFLICT` (exit 2) and left as it is; the error names the `--id` to rerun with once it is moved aside.
 - **No offline fallback.** If hive-mind cannot be reached, `adr new` fails. It never takes the local highest number + 1.
+- **Symlinks.** If `docs`, `docs/adr` or another part of the ADR directory is a symbolic link that leads outside the directory holding `.hivemind.json`, `adr new` fails with `IO_ERROR` (exit 1) before it reserves a number, and writes nothing. A link that stays inside is followed.
 - A lost answer is retried with `--id`; see [Lost answers and retries](#lost-answers-and-retries).
 
 ### `adr status` and `adr supersede`
@@ -569,7 +570,7 @@ Both commands edit local files only and make no server call. A change on the ser
 
 - **`adr status <adr> <status>`** rewrites `status` and `date` (today) in the frontmatter and keeps the rest of the file byte for byte. The current status is a no-op (`changed: false`, date kept). `superseded` is `USAGE_ERROR`: use `adr supersede`.
 - **`adr supersede <old> --by <new>`** adds `<old>` to `<new>`'s `supersedes` list (`<new>`'s date is unchanged), then sets `<old>` to `superseded` with today's date. It first parses every local ADR file. It refuses with `CONFLICT` (exit 2) when `<new>` is itself superseded, when another ADR already supersedes `<old>`, or when the change would make a supersedes cycle. Both files are written to temporary files before either is renamed, `<new>` first, so a rerun after an interruption finishes the job. Running it again when both files are already done is a no-op.
-- Errors: no local file with the number is `NOT_FOUND` (exit 4); more than one is `CONFLICT`; a file the parser rejects is `ADR_INVALID` (exit 1), with each problem listed as `<path>: <CODE>: <message>`.
+- Errors: no local file with the number is `NOT_FOUND` (exit 4); more than one is `CONFLICT`; a file the parser rejects is `ADR_INVALID` (exit 1), with each problem listed as `<path>: <CODE>: <message>`. A symlinked ADR file, or an ADR directory that a symbolic link leads outside its base directory (as for `adr new`), is `IO_ERROR` (exit 1), and nothing is written.
 
 ### `adr sync`
 
@@ -588,7 +589,7 @@ Both commands edit local files only and make no server call. A change on the ser
   | on another line of history | `CONFLICT`: if the default branch was force-pushed, rerun with `--force` |
 
   `--force` skips these checks, so it can also sync an older commit; use it only after a force-push. The `adr.synced` Event records that the sync was forced.
-- **Two phases.** First the CLI uploads the content of each file the copy does not have yet, in batches. Then it sends the manifest: the commit, the commit it expects hive-mind to have synced last, and each file's name and sha256. hive-mind applies the manifest in one transaction: it updates the copy, marks ADRs missing from the commit `removed` (never deleted), moves the number counter past the highest synced number and writes one `adr.synced` Event. If another sync finished in between, it answers `CONFLICT`; run `adr sync` again. An interrupted sync applies nothing, and a rerun uploads only what is still missing.
+- **Two phases.** First the CLI uploads the content of each file the copy does not have yet, in batches. Then it sends the manifest: the commit, the commit it expects hive-mind to have synced last, and each file's name and sha256. hive-mind applies the manifest in one transaction: it updates the copy, marks ADRs missing from the commit `removed` (never deleted), moves the number counter past the highest synced number and writes one `adr.synced` Event. If another sync finished in between, it answers `CONFLICT`, and the CLI reads the copy once more (it never retries the sync): a copy now at this commit with the same files is `Already synced at commit <sha7>.` and a copy at a descendant (without `--force`) is `Already synced past this commit: …`, both exit 0. Otherwise the `CONFLICT` stands (exit 2) with the hint to run `adr sync` again. If the copy already holds this commit with different files (for example synced from another ADR directory), the hint says so: neither a rerun nor `--force` replaces a synced commit, so sync a later commit. An interrupted sync applies nothing, and a rerun uploads only what is still missing.
 - **A file that takes a reserved number.** If a file that bypassed `adr new` uses a number reserved for another ADR, the file keeps the number. The sync prints a warning, and `adr show` and the dashboard say the reserved ADR needs a new number: reserve one for it with `adr new`.
 - **`--dry-run`** reads the copy and prints the changes the sync would make, then `Nothing was sent.` It needs a credential and runs the same checks.
 - **`--check`** parses the working tree's `docs/adr/` instead of a commit, makes no server call and needs no credential or `.hivemind.json`. It cannot be combined with `--ref`, `--force` or `--dry-run`. See [Checking ADRs in pull requests](#checking-adrs-in-pull-requests).
@@ -684,7 +685,7 @@ Checked 17 ADR files in docs/adr/: no errors, 0 warnings.
 | Upload request (`.../adrs/contents` and `.../adrs/sync`) | 256 KiB; every other `/api/v1` request stays at 16 KiB. The CLI splits uploads into requests of at most 50 files that fit |
 | `supersedes` | 64 numbers per ADR |
 
-A file over the size limit, or with a title over 200 characters, fails the parser, so `adr sync` and `adr sync --check` report it as `ADR_INVALID`. hive-mind checks the `supersedes` limit when the content is uploaded, and `adr sync` then fails with `ADR_INVALID` before anything is synced. A commit with more than 1,000 ADR files is refused with `BAD_REQUEST` (exit 1).
+A file over the size limit, or with a title over 200 characters, fails the parser, so `adr sync` and `adr sync --check` report it as `ADR_INVALID`. hive-mind checks the `supersedes` limit when the content is uploaded, and `adr sync` then fails with `ADR_INVALID` before anything is synced. A commit with more than 1,000 ADR files is refused with `BAD_REQUEST` (exit 1) before anything is uploaded.
 
 ## Command reference
 

@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +16,7 @@ import {
   anyCliEnvelopeSchema,
   exitCodeForEnvelope,
   MAX_ADR_FILE_BYTES,
+  MAX_ADR_SYNC_ENTRIES,
   MAX_ADR_UPLOAD_BODY_BYTES,
   parseAdrContent,
   renderAdrTemplate,
@@ -638,6 +640,110 @@ describe("adr supersede", () => {
 
 // ---------------------------------------------------------------------------
 
+describe("symlinks in the ADR directory", () => {
+  /** A directory outside every repository, holding copies of `files` (names relative to it). */
+  function outsideDir(files: Record<string, string>): string {
+    const dir = join(scratch, `outside-${randomUUID()}`);
+    mkdirSync(dir, { recursive: true });
+    fixture.write(dir, files);
+    return dir;
+  }
+  const listing = (dir: string) =>
+    readdirSync(dir)
+      .sort()
+      .map((name) => [name, read(join(dir, name))]);
+
+  it("adr new refuses a docs/adr or docs that leads outside, before reserving a number", async () => {
+    const repos = repo();
+    const outside = outsideDir({ "0001-a.md": adrText("A") });
+    const before = listing(outside);
+    rmSync(join(repos.work, "docs/adr"), { recursive: true });
+    symlinkSync(outside, join(repos.work, "docs/adr"));
+    const refused = await json(["adr", "new", "--title", "Elsewhere"], { cwd: repos.work });
+    expect(refused.code).toBe(1);
+    expect(refused.error?.code).toBe("IO_ERROR");
+    expect(refused.error?.message).toContain("symbolic link");
+    expect(refused.error?.message).toContain(outside);
+    expect(listing(outside)).toEqual(before);
+    expect(posts("/adrs")).toHaveLength(0);
+
+    // `docs` itself: mkdir -p would create adr/ in the link's target.
+    const bare = repo({});
+    const docs = outsideDir({});
+    rmSync(join(bare.work, "docs"), { recursive: true, force: true });
+    symlinkSync(docs, join(bare.work, "docs"));
+    const viaDocs = await json(["adr", "new", "--title", "Elsewhere"], { cwd: bare.work });
+    expect(viaDocs.code).toBe(1);
+    expect(viaDocs.error?.code).toBe("IO_ERROR");
+    expect(readdirSync(docs)).toEqual([]);
+    expect(posts("/adrs")).toHaveLength(0);
+  });
+
+  it("adr status and adr supersede refuse a docs/adr that leads outside, and leave it unchanged", async () => {
+    const outside = outsideDir({
+      "0002-b.md": adrText("B"),
+      "0004-d.md": adrText("D", { status: "proposed" }),
+    });
+    const before = listing(outside);
+    const dir = unboundRepo({});
+    mkdirSync(join(dir, "docs"));
+    symlinkSync(outside, join(dir, "docs/adr"));
+    for (const argv of [
+      ["adr", "status", "2", "deprecated"],
+      ["adr", "supersede", "2", "--by", "4"],
+    ]) {
+      const refused = await json(argv, { cwd: dir });
+      expect(refused.code, argv.join(" ")).toBe(1);
+      expect(refused.error?.code).toBe("IO_ERROR");
+      expect(refused.error?.message).toContain("symbolic link");
+    }
+    expect(listing(outside)).toEqual(before);
+  });
+
+  it("follows a docs/adr link that stays inside the repository", async () => {
+    const dir = unboundRepo({ "adrs/0002-b.md": adrText("B", { status: "proposed" }) });
+    mkdirSync(join(dir, "docs"));
+    symlinkSync(join(dir, "adrs"), join(dir, "docs/adr"));
+    const changed = await json(["adr", "status", "2", "accepted"], { cwd: dir });
+    expect(changed.code, changed.stderr).toBe(0);
+    expect(read(join(dir, "adrs/0002-b.md"))).toContain("status: accepted");
+  });
+
+  it("adr status and adr supersede refuse a symlinked ADR file, and leave its target unchanged", async () => {
+    const outside = outsideDir({ "target.md": adrText("B") });
+    const target = join(outside, "target.md");
+    const dir = unboundRepo({ "docs/adr/0004-d.md": adrText("D", { status: "proposed" }) });
+    symlinkSync(target, join(dir, "docs/adr/0002-b.md"));
+    for (const argv of [
+      ["adr", "status", "2", "deprecated"],
+      ["adr", "supersede", "2", "--by", "4"],
+    ]) {
+      const refused = await json(argv, { cwd: dir });
+      expect(refused.code, argv.join(" ")).toBe(1);
+      expect(refused.error?.code).toBe("IO_ERROR");
+      expect(refused.error?.message).toContain("symbolic link");
+    }
+    expect(read(target)).toBe(adrText("B"));
+    expect(read(join(dir, "docs/adr/0004-d.md"))).toBe(adrText("D", { status: "proposed" }));
+  });
+
+  it("adr sync reports a committed symlink as not a file and never follows it", async () => {
+    const repos = repo();
+    symlinkSync("0001-a.md", join(repos.seed, "docs/adr/0005-x.md"));
+    fixture.commit(repos.seed, {});
+    expect(fixture.git(repos.seed, "ls-tree", "HEAD", "docs/adr/0005-x.md")).toMatch(/^120000 /);
+    fixture.git(repos.seed, "push", "-q", "origin", "main");
+    fixture.git(repos.work, "fetch", "-q", "origin");
+    const refused = await json(["adr", "sync"], { cwd: repos.work });
+    expect(refused.code).toBe(1);
+    expect(refused.error?.code).toBe("ADR_INVALID");
+    expect(refused.error?.message).toContain("docs/adr/0005-x.md: ADR_NOT_A_FILE");
+    expect(adrRequests()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe("adr sync", () => {
   const syncBody = () => bodyOf(posts("/adrs/sync").at(-1));
   const fileNames = () =>
@@ -804,6 +910,35 @@ describe("adr sync", () => {
     expect(api.requests.slice(before).every((request) => request.method === "GET")).toBe(true);
   });
 
+  it("--force --ref <older commit> moves the copy back to it, and says forced", async () => {
+    const repos = repo();
+    const c1 = fixture.commit(repos.seed, { "docs/adr/0004-d.md": adrText("D") });
+    const c2 = fixture.commit(repos.seed, { "docs/adr/0005-e.md": adrText("E") });
+    fixture.git(repos.seed, "push", "-q", "origin", "main");
+    fixture.git(repos.work, "fetch", "-q", "origin");
+    expect((await json(["adr", "sync", "--ref", c2], { cwd: repos.work })).code).toBe(0);
+    const forced = await json(["adr", "sync", "--force", "--ref", c1], { cwd: repos.work });
+    expect(forced.code, forced.stderr).toBe(0);
+    expect(forced.data).toMatchObject({
+      outcome: "synced",
+      forced: true,
+      commitSha: c1,
+      baseCommitSha: c2,
+      removed: 1,
+      changes: [{ number: 5, change: "removed" }],
+    });
+    expect(syncBody()).toMatchObject({ commitSha: c1, baseCommitSha: c2, forced: true });
+    expect(api.coordination.adrs.syncs.get(project.id)?.commitSha).toBe(c1);
+    expect(api.coordination.adrs.rows.get(project.id)?.get(5)?.state).toBe("removed");
+
+    // Compare-and-set still applies: the human run reads the copy at c1.
+    const back = await run(["adr", "sync", "--force", "--ref", c2], { cwd: repos.work });
+    expect(back.code, back.stderr).toBe(0);
+    expect(back.stdout.split("\n")[0]).toBe(
+      `Synced commit ${c2.slice(0, 7)} (was ${c1.slice(0, 7)}) (forced): 1 added, 0 updated, 0 removed, 4 unchanged.`,
+    );
+  });
+
   it("says to fetch the full history in a shallow clone", async () => {
     const repos = repo();
     await json(["adr", "sync"], { cwd: repos.work });
@@ -963,24 +1098,146 @@ describe("adr sync", () => {
     expect(api.requests.slice(before).every((request) => request.method === "GET")).toBe(true);
   });
 
-  it("adds a rerun hint when another sync finished first", async () => {
+  /** A fetch that runs `before` when `adr sync` sends its final POST, then forwards it. */
+  const onSyncPost =
+    (before: () => void | Promise<void>) =>
+    async (input: URL | Request | string, init?: RequestInit) => {
+      if (init?.method === "POST" && String(input).endsWith("/adrs/sync")) await before();
+      return globalThis.fetch(input, init);
+    };
+  const syncedBy = () => ({ kind: "user" as const, userId: randomUUID() });
+
+  it("exits 0 when a sync of a later commit lands between reading the copy and syncing", async () => {
     const repos = repo();
+    const c1 = fixture.commit(repos.seed, { "docs/adr/0004-d.md": adrText("D") });
+    const c2 = fixture.commit(repos.seed, { "docs/adr/0005-e.md": adrText("E") });
+    fixture.git(repos.seed, "push", "-q", "origin", "main");
+    fixture.git(repos.work, "fetch", "-q", "origin");
+    // The CI job for c2 finishes while this one (for c1) is uploading.
+    const racing = onSyncPost(() => {
+      api.coordination.adrs.syncs.set(project.id, {
+        commitSha: c2,
+        syncedAt: new Date().toISOString(),
+        syncedBy: syncedBy(),
+        manifest: "[]",
+      });
+    });
+    const result = await json(["adr", "sync", "--ref", c1], { cwd: repos.work, fetch: racing });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.data).toMatchObject({
+      outcome: "already_synced_past",
+      commitSha: c1,
+      baseCommitSha: c2,
+    });
+    expect(posts("/adrs/sync")).toHaveLength(1);
+
+    api.coordination.adrs.syncs.delete(project.id);
+    const human = await run(["adr", "sync", "--ref", c1], { cwd: repos.work, fetch: racing });
+    expect(human.code, human.stderr).toBe(0);
+    expect(human.stdout).toBe(
+      `Already synced past this commit: the copy is at ${c2.slice(0, 7)}, which contains ${c1.slice(0, 7)}.\n`,
+    );
+  });
+
+  it("exits 0 when a sync of the same commit and files lands in that window", async () => {
+    const repos = repo();
+    // The other job's sync is applied, and this one's answer is the CONFLICT
+    // it got before that sync committed.
     const racing = async (input: URL | Request | string, init?: RequestInit) => {
       if (init?.method === "POST" && String(input).endsWith("/adrs/sync")) {
-        api.coordination.adrs.syncs.set(project.id, {
-          commitSha: "f".repeat(40),
-          syncedAt: new Date().toISOString(),
-          syncedBy: { kind: "user", userId: randomUUID() },
-          manifest: "[]",
-        });
+        await globalThis.fetch(input, init);
+        return new Response(
+          JSON.stringify({
+            defined: true,
+            code: "CONFLICT",
+            status: 409,
+            message: "The ADR copy is at commit f, not no commit. Another ADR sync finished first.",
+          }),
+          { status: 409, headers: { "content-type": "application/json" } },
+        );
       }
       return globalThis.fetch(input, init);
     };
     const result = await json(["adr", "sync"], { cwd: repos.work, fetch: racing });
+    expect(result.code, result.stderr).toBe(0);
+    const head = repos.head(repos.work, "origin/HEAD");
+    expect(result.data).toMatchObject({
+      outcome: "up_to_date",
+      commitSha: head,
+      baseCommitSha: head,
+    });
+  });
+
+  it("keeps CONFLICT with a rerun hint when the sync that landed is not a descendant", async () => {
+    const repos = repo();
+    const racing = onSyncPost(() => {
+      api.coordination.adrs.syncs.set(project.id, {
+        commitSha: "f".repeat(40),
+        syncedAt: new Date().toISOString(),
+        syncedBy: syncedBy(),
+        manifest: "[]",
+      });
+    });
+    const result = await json(["adr", "sync"], { cwd: repos.work, fetch: racing });
     expect(result.code).toBe(2);
     expect(result.error?.message).toContain("Another ADR sync finished first");
     expect(result.error?.message).toContain("run 'hivemind adr sync' again");
+
+    // A commit this clone has, on another line of history.
+    api.coordination.adrs.syncs.delete(project.id);
+    fixture.git(repos.work, "switch", "-q", "--orphan", "side");
+    const side = fixture.commit(repos.work, { "docs/adr/0009-side.md": adrText("Side") });
+    fixture.git(repos.work, "switch", "-q", "main");
+    const sideways = onSyncPost(() => {
+      api.coordination.adrs.syncs.set(project.id, {
+        commitSha: side,
+        syncedAt: new Date().toISOString(),
+        syncedBy: syncedBy(),
+        manifest: "[]",
+      });
+    });
+    const human = await run(["adr", "sync"], { cwd: repos.work, fetch: sideways });
+    expect(human.code).toBe(2);
+    expect(human.stderr).toContain(
+      "Another ADR sync finished first; run 'hivemind adr sync' again.",
+    );
   });
+
+  it("says a later commit fixes a commit already synced with different files", async () => {
+    const repos = repo();
+    const head = repos.head(repos.work, "origin/HEAD");
+    const other = onSyncPost(() => {
+      api.coordination.adrs.syncs.set(project.id, {
+        commitSha: head,
+        syncedAt: new Date().toISOString(),
+        syncedBy: syncedBy(),
+        manifest: "[]",
+      });
+    });
+    const result = await json(["adr", "sync"], { cwd: repos.work, fetch: other });
+    expect(result.code).toBe(2);
+    expect(result.error?.message).toContain("was already synced with different files");
+    expect(result.error?.message).toContain("different files than this run read from docs/adr/");
+    expect(result.error?.message).toContain("Sync a later commit");
+    expect(result.error?.message).not.toContain("Another ADR sync finished first");
+  });
+
+  it("refuses more than the sync entry limit before uploading anything", async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: MAX_ADR_SYNC_ENTRIES + 1 }, (_, index) => [
+        `docs/adr/${String(index + 1).padStart(4, "0")}-a.md`,
+        adrText("Same"),
+      ]),
+    );
+    const repos = repo(files);
+    const result = await json(["adr", "sync"], { cwd: repos.work });
+    expect(result.code).toBe(1);
+    expect(result.error?.code).toBe("BAD_REQUEST");
+    expect(result.error?.message).toContain(
+      `has ${MAX_ADR_SYNC_ENTRIES + 1} ADR files in docs/adr/; one sync takes at most ${MAX_ADR_SYNC_ENTRIES}`,
+    );
+    expect(adrRequests()).toHaveLength(0);
+  }, 60_000);
 
   it("recovers from a lost answer by running again, with no --id", async () => {
     const repos = repo();

@@ -231,10 +231,14 @@ export async function collectTouchedPaths(cwd: string, env: Env): Promise<Touche
 // commit's tree and never the working tree, so unmerged branches and dirty
 // files cannot reach hive-mind's copy. Revisions come from the user (`--ref`)
 // and are passed after `--end-of-options`, so a value starting with `-` is a
-// revision, never an option.
+// revision, never an option. Helpers that take an object id check it is a
+// full hash before git runs.
 
 /** Enough for `git ls-tree` of a directory with tens of thousands of entries. */
 const MAX_TREE_BYTES = 32 * 1024 * 1024;
+
+/** A full lowercase object hash (SHA-1 or SHA-256), the only form these helpers pass as an id. */
+const isObjectId = (value: string) => gitCommitSchema.safeParse(value).success;
 
 /** The full hash of the commit `rev` names, or null when it names none. */
 export async function gitResolveCommit(cwd: string, env: Env, rev: string): Promise<string | null> {
@@ -248,14 +252,15 @@ export async function gitResolveCommit(cwd: string, env: Env, rev: string): Prom
 
 /** Whether this clone has the commit `hash` (a shallow clone or a fresh clone after a force-push may not). */
 export async function gitHasCommit(cwd: string, env: Env, hash: string): Promise<boolean> {
-  if (!gitCommitSchema.safeParse(hash).success) return false;
-  return (await runGit(["cat-file", "-e", `${hash}^{commit}`], { cwd, env })).ok;
+  if (!isObjectId(hash)) return false;
+  return (await runGit(["cat-file", "-e", "--end-of-options", `${hash}^{commit}`], { cwd, env }))
+    .ok;
 }
 
 /**
- * Whether `ancestor` is an ancestor of (or equal to) `descendant`: true or
- * false as git answers, null when git cannot tell (a missing commit, a
- * shallow history, git failing).
+ * Whether `ancestor` is an ancestor of (or equal to) `descendant`, both full
+ * hashes: true or false as git answers, null when git cannot tell (a missing
+ * commit, a shallow history, git failing) or either is not a full hash.
  */
 export async function gitIsAncestor(
   cwd: string,
@@ -263,7 +268,11 @@ export async function gitIsAncestor(
   ancestor: string,
   descendant: string,
 ): Promise<boolean | null> {
-  const result = await runGit(["merge-base", "--is-ancestor", ancestor, descendant], { cwd, env });
+  if (!isObjectId(ancestor) || !isObjectId(descendant)) return null;
+  const result = await runGit(
+    ["merge-base", "--is-ancestor", "--end-of-options", ancestor, descendant],
+    { cwd, env },
+  );
   if (result.ok) return true;
   return result.failure === "exit 1" ? false : null;
 }
@@ -323,13 +332,17 @@ export async function gitListTree(
 
 export type GitBlobResult = { ok: true; bytes: Buffer } | { ok: false; failure: string };
 
-/** A blob's exact bytes; a blob larger than `maxBytes` is a failure (`maxBuffer`), not a partial read. */
+/**
+ * A blob's exact bytes; a blob larger than `maxBytes` is a failure
+ * (`maxBuffer`), not a partial read. `oid` must be a full hash.
+ */
 export async function gitReadBlob(
   cwd: string,
   env: Env,
   oid: string,
   maxBytes: number,
 ): Promise<GitBlobResult> {
+  if (!isObjectId(oid)) return { ok: false, failure: "not an object id" };
   const result = await runGit(["cat-file", "blob", oid], { cwd, env, maxBytes });
   return result.ok
     ? { ok: true, bytes: result.stdout }
