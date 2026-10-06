@@ -2,52 +2,45 @@
 
 The HiveMind design system is the brand's colours, type, spacing and components, ported to typed React from a design-system file exported from Claude Design. Where it came from, what changed in the port and how the landing page is routed are in [ADR-0016](adr/0016-hivemind-design-system-and-landing-page.md); this page describes the code. Its identity comes from the logo: hexagonal cells, a navy ground and a honey-gold hub. Its three principles are **precise** (a 4px grid, tabular figures, real contrast), **warm** (navy and honey, never grey and blue) and **a little playful** (hexagons where others use circles, a honey glow where others use a shadow).
 
-The public pages use it (the landing page and sign-in, both framed by `SitePage`; see Site pages), and so does the signed-in home page, `/` (`apps/web/src/app/(app)/page.tsx` and `_home/`, its rules scoped under `.hm-home`; [ADR-0018](adr/0018-home-dashboard.md)). The Project pages and the dev tracker keep their own stylesheets (`apps/web/src/app/(app)/dashboard.css`, `tracker/tracker.css`) and are not affected by it. `dashboard.css` styles `body`, tables and a few class names globally, so the home page uses none of those class names, positions its root over the viewport as `SitePage` does, and restyles tables and focus at a higher specificity.
+It is the baseline theme of every page ([ADR-0019](adr/0019-design-system-as-baseline-theme.md)). The root layout loads its styles, and `<html>` is its root, with the fonts and the theme, so a page with no stylesheet of its own is already on the brand's surfaces, type, links, tables, form controls and focus ring. The public pages (the landing page, sign-in and the CLI's device approval page) are framed by `SitePage` (see Site pages); the signed-in pages (`/`, the Project pages and the dev tracker) by the app shell (see App shell). Each page's own stylesheet only lays out what is its own, scoped under the page's root class.
 
 ## Where it lives
 
 | Path | Contents |
 |---|---|
 | `apps/web/src/design-system/tokens.css` | Every token as a CSS custom property, with the light, dark and system themes (see Themes). |
+| `apps/web/src/design-system/base.css` | The baseline: element defaults for every page, in the `hm-base` cascade layer (see Using it on a page). |
 | `apps/web/src/design-system/components.css` | The component classes and the type scale classes, all prefixed `hm-`. |
-| `apps/web/src/design-system/styles.css` | Imports both, tokens first. |
-| `apps/web/src/design-system/fonts.ts` | The three faces via `next/font/local`, and `designSystemFontClassName`. |
+| `apps/web/src/design-system/styles.css` | Imports the three: tokens, then the baseline, then the components. The root layout (`apps/web/src/app/layout.tsx`) imports it. |
+| `apps/web/src/design-system/fonts.ts` | The three faces via `next/font/local`, and `designSystemFontClassName`, which the root layout puts on `<html>`. Not exported from `index.ts`, so importing the components does not load `next/font`. |
 | `apps/web/src/design-system/fonts/` | The vendored font files (woff2) and each family's OFL licence. |
 | `apps/web/src/design-system/index.ts` | The React components. There is no `@/` alias; import it by relative path. |
 | `apps/web/public/brand/` | The logo files: mark, wordmark and the square lockup, downscaled from the originals. |
 | `apps/web/src/app/icon.png`, `apple-icon.png` | The favicon and touch icon, from the mark (app-router metadata files). |
 | `apps/web/src/site/` | The frame of the public pages (see Site pages): `SitePage`, `SiteHeader`, `SiteFooter`, `ThemeSwitch`, the shared repository links and `site.css`. |
+| `apps/web/src/app/(app)/_shell/` | The frame of the signed-in pages (see App shell): `AppShell`, `AppNav`, `Viewer`, `Breadcrumb` and `app-shell.css`. |
 | `apps/web/test/design-system.test.ts` | The markup contracts (classes per variant, ARIA, link versus button), the keyboard and toggle rules, and the theme and hive card tokens with their contrast. |
+| `apps/web/test/page-styles.test.ts` | The stylesheet contract: the baseline is loaded once and layered, and every other stylesheet in the app is listed with its scope class and keeps every rule under it. |
+| `apps/web/test/app-shell.test.ts`, `site.test.ts` | The root layout's `<html>`, and the two frames' markup. |
 
 ## Using it on a page
 
-```tsx
-import "../../design-system/styles.css";
-import { Button, designSystemFontClassName, Logo } from "../../design-system";
+A page needs nothing to be on the design system: the root layout has already loaded it.
 
-export default function Page() {
-  return (
-    <div className={`hm-root ${designSystemFontClassName}`} data-theme="system">
-      <Logo loading="eager" />
-      <Button variant="primary" href="/sign-in">Sign in with GitHub</Button>
-    </div>
-  );
-}
-```
-
-- `designSystemFontClassName` loads Sora, Nunito Sans and JetBrains Mono, served from the app itself, for that page only and points `--font-display`, `--font-sans` and `--font-mono` at them. Without it the font tokens fall back to the system stacks in `tokens.css`. The fonts are never set on `<body>`.
-- `hm-root` sets the base text (Nunito Sans 15/22 in `ink` on `surface`), `box-sizing` for everything inside, and `color-scheme` from the theme, so form controls and scrollbars inside the element match it. It does not reach the viewport: the page's own scrollbar and the canvas around the element keep the browser's default scheme. Do not fix that with a `:root:has(.hm-root)` rule; Cache Components keeps a visited page mounted but hidden, so the rule would also apply on the dashboard.
-- A public page uses `SitePage` instead (next section), which does all of this for it.
-- Importing `tokens.css` declares its custom properties on `:root`. No stylesheet in `apps/web` outside the design system and the pages that opt into it declares or uses these names, so loading it changes nothing outside elements that use the `hm-` classes or the tokens.
+- `<html>` carries `hm-root`, `designSystemFontClassName` and `data-theme="system"`. `designSystemFontClassName` loads Sora, Nunito Sans and JetBrains Mono, served from the app itself, and points `--font-display`, `--font-sans` and `--font-mono` at them. `hm-root` sets the base text (Nunito Sans 15/22 in `ink` on `surface`) and `color-scheme` from the theme, so the canvas, scrollbars and native controls follow it.
+- `base.css` is the baseline for elements: `body` without margins, headings in Sora on the product's type scale, links in `ink` with a `line-strong` underline, inline code on a `surface-sunken` chip, `pre`, tables with label-style headers and hairline rows, the focus ring on everything focusable, honey selection, and native form controls. A `button`, `input`, `select` or `textarea` without a design-system class (no `hm-` in its class names) looks like the outline Button or the Input; the components style their own.
+- Every rule of `base.css` is in the `hm-base` cascade layer. Unlayered rules win over layered ones whatever their specificity, so a component class, a frame or a page's stylesheet overrides a default with a plain class selector, and a page can reset margins at zero specificity (`:where(.hm-my-page) :where(h1, p) { margin: 0; }`).
+- Use the components for anything they cover (Button, Badge, Alert, Input, Tabs, Card) rather than restyling raw elements, and the tokens for every colour, length and radius in a page's stylesheet.
+- Scope every rule of a page's stylesheet under its root class: global stylesheets stay loaded after client navigation, and Cache Components keeps a visited page mounted but hidden, so an unscoped rule reaches every page visited later. Only `base.css` styles elements unscoped, and nothing else styles `html` or `body`. `apps/web/test/page-styles.test.ts` lists every stylesheet outside the design system with its scope and fails on a rule outside it, or on a new stylesheet that is not listed.
 
 ### Site pages
 
-A public page renders `SitePage` from `apps/web/src/site` as its root. It imports the design system's styles, puts `hm-root`, `designSystemFontClassName` and `data-theme="system"` on its root element, and renders a skip link, the `header` it is given, `<main>` and the site footer (`SiteFooter`, the same on every page). The root covers the viewport whatever styles `<body>` has, so the page needs no rules on `html` or `body`.
+A public page renders `SitePage` from `apps/web/src/site` as its root. It renders a skip link, the `header` it is given, `<main>` and the site footer (`SiteFooter`, the same on every page), on `surface` and at least one screen tall.
 
 ```tsx
 import { Button } from "../../design-system";
 import { SiteHeader, SitePage, ThemeSwitch } from "../../site";
-// After the site import, so the page's rules come after the design system's.
+// After the site import, so the page's rules come after the frame's.
 import "./my-page.css";
 
 export default function Page() {
@@ -71,8 +64,17 @@ export default function Page() {
 - `mainId` is the id of `<main>` and the skip link's target. Give each page its own: Cache Components keeps a visited page mounted but hidden, so two pages' `<main>` can be in the document at once, and with a shared id the skip link would go to the hidden one.
 - `className` is the page's scope class. Scope every rule in the page's stylesheet under it (`.hm-landing`, `.hm-sign-in`), and the frame's under `.hm-site` (`site.css`): global stylesheets stay loaded after client navigation, so an unscoped rule reaches every page visited later.
 - `SiteHeader` takes `homeHref` (`/` by default, or an anchor such as `#top` on the home page itself), `nav` (links for the Primary navigation, hidden at 1024px and below) and, as children, the controls at its right end. On screens 720px wide or less and on touch screens those controls are 44px tall. A label too long for a 320px screen can wrap its spare words in `site-hide-sm` and keep the whole label as the control's `aria-label`.
-- `ThemeSwitch` sets `data-theme` on the nearest `hm-root` (the `SitePage` root, or the home page's), so the forced theme applies to the whole page. It is not kept across visits.
+- `ThemeSwitch` sets `data-theme` on `<html>` (see Themes).
 - `site-wrap` is the content column: at most 1200px wide with the page gutters, `space-12` and `space-4` at 720px and below.
+
+### App shell
+
+Every signed-in page is inside the app shell: the `(app)` route group's layout renders `AppShell` from `apps/web/src/app/(app)/_shell` around it. The shell renders a skip link, the top bar and the one `<main>` (`id="app-main"`), on `surface-sunken` so the pages' cards (`surface-raised`) stand out. The top bar holds the logo (a link to `/`), the Primary navigation (`AppNav`: the Dashboard, and the dev tracker under `next dev` only), the `ThemeSwitch` and the viewer (`Viewer`: the signed-in User's initial and name, and Sign out). Main is the content column: at most 1320px wide with gutters of `clamp(16px, 4vw, 48px)`.
+
+- The shell is static. The viewer reads the login session, so the layout renders it inside Suspense; it is the same fresh read as the page's own check, which React's per-request cache answers once. `AppNav` reads the pathname, so it is inside Suspense too, with the links and no current item as the fallback. Each page still checks the login session itself (ADR-0003).
+- A page renders no `<header>`, skip link or `<main>` of its own. It starts with a `Breadcrumb` (`items`: the pages above it as `{ label, href }`, then the current page as `{ label }`) and its `<h1>`. The Project pages do both through `ProjectHeading`: Dashboard, the Project, then the page.
+- The navigation marks the current page with `aria-current="page"` and the current section (the Dashboard's section is the Project pages) with `aria-current="true"`, with a tint and a honey edge, not colour alone.
+- Rules of the frame are scoped under `.app-shell` (`app-shell.css`), which also styles the loading, error and not-found states (`app-loading`, `app-message`). The pages scope theirs under their own root: `.hm-home`, `.hm-project` (the Project layout's root) and `.tracker`.
 
 ### Themes
 
@@ -85,7 +87,7 @@ Every colour token has a light and a dark value. The theme is chosen in CSS alon
 | `system` | The operating system's colour scheme (`prefers-color-scheme`), even inside a forced theme. |
 | none | Inherited. At the top, `:root` follows the operating system unless `<html>` has `data-theme="light"`. |
 
-A page that follows the system by default and offers a toggle renders `data-theme="system"` on its root, and the toggle (a `Switch`) replaces it with `light` or `dark`. To keep the reader's choice across visits it has to be read before the first paint, from a cookie on the server, for example; a choice applied only after hydration flashes the system theme first.
+The root layout renders `data-theme="system"` on `<html>`, so every page follows the operating system. `ThemeSwitch` (in a `SiteHeader` and in the app shell's top bar) replaces it with `light` or `dark`, which themes the whole document, canvas included, and holds on every page until a full reload; every mounted switch follows a change of `<html>`'s `data-theme`. The choice is not kept across visits. To keep it, it has to be read before the first paint, from a cookie on the server, for example; a choice applied only after hydration flashes the system theme first. A section can force a theme for itself with `data-theme` on its own element.
 
 The rules that differ only in the dark theme (the primary button's hover, the text of success and danger badges) are component tokens (`--hm-btn-primary-hover`, `--hm-badge-success-ink`, `--hm-badge-danger-ink`) set per theme in `tokens.css`, so they follow every row of the table.
 
@@ -179,10 +181,11 @@ The CSS also has the layout helpers `hm-row` and `hm-stack`.
 
 ADR-0016 records where the design system came from. The React components keep the original components' props, markup and classes, except:
 
-- Fonts are vendored and loaded with `next/font/local`, not a Google Fonts `@import` or `next/font/google` (see Fonts), and apply only under `designSystemFontClassName`. The font tokens are declared outside the theme blocks so a nested `data-theme` cannot reset them.
+- Fonts are vendored and loaded with `next/font/local`, not a Google Fonts `@import` or `next/font/google` (see Fonts), and apply under `designSystemFontClassName`, which is on `<html>`. The font tokens are declared outside the theme blocks so a nested `data-theme` cannot reset them.
 - The props match the original typed API, widened where React allows it (titles and labels take any node, HTML attributes pass through, `icon` takes any icon name). `Button` gained `href`; `Card` gained `headingLevel`; `Tabs` gained panels, `aria-controls`, roving focus and arrow keys, and its tablist wraps. `Alert` gained `live`, and `LogoLockup` gained `decorative`. `Input` uses `useId` instead of a module counter, so ids match between server and client.
 - The original `[data-theme="dark"] …` rules became component tokens (see Themes), `tokens.css` adds the `system` theme and the hive card's token overrides, and `components.css` the type scale classes.
 - `Alert` wraps non-string children in a `<div>` rather than a `<p>`, so block content is valid HTML. The inline styles on Alert's action and Cell's delta label became the classes `hm-alert-action` and `hm-cell-delta-label`.
 - Icons use the icon set's drawings rather than the component stylesheet's, so `info` and `alert` have the set's slightly larger hexagon frame and `spark` its second star.
 - `components.css` adds `a.hm-btn` (no underline), `hm-hex`, `hm-code`, the logo tile and the reduced-motion rules for transforms.
+- `base.css`, the element baseline, is not in the original ([ADR-0019](adr/0019-design-system-as-baseline-theme.md)).
 - Not built yet: a hexagon loading indicator ("tracer") for loading states and loading buttons.
