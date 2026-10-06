@@ -6,7 +6,6 @@ import { SiteFooter } from "../src/site/site-footer";
 import { SiteHeader } from "../src/site/site-header";
 import { SitePage, type SitePageProps } from "../src/site/site-page";
 
-
 // createElement's types want children among the props when they are
 // required; JSX callers pass them as the element's content.
 const Page = SitePage as (
