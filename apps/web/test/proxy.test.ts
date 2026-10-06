@@ -7,7 +7,9 @@ import {
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { config, proxy } from "../src/proxy";
-import { cursorParam, MAX_CURSOR_LENGTH } from "../src/server/dashboard/queries";
+import { homeHref, parseHomeParams } from "../src/server/dashboard/home-params";
+
+const PROJECT_ID = "0b6f2a2e-6a1d-4a43-9f43-3c3f4d1f2a10";
 
 // Next.js 16.3 documents `unstable_doesProxyMatch` but ships only the older
 // `unstable_doesMiddlewareMatch`, which applies the same matcher logic.
@@ -20,10 +22,15 @@ function showsLanding(url: string): boolean {
   return isRewrite(proxy(new NextRequest(url)));
 }
 
-/** `cursor` as the Projects page receives it in `searchParams`. */
-function pageCursor(url: string): string | string[] | undefined {
-  const values = new URL(url).searchParams.getAll("cursor");
-  return values.length > 1 ? values : values[0];
+/** The query as the home page receives it in `searchParams`. */
+function pageSearchParams(url: string): Record<string, string | string[]> {
+  const { searchParams } = new URL(url);
+  return Object.fromEntries(
+    [...new Set(searchParams.keys())].map((key) => {
+      const values = searchParams.getAll(key);
+      return [key, values.length > 1 ? values : (values[0] ?? "")];
+    }),
+  );
 }
 
 describe("proxy", () => {
@@ -34,51 +41,60 @@ describe("proxy", () => {
     expect(getRedirectUrl(response)).toBeNull();
   });
 
-  it("keeps a query that is not a Projects page on the landing page", () => {
+  it("keeps a query that names no home-page state on the landing page", () => {
     const response = proxy(new NextRequest("https://hive-mind.example/?utm_source=example"));
     expect(getRewrittenUrl(response)).toBe("https://hive-mind.example/welcome?utm_source=example");
     expect(getRedirectUrl(response)).toBeNull();
   });
 
-  it("sends a signed-out link to a Projects page to /sign-in, returning to it", () => {
-    const response = proxy(new NextRequest("https://hive-mind.example/?cursor=abc"));
+  it.each([
+    ["a Project", `/?project=${PROJECT_ID}`],
+    ["a filter", "/?q=auth"],
+    ["the Plans list", "/?view=plans"],
+    ["the Sessions list", "/?view=sessions"],
+    ["a Sessions tab", "/?sessions=ended"],
+    ["a Plans tab", "/?plans=paused"],
+    ["a range", "/?range=30d"],
+    ["a state next to tracking parameters", "/?utm_source=x&view=plans"],
+  ])("sends a signed-out link to %s to /sign-in, returning to it", (_name, path) => {
+    const response = proxy(new NextRequest(`https://hive-mind.example${path}`));
     expect(isRewrite(response)).toBe(false);
     expect(response.status).toBe(307);
     expect(getRedirectUrl(response)).toBe(
-      "https://hive-mind.example/sign-in?returnTo=%2F%3Fcursor%3Dabc",
+      `https://hive-mind.example/sign-in?returnTo=${encodeURIComponent(path)}`,
     );
   });
 
   it.each([
-    ["an empty cursor", "/?cursor="],
-    ["a cursor without a value", "/?cursor"],
-    ["a repeated cursor", "/?cursor=a&cursor=b"],
-    ["an over-long cursor", `/?cursor=${"a".repeat(MAX_CURSOR_LENGTH + 1)}`],
-  ])("shows the landing page for %s, which the Projects list ignores", (_name, path) => {
+    ["an old Projects list cursor", "/?cursor=abc"],
+    ["a Project that is not an id", "/?project=web"],
+    ["an empty filter", "/?q="],
+    ["a blank filter", "/?q=%20%20"],
+    ["an unknown view", "/?view=agents"],
+    ["the default view", "/?view=home"],
+    ["the default tabs and range", "/?sessions=active&plans=all&range=7d"],
+  ])("shows the landing page for %s, which the home page ignores", (_name, path) => {
     const url = `https://hive-mind.example${path}`;
     expect(showsLanding(url)).toBe(true);
-    expect(cursorParam(pageCursor(url))).toBeUndefined();
+    expect(homeHref(parseHomeParams(pageSearchParams(url)))).toBe("/");
   });
 
-  it("treats a cursor of the maximum length as a Projects page", () => {
-    const url = `https://hive-mind.example/?cursor=${"a".repeat(MAX_CURSOR_LENGTH)}`;
-    expect(showsLanding(url)).toBe(false);
-    expect(cursorParam(pageCursor(url))).toBeDefined();
-  });
-
-  it("agrees with the Projects list on which cursors name a page", () => {
+  it("agrees with the home page on which queries name a state", () => {
     for (const query of [
       "",
-      "?cursor=abc",
-      "?cursor=",
-      "?cursor=a&cursor=a",
-      "?utm_source=x&cursor=abc",
-      `?cursor=${"b".repeat(MAX_CURSOR_LENGTH)}`,
-      `?cursor=${"b".repeat(MAX_CURSOR_LENGTH + 1)}`,
-      "?cursor=%20",
+      "?view=plans",
+      "?view=plans&view=home",
+      "?view=home&view=plans",
+      "?q=a&q=",
+      `?q=${"b".repeat(200)}`,
+      `?project=${PROJECT_ID.toUpperCase()}`,
+      "?range=1y",
+      "?sessions=overlap",
     ]) {
       const url = `https://hive-mind.example/${query}`;
-      expect(showsLanding(url), query).toBe(cursorParam(pageCursor(url)) === undefined);
+      expect(showsLanding(url), query).toBe(
+        homeHref(parseHomeParams(pageSearchParams(url))) === "/",
+      );
     }
   });
 

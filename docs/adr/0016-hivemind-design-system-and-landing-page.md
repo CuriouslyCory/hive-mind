@@ -29,13 +29,14 @@ The landing page has to live at `/`, which is already the signed-in Projects lis
 
 - `apps/web/src/proxy.ts` rewrites a signed-out request for `/` to `/welcome`, so the URL stays `/`. `/welcome` is public and excluded from the proxy's matcher. The page reads no request data, so it prerenders, and a signed-in `/` is still the Projects list.
 - The exception is a `/` whose `cursor` the Projects list would use (one value, not empty, at most `MAX_CURSOR_LENGTH`, as `cursorParam` in `apps/web/src/server/dashboard/queries.ts` decides). That URL names a page of a signed-in list, so a signed-out visitor is redirected to `/sign-in` and returns to it, like any other signed-in page. A cursor the list would ignore, or any other query such as tracking parameters, still shows the landing page.
+- (Since [ADR-0017](0017-home-dashboard.md), a signed-in `/` is the home dashboard rather than the Projects list, and the exception is a `/` that names a home-page state `parseHomeParams` in `apps/web/src/server/dashboard/home-params.ts` would use: a Project, a filter, a list view, a tab or a range. The proxy imports that function, so there is no mirrored copy. `cursor` no longer has a meaning at `/`.)
 - The landing page's canonical URL and `og:url` are `/`, so `/welcome` is not indexed as a second copy.
 
 ## Consequences
 
 - The landing page is static and costs signed-in Users nothing: their `/` takes the same path as before.
-- The proxy mirrors `cursorParam` instead of importing it, because `queries.ts` pulls in the database. `apps/web/test/proxy.test.ts` compares the two, so a change to one fails tests until the other follows.
-- The proxy only checks that a login session cookie exists. A visitor with a stale cookie gets the Projects page's own check and is sent to `/sign-in`, not the landing page.
+- The proxy decides which `/` queries are deep links with `parseHomeParams`, which imports nothing from the database, so the proxy and the home page cannot disagree. `apps/web/test/proxy.test.ts` checks them against each other. (This replaced a mirrored copy of the Projects list's `cursorParam`, which the proxy could not import because `queries.ts` pulls in the database.)
+- The proxy only checks that a login session cookie exists. A visitor with a stale cookie gets the home page's own check and is sent to `/sign-in`, not the landing page.
 - Next keeps global stylesheets loaded after client navigation, and Cache Components keeps a visited page mounted but hidden, so neither the design-system nor the landing styles may reach other pages. Every selector in `components.css` is built on an `hm-`-prefixed class (element names appear only with one, as in `a.hm-btn` or `.hm-alert svg`), and `landing.css` scopes every rule under `.hm-landing`. Beyond declaring the tokens on `:root`, nothing in them styles `html` or `body`, and nothing uses `:root:has(.hm-root)`: a hidden landing page would still match it and restyle the dashboard.
 - Updating the fonts means downloading new files and checking them visually; there is no build-time fetch.
 

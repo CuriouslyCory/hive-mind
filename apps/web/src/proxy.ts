@@ -2,27 +2,21 @@ import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_PREFIX } from "./lib/auth-config";
 import { signInPath } from "./lib/return-path";
-
-/** `MAX_CURSOR_LENGTH` in `apps/web/src/server/dashboard/queries.ts`. */
-const MAX_CURSOR_LENGTH = 512;
+import { homeHref, parseHomeParams } from "./server/dashboard/home-params";
 
 /**
- * Whether the query names a page of the Projects list. Mirrors `cursorParam`
- * in `apps/web/src/server/dashboard/queries.ts`, which the proxy cannot
- * import because that module pulls in the database: exactly one `cursor`
- * value, not empty and at most MAX_CURSOR_LENGTH long. The list ignores any
- * other `cursor` and shows its first page, so here it shows the landing page.
- * Change both together; `apps/web/test/proxy.test.ts` compares them.
+ * Whether the query names a state of the home page other than its default
+ * view: a Project, a filter, a list view, a tab or a range that
+ * `parseHomeParams` would use. The page ignores any other parameter or
+ * value, so such a `/` shows the same page as a plain `/`. Repeated keys
+ * arrive as arrays, as they do in the page's `searchParams`.
  */
-function isProjectsCursor(searchParams: URLSearchParams): boolean {
-  const values = searchParams.getAll("cursor");
-  const [value] = values;
-  return (
-    values.length === 1 &&
-    value !== undefined &&
-    value.length > 0 &&
-    value.length <= MAX_CURSOR_LENGTH
-  );
+function isHomeState(searchParams: URLSearchParams): boolean {
+  const params: Record<string, string[]> = {};
+  for (const [key, value] of searchParams) {
+    params[key] = [...(params[key] ?? []), value];
+  }
+  return homeHref(parseHomeParams(params)) !== "/";
 }
 
 /**
@@ -31,12 +25,12 @@ function isProjectsCursor(searchParams: URLSearchParams): boolean {
  * control: pages call `requireLoginSession()`, and API routes answer 401 themselves.
  *
  * - With the cookie, every request goes through unchanged, so `/` is the
- *   Projects list (whose own check sends a stale cookie to `/sign-in`).
+ *   home page (whose own check sends a stale cookie to `/sign-in`).
  * - Without it, `/` is rewritten to the public landing page at `/welcome`: the
- *   URL stays `/`. A `/` that names a page of the Projects list (a cursor
- *   the list would use, see `isProjectsCursor`) is a deep link into the
- *   signed-in area, so it is redirected like any other page instead and
- *   comes back to that page after sign-in.
+ *   URL stays `/`. A `/` that names a state of the home page (see
+ *   `isHomeState`) is a deep link into the signed-in area, so it is
+ *   redirected like any other page instead and comes back to that state
+ *   after sign-in.
  * - Without it, every other page redirects to `/sign-in`. The requested page
  *   goes along as a validated, same-origin return path, so opening a
  *   `/device?user_code=...` link while signed out comes back to it.
@@ -46,11 +40,9 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
   const { pathname, search, searchParams } = request.nextUrl;
-  // `cursor` is the only search parameter the Projects list reads
-  // (`apps/web/src/app/(app)/page.tsx`). Any other query, such as the
-  // tracking parameters that sites add to shared links, still shows the
-  // landing page.
-  if (pathname === "/" && !isProjectsCursor(searchParams)) {
+  // A query that names no home-page state, such as the tracking parameters
+  // that sites add to shared links, still shows the landing page.
+  if (pathname === "/" && !isHomeState(searchParams)) {
     const landing = request.nextUrl.clone();
     landing.pathname = "/welcome";
     return NextResponse.rewrite(landing);
