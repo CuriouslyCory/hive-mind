@@ -1,4 +1,3 @@
-import "./landing.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Badge, Button, Card, LogoLockup } from "../../../design-system";
@@ -10,6 +9,9 @@ import {
   SitePage,
   ThemeSwitch,
 } from "../../../site";
+// After the site import, which loads the design system's styles, so this
+// page's rules come after them.
+import "./landing.css";
 import { fullCommand, INSTALL_COMMAND, TYPICAL_RUN } from "./_components/content";
 import { CopyButton } from "./_components/copy-button";
 import { DashboardMock } from "./_components/dashboard-mock";

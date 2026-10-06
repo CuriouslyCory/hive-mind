@@ -9,8 +9,9 @@ const ROOT_SELECTOR = ".hm-site";
 /**
  * The dark theme switch, for a `SiteHeader`. `SitePage` renders
  * `data-theme="system"`, so the first paint follows the operating system in
- * CSS alone; this switch only reflects the effective theme once mounted and, when toggled, forces
- * `light` or `dark` on the page root. The choice is not kept across visits.
+ * CSS alone; this switch only reflects the effective theme once mounted and,
+ * when toggled, forces `light` or `dark` on the page root. The choice is not
+ * kept across visits.
  */
 export function ThemeSwitch() {
   const ref = useRef<HTMLSpanElement>(null);

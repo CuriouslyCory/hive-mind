@@ -45,9 +45,10 @@ export default function Page() {
 A public page renders `SitePage` from `apps/web/src/site` as its root. It imports the design system's styles, puts `hm-root`, `designSystemFontClassName` and `data-theme="system"` on its root element, and renders a skip link, the `header` it is given, `<main>` and the site footer (`SiteFooter`, the same on every page). The root covers the viewport whatever styles `<body>` has, so the page needs no rules on `html` or `body`.
 
 ```tsx
-import "./my-page.css";
 import { Button } from "../../design-system";
 import { SiteHeader, SitePage, ThemeSwitch } from "../../site";
+// After the site import, so the page's rules come after the design system's.
+import "./my-page.css";
 
 export default function Page() {
   return (
@@ -69,7 +70,7 @@ export default function Page() {
 
 - `mainId` is the id of `<main>` and the skip link's target. Give each page its own: Cache Components keeps a visited page mounted but hidden, so two pages' `<main>` can be in the document at once, and with a shared id the skip link would go to the hidden one.
 - `className` is the page's scope class. Scope every rule in the page's stylesheet under it (`.hm-landing`, `.hm-sign-in`), and the frame's under `.hm-site` (`site.css`): global stylesheets stay loaded after client navigation, so an unscoped rule reaches every page visited later.
-- `SiteHeader` takes `homeHref` (`/` by default, or an anchor such as `#top` on the home page itself), `nav` (links for the Primary navigation, hidden below 1024px) and, as children, the controls at its right end. On screens 720px wide or less and on touch screens those controls are 44px tall. A label too long for a 320px screen can wrap its spare words in `site-hide-sm` and keep the whole label as the control's `aria-label`.
+- `SiteHeader` takes `homeHref` (`/` by default, or an anchor such as `#top` on the home page itself), `nav` (links for the Primary navigation, hidden at 1024px and below) and, as children, the controls at its right end. On screens 720px wide or less and on touch screens those controls are 44px tall. A label too long for a 320px screen can wrap its spare words in `site-hide-sm` and keep the whole label as the control's `aria-label`.
 - `ThemeSwitch` sets `data-theme` on the `SitePage` root, so the forced theme applies to the whole page. It is not kept across visits.
 - `site-wrap` is the content column: at most 1200px wide with the page gutters, `space-12` and `space-4` at 720px and below.
 

@@ -1,5 +1,5 @@
-// Links to the repository that the public pages share: the site footer, the
-// landing page and the sign-in page.
+// Links to the repository that the public pages share: the site footer and
+// the landing page.
 
 export const REPOSITORY_URL = "https://github.com/CuriouslyCory/hive-mind";
 export const CLI_DOCS_URL = `${REPOSITORY_URL}/blob/main/docs/cli.md`;

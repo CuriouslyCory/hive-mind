@@ -10,7 +10,7 @@ export type SiteHeaderProps = {
    * itself the home page. Defaults to `/`.
    */
   homeHref?: "/" | `#${string}`;
-  /** The page's primary navigation, after the logo. Hidden below 1024px. */
+  /** The page's primary navigation, after the logo. Hidden at 1024px and below. */
   nav?: readonly SiteNavItem[];
   /** Controls at the right end, such as the theme switch and a Button. */
   children?: ReactNode;

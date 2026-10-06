@@ -73,6 +73,7 @@ test("the button says it is signing in, then reports a failure and can be retrie
   await expect(alert).toContainText("Sign-in failed.");
   await expect(alert).toContainText("Try again.");
   await expect(button).toBeEnabled();
+  await expect(button).toBeFocused();
 
   // A second attempt clears the failure while it runs.
   await page.unroute(SOCIAL_SIGN_IN);

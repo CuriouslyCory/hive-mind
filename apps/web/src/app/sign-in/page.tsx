@@ -1,9 +1,11 @@
-import "./sign-in.css";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Button, LogoLockup } from "../../design-system";
 import { RETURN_TO_PARAM, safeReturnPath } from "../../lib/return-path";
 import { SiteHeader, SitePage } from "../../site";
+// After the site import, which loads the design system's styles, so this
+// page's rules come after them.
+import "./sign-in.css";
 import { SignInButton } from "./sign-in-button";
 
 export const metadata: Metadata = { title: "Sign in · HiveMind" };
