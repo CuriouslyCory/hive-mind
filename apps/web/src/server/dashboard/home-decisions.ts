@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import { projectEvent } from "../event-projection";
 import { loadHomeNames } from "./home-attribution";
 import type { HomeDecision } from "./home-types";
+import { likePattern } from "./like-pattern";
 import type { Attribution } from "./queries";
 
 // The home page's Decisions panel: the newest `plan.decision_recorded` Events
@@ -23,11 +24,6 @@ export interface HomeDecisionsInput {
 
 const DECISION_TYPE = "plan.decision_recorded";
 
-/** `value` as a case-insensitive substring pattern for `ilike ... escape '\'`. */
-function containsPattern(value: string): string {
-  return `%${value.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
-}
-
 /**
  * The filter on a decision's text, its Plan's key, its actor's agent or its
  * Project's name. Project names come from `projects`, which the caller read,
@@ -35,7 +31,7 @@ function containsPattern(value: string): string {
  */
 function queryCondition(q: string, projects: HomeDecisionsInput["projects"]): SQL | undefined {
   if (q === "") return undefined;
-  const pattern = containsPattern(q);
+  const pattern = likePattern(q);
   const needle = q.toLowerCase();
   const namedIds = projects
     .filter((project) => project.name.toLowerCase().includes(needle))

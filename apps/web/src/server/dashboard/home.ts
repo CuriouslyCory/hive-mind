@@ -84,6 +84,7 @@ import {
   type SessionTab,
   UNCLAIMED_PLAN_SECONDS,
 } from "./home-types";
+import { likePattern } from "./like-pattern";
 import type { Attribution, SessionLabel, TaskRef } from "./queries";
 import { runDashboardSnapshot } from "./snapshot";
 
@@ -486,11 +487,6 @@ async function readLiveness(
 }
 
 // --- Filter text ----------------------------------------------------------------
-
-/** `%q%` for ILIKE, with `\`, `%` and `_` in `q` matched literally. */
-export function likePattern(q: string): string {
-  return `%${q.replace(/[\\%_]/g, "\\$&")}%`;
-}
 
 function planKeyLike(pattern: string): SQL {
   return sql`('PLAN-' || ${plan.number}) ilike ${pattern}`;

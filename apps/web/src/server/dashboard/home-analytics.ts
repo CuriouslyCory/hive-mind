@@ -10,6 +10,7 @@ import {
   type HomeRange,
   type HomeThroughput,
 } from "./home-types";
+import { likePattern } from "./like-pattern";
 
 export interface HomeAnalyticsInput {
   /** The Projects in scope: every readable one, or the selected one. Never empty. */
@@ -75,11 +76,6 @@ interface QueryContext {
   pattern: string | null;
   /** A CTE body yielding one row: cur_start, cur_end, prev_start, step, n. */
   bounds: SQL;
-}
-
-/** `%q%` with LIKE's wildcards and escape character escaped, for `ilike … escape '\'`. */
-function likePattern(q: string): string {
-  return `%${q.replace(/[\\%_]/g, "\\$&")}%`;
 }
 
 function boundsSql(now: Date, unit: "hour" | "day", count: number): SQL {

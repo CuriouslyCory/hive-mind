@@ -1,13 +1,14 @@
 import { sweepCoordination } from "@hivemind/db";
 import { describeDb } from "@hivemind/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { likePattern, loadHomeDashboard } from "../src/server/dashboard/home";
+import { loadHomeDashboard } from "../src/server/dashboard/home";
 import { DEFAULT_HOME_PARAMS } from "../src/server/dashboard/home-params";
 import {
   HOME_TABLE_ROWS,
   type HomeDashboard,
   type HomeParams,
 } from "../src/server/dashboard/home-types";
+import { likePattern } from "../src/server/dashboard/like-pattern";
 import { type ApiHarness, createApiHarness, type SignedInUser } from "./support/api";
 
 // The home page's read (`loadHomeDashboard`) against a real database, with
