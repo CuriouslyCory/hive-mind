@@ -18,7 +18,7 @@ import {
 // views and their breadcrumb, Decisions, and the 15-second refresh that
 // keeps it current (it opens no Event stream). Every state is in the URL.
 
-/** `HOME_REFRESH_MS` in `apps/web/src/app/(app)/_home/freshness.tsx`. */
+/** `HOME_REFRESH_MS` in `apps/web/src/app/(app)/_home/freshness-controller.ts`. */
 const HOME_REFRESH_MS = 15_000;
 
 let pool: pg.Pool;
