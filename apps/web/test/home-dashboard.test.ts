@@ -497,5 +497,63 @@ describeDb("home dashboard", () => {
       expect((await ids("ended")).ids).toEqual([endedLate, silent, endedEarly]);
       expect((await ids("active")).ids).toEqual([live]);
     });
+
+    it("counts a Plan as unclaimed from its last usable claim or release, not its last claim", async () => {
+      const { user: someone, projectId } = await ownProject();
+      const sessionId = await startSession(someone.token, projectId, { intent: "Long run" });
+      /** An active Plan with one Task claimed through `sessionId`, last updated two days ago. */
+      async function claimedPlan(title: string) {
+        const plan = await createPlan(someone.token, projectId, { title });
+        const { id: taskId } = await addTask(someone.token, projectId, plan.key, "Work");
+        await ok(someone.token, `/projects/${projectId}/tasks/${taskId}/claim`, { sessionId });
+        await sql(
+          "update plan set updated_at = clock_timestamp() - interval '2 days' where id = $1",
+          [plan.id],
+        );
+        return { plan, taskId };
+      }
+      const ageClaim = (taskId: string, interval: string) =>
+        sql(
+          `update event set effective_at = clock_timestamp() - $2::interval
+           where task_id = $1 and type = 'task.claimed'`,
+          [taskId, interval],
+        );
+      const expireLease = async (taskId: string, interval: string): Promise<Date> => {
+        const result = await sql(
+          `update task set lease_expires_at = clock_timestamp() - $2::interval
+           where id = $1 returning lease_expires_at`,
+          [taskId, interval],
+        );
+        return result.rows[0]?.lease_expires_at as Date;
+      };
+
+      // Claimed two days ago and held until its lease expired ten minutes ago.
+      const justLapsed = await claimedPlan("Just lapsed");
+      await ageClaim(justLapsed.taskId, "2 days");
+      await expireLease(justLapsed.taskId, "10 minutes");
+      // Claimed two days ago and released just now.
+      const released = await claimedPlan("Just released");
+      await ok(someone.token, `/projects/${projectId}/tasks/${released.taskId}/release`, {
+        sessionId,
+      });
+      await ageClaim(released.taskId, "2 days");
+      // Claimed three days ago; its lease expired two days ago.
+      const longIdle = await claimedPlan("Long idle");
+      await ageClaim(longIdle.taskId, "3 days");
+      const expiredAt = await expireLease(longIdle.taskId, "2 days");
+
+      const home = await load(someone.id);
+      expect(
+        home.attention.items.map((item) => [
+          item.kind,
+          "planTitle" in item ? item.planTitle : item.taskTitle,
+        ]),
+      ).toEqual([
+        ["claim_lapsed", "Work"],
+        ["unclaimed_plan", "Long idle"],
+      ]);
+      expect(home.attention.items[0]?.planKey).toBe(justLapsed.plan.key);
+      expect(home.attention.items[1]).toMatchObject({ idleSince: expiredAt });
+    });
   });
 });

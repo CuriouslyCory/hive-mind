@@ -43,7 +43,6 @@ import {
   inArray,
   isNull,
   lte,
-  max,
   ne,
   not,
   notInArray,
@@ -1027,18 +1026,38 @@ async function readAttention(
     .orderBy(sql`${task.blockedAt} desc nulls last`, desc(task.id))
     .limit(limit);
 
-  // Raw SQL naming `plan` is used only in WHERE and ORDER BY: Drizzle drops
-  // table qualifiers from a single-table query's select list, which would
-  // break these correlated subqueries there.
   const hasOpenTask = exists(
     tx
       .select({ one: sql`1` })
       .from(task)
       .where(and(eq(task.planId, plan.id), ne(task.status, "done"))),
   );
-  const idleSince = sql`greatest(${plan.updatedAt}, (select max(${event.effectiveAt}) from ${event} where ${event.planId} = ${plan.id} and ${event.type} = 'task.claimed'))`;
+  // When the Plan was last worked on: the latest of its last update, its
+  // last claim or release, and the last moment any of its Tasks still held a
+  // usable claim (a lapsed claim nothing has released yet stopped being
+  // usable when its lease expired or its holder stopped being live). So a
+  // long-held claim that just lapsed does not also make the Plan unclaimed.
+  const idleSince = sql`greatest(
+    ${plan.updatedAt},
+    (select max(${event.effectiveAt}) from ${event}
+      where ${event.planId} = ${plan.id} and ${event.type} in ('task.claimed', 'task.released')),
+    (select max(least(
+        ${task.leaseExpiresAt},
+        ${agentSession.endedAt},
+        ${agentSession.lastHeartbeatAt} + make_interval(secs => ${SESSION_STALE_AFTER_MS / 1000})
+      ))
+      from ${task} join ${agentSession} on ${agentSession.id} = ${task.claimedBySessionId}
+      where ${task.planId} = ${plan.id})
+  )`;
   const unclaimedRows = await tx
-    .select({ plan, total: totalOver })
+    .select({
+      plan,
+      // Wrapped, so its columns keep their table qualifiers: Drizzle drops
+      // them only from the top level of a single-table select list, which
+      // would break the correlated subqueries.
+      idleSince: sql<Date>`${idleSince}`.mapWith(plan.updatedAt),
+      total: totalOver,
+    })
     .from(plan)
     .where(
       and(
@@ -1083,34 +1102,12 @@ async function readAttention(
     .orderBy(sql`${plan.pausedAt} desc nulls last`, desc(plan.id))
     .limit(limit);
 
-  // Open Task counts (M2's progress) and last claims of the Plans shown.
+  // Open Task counts (M2's progress) of the Plans shown.
   const shownPlanIds = [...unclaimedRows, ...pausedRows].map((row) => row.plan.id);
   const progress = await progressOf(tx, shownPlanIds);
   const openTasks = (planId: string) => {
     const counts = progress.get(planId);
     return counts ? counts.total - counts.done : 0;
-  };
-  const lastClaims =
-    unclaimedRows.length === 0
-      ? []
-      : await tx
-          .select({ planId: event.planId, at: max(event.effectiveAt) })
-          .from(event)
-          .where(
-            and(
-              inArray(event.projectId, scopeIds),
-              inArray(
-                event.planId,
-                unclaimedRows.map((row) => row.plan.id),
-              ),
-              eq(event.type, "task.claimed"),
-            ),
-          )
-          .groupBy(event.planId);
-  const lastClaimOf = new Map(lastClaims.map((row) => [row.planId, row.at]));
-  const idleSinceOf = (row: PlanRow): Date => {
-    const claimed = lastClaimOf.get(row.id);
-    return claimed && claimed > row.updatedAt ? claimed : row.updatedAt;
   };
 
   const pending: PendingAttention[] = [
@@ -1156,13 +1153,13 @@ async function readAttention(
         blockedAt: row.blockedAt,
       }),
     })),
-    ...unclaimedRows.map(({ plan: row }) => ({
+    ...unclaimedRows.map(({ plan: row, idleSince }) => ({
       build: (): AttentionItem => ({
         ...base(row.projectId, row.number),
         kind: "unclaimed_plan",
         planTitle: row.title,
         openTaskCount: openTasks(row.id),
-        idleSince: idleSinceOf(row),
+        idleSince,
       }),
     })),
     ...pausedRows.map(({ plan: row }) => ({

@@ -191,7 +191,10 @@ export type AttentionItem =
       kind: "unclaimed_plan";
       planTitle: string;
       openTaskCount: number;
-      /** The later of the Plan's last update and its last claim. */
+      /**
+       * The latest of the Plan's last update, its last claim or release, and
+       * the last time any of its Tasks held a usable claim.
+       */
       idleSince: Date;
     })
   | (AttentionBase & {
