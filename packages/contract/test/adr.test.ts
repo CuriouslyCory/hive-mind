@@ -470,9 +470,11 @@ describe("parseAdrContent", () => {
     });
 
     it("rejects control characters in the title", () => {
-      expect(errorCodes(withBody("# Ring \u0007 bell"))).toEqual(["ADR_TITLE_INVALID"]);
-      expect(errorCodes(withBody("# Escape \u001b[31m red"))).toEqual(["ADR_TITLE_INVALID"]);
+      // C0 controls other than tab are refused for the whole file first.
+      expect(errorCodes(withBody("# Ring \u0007 bell"))).toEqual(["ADR_CONTROL_CHARACTER"]);
+      expect(errorCodes(withBody("# Escape \u001b[31m red"))).toEqual(["ADR_CONTROL_CHARACTER"]);
       expect(errorCodes(withBody("# Tab\tinside"))).toEqual(["ADR_TITLE_INVALID"]);
+      expect(errorCodes(withBody("# C1 \u009b control"))).toEqual(["ADR_TITLE_INVALID"]);
     });
 
     it("reports every error at once", () => {
@@ -539,6 +541,51 @@ describe("parseAdrContent", () => {
 
     it("rejects a string with a lone surrogate", () => {
       expect(errorCodes(withBody("# Title \ud800", ""))).toEqual(["ADR_NOT_UTF8"]);
+    });
+
+    it.each([
+      ["NUL", "\u0000"],
+      ["ESC", "\u001b"],
+      ["form feed", "\f"],
+      ["vertical tab", "\v"],
+      ["backspace", "\b"],
+      ["unit separator", "\u001f"],
+      ["DEL", "\u007f"],
+    ])("rejects %s anywhere in the file, naming the line", (_name, character) => {
+      for (const contents of [
+        withBody("# Title", `Some${character}text.`),
+        withBody(`# Ti${character}tle`, ""),
+        `${VALID}${character}`,
+      ]) {
+        const result = parseAdrContent(contents);
+        expect(result.ok || result.errors.map((error) => error.code)).toEqual([
+          "ADR_CONTROL_CHARACTER",
+        ]);
+        expect(parseAdrContent(encoder.encode(contents)).ok).toBe(false);
+      }
+      const line = withBody("# Title", `First.\n\nSecond${character}.`);
+      const result = parseAdrContent(line);
+      const lineNumber = line.slice(0, line.indexOf(character)).split("\n").length;
+      expect(!result.ok && result.errors[0]?.message).toContain(`Line ${lineNumber} `);
+      expect(!result.ok && result.errors[0]?.message).toContain(
+        `U+${character.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
+      );
+    });
+
+    it("rejects a control character inside frontmatter or fenced code too", () => {
+      expect(errorCodes(withFrontmatter("status: accepted\u0000", "date: 2026-10-05"))).toEqual([
+        "ADR_CONTROL_CHARACTER",
+      ]);
+      expect(errorCodes(withBody("# Title", "```", "\u001b[2J", "```"))).toEqual([
+        "ADR_CONTROL_CHARACTER",
+      ]);
+    });
+
+    it("still accepts tabs, LF, CRLF and a lone CR in the body", () => {
+      expect(parsed(withBody("# Title", "a\tb", "c\rd")).title).toBe("Title");
+      expect(parseAdrContent(VALID.replaceAll("\n", "\r\n")).ok).toBe(true);
+      // C1 controls and other format characters are text, not C0 controls.
+      expect(parseAdrContent(withBody("# Title", "\u0085   ‮")).ok).toBe(true);
     });
 
     it("accepts multi-byte UTF-8", () => {

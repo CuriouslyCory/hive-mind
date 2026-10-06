@@ -1,4 +1,16 @@
 import { eventIterator, oc } from "@orpc/contract";
+import {
+  adrPageSchema,
+  getAdrInputSchema,
+  getAdrOutputSchema,
+  listAdrsInputSchema,
+  reserveAdrInputSchema,
+  reserveAdrOutputSchema,
+  syncAdrsInputSchema,
+  syncAdrsOutputSchema,
+  uploadAdrContentsInputSchema,
+  uploadAdrContentsOutputSchema,
+} from "./adr-api.ts";
 import { listOrganizationsInputSchema, meOutputSchema, organizationPageSchema } from "./auth.ts";
 import { apiErrorMap } from "./errors.ts";
 import {
@@ -101,7 +113,7 @@ const base = oc.errors(apiErrorMap);
  * redirects to the web sign-in. Organization and Project enumeration, Project
  * creation and key management are user-only (403 for a Project key). The
  * coordination routes under `/projects/{id}` (Plans, Tasks, Sessions, Scopes,
- * Events, status) accept Members of the Project's Organization and keys bound
+ * Events, status, ADRs) accept Members of the Project's Organization and keys bound
  * to that Project with the route's permission from `PROJECT_KEY_PERMISSIONS`.
  * An inaccessible Project or a nested ID from elsewhere is the same 404 as an
  * absent one. `operationId`s are fixed so generated clients keep their method
@@ -631,6 +643,72 @@ export const apiContract = {
       })
       .input(getProjectStatusInputSchema)
       .output(projectStatusSchema),
+
+    // ADRs (#19, ADR-0017): ADR reservations, and the read-only copy of the
+    // repository's ADR files that ADR sync keeps. The two upload routes
+    // accept bodies up to MAX_ADR_UPLOAD_BODY_BYTES; every other route keeps
+    // MAX_MANAGEMENT_BODY_BYTES.
+    adrs: {
+      list: base
+        .route({
+          method: "GET",
+          path: "/projects/{id}/adrs",
+          successStatus: 200,
+          operationId: "listAdrs",
+          tags: ["ADRs"],
+          summary: "List a Project's ADRs and ADR reservations, as of the last ADR sync",
+        })
+        .input(listAdrsInputSchema)
+        .output(adrPageSchema),
+
+      reserve: base
+        .route({
+          method: "POST",
+          path: "/projects/{id}/adrs",
+          successStatus: 200,
+          operationId: "reserveAdr",
+          tags: ["ADRs"],
+          summary: "Reserve the next ADR number, or return the reservation made with this ID",
+        })
+        .input(reserveAdrInputSchema)
+        .output(reserveAdrOutputSchema),
+
+      get: base
+        .route({
+          method: "GET",
+          path: "/projects/{id}/adrs/{number}",
+          successStatus: 200,
+          operationId: "getAdr",
+          tags: ["ADRs"],
+          summary: "Get an ADR by number, with its content as of the last ADR sync",
+        })
+        .input(getAdrInputSchema)
+        .output(getAdrOutputSchema),
+
+      contents: base
+        .route({
+          method: "POST",
+          path: "/projects/{id}/adrs/contents",
+          successStatus: 200,
+          operationId: "uploadAdrContents",
+          tags: ["ADRs"],
+          summary: "Upload ADR files for an ADR sync; each is parsed and stored by SHA-256",
+        })
+        .input(uploadAdrContentsInputSchema)
+        .output(uploadAdrContentsOutputSchema),
+
+      sync: base
+        .route({
+          method: "POST",
+          path: "/projects/{id}/adrs/sync",
+          successStatus: 200,
+          operationId: "syncAdrs",
+          tags: ["ADRs"],
+          summary: "Replace the ADR copy with the ADR files of one commit",
+        })
+        .input(syncAdrsInputSchema)
+        .output(syncAdrsOutputSchema),
+    },
   },
 };
 

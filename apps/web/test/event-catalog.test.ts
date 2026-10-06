@@ -1,8 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
+  type AdrStatus,
+  adrContentSha256,
+  adrFileName,
   EVENT_PAYLOAD_VERSION,
   EVENT_TYPES,
   knownEventSchema,
+  renderAdrTemplate,
+  rewriteAdrFrontmatter,
   UNAVAILABLE_EVENT_TYPE,
 } from "@hivemind/contract";
 import {
@@ -20,16 +25,18 @@ import {
   endSession,
   finalizeCollection,
   heartbeatSession,
-  insertEvent,
   type Principal,
   recordCollectionManifest,
   releaseTask,
   removeScope,
+  reserveAdr,
   schema,
   setPlanStatus,
   startSession,
   startTask,
+  storeAdrContents,
   sweepCoordination,
+  syncAdrs,
   touchedPathsContentHash,
   updatePlan,
   updateSession,
@@ -249,45 +256,66 @@ describeDb("the Event catalog", () => {
     expect(await heartbeatSession(db, { ...own(c), collectionId: randomUUID() })).toMatchObject(ok);
     expect(await heartbeatSession(db, { ...own(c), collectionId: randomUUID() })).toMatchObject(ok);
 
-    // ADR Events. Issue #19 ships this reader before any helper writes them,
-    // so they go through `insertEvent` here, one sync with a change of each
-    // kind and one reservation acted through a Session.
-    await db.transaction(async (tx) => {
-      await insertEvent(tx, {
-        projectId: project.id,
-        type: "adr.reserved",
-        payload: {
-          adrId: randomUUID(),
-          number: 17,
-          title: "Use ADRs",
-          slug: "use-adrs",
-          floor: 16,
+    // ADRs: a reservation acted through a Session, then syncs that add,
+    // update, remove and restore ADRs, through the writers the API calls.
+    expect(
+      await reserveAdr(db, {
+        ...own(c),
+        id: randomUUID(),
+        title: "Use ADRs",
+        slug: "use-adrs",
+        floor: 16,
+      }),
+    ).toMatchObject({ status: "created", adr: { number: 17 } });
+    const adrFile = async (number: number, title: string, status: AdrStatus) => {
+      const rendered = renderAdrTemplate({ title, date: "2026-10-05" });
+      if (!rendered.ok) throw new Error("setup");
+      const rewritten = rewriteAdrFrontmatter(rendered.contents, { status });
+      if (!rewritten.ok) throw new Error("setup");
+      const { title: parsedTitle, date, supersedes, warnings } = rewritten.adr;
+      const sha256 = await adrContentSha256(rewritten.contents);
+      const slug = `adr-${number}`;
+      return {
+        content: {
+          sha256,
+          contentMd: rewritten.contents,
+          title: parsedTitle,
+          status,
+          date,
+          supersedes,
+          warnings,
         },
-        actor: { ...principal, sessionId: c },
-        now: new Date(),
+        entry: { path: `docs/adr/${adrFileName(number, slug)}`, sha256, number, slug },
+      };
+    };
+    const files = [
+      await adrFile(1, "One", "accepted"),
+      await adrFile(2, "Two", "superseded"),
+      await adrFile(3, "Three", "proposed"),
+      await adrFile(3, "Three", "accepted"),
+    ];
+    expect(
+      await storeAdrContents(db, { ...writer, items: files.map((file) => file.content) }),
+    ).toMatchObject({ status: "ok" });
+    const [one, two, three, threeAccepted] = files.map((file) => file.entry);
+    if (!one || !two || !three || !threeAccepted) throw new Error("setup");
+    let base: string | null = null;
+    for (const entries of [
+      [one, two, three],
+      [one, threeAccepted],
+      [one, two, threeAccepted],
+    ]) {
+      const commitSha = randomBytes(20).toString("hex");
+      const synced = await syncAdrs(db, {
+        ...writer,
+        commitSha,
+        baseCommitSha: base,
+        forced: false,
+        entries,
       });
-      await insertEvent(tx, {
-        projectId: project.id,
-        type: "adr.synced",
-        payload: {
-          commitSha: "a".repeat(40),
-          previousCommitSha: null,
-          forced: false,
-          added: 2,
-          updated: 1,
-          removed: 1,
-          changes: [
-            { number: 1, change: "added", statusFrom: null, statusTo: "accepted" },
-            { number: 2, change: "restored", statusFrom: null, statusTo: "superseded" },
-            { number: 3, change: "updated", statusFrom: "proposed", statusTo: "accepted" },
-            { number: 4, change: "removed", statusFrom: "deprecated", statusTo: null },
-          ],
-          truncated: false,
-        },
-        actor: principal,
-        now: new Date(),
-      });
-    });
+      expect(synced).toMatchObject({ status: "ok", replay: false });
+      base = commitSha;
+    }
 
     const rows = await db
       .select()
@@ -315,6 +343,12 @@ describeDb("the Event catalog", () => {
     });
     const types = rows.map((row) => row.type);
     expect([...new Set(types)].sort()).toEqual(Object.keys(EVENT_PAYLOAD_VERSIONS).sort());
+    const changeKinds = rows
+      .map((row) => knownEventSchema.parse(dtoOf(row)))
+      .flatMap((dto) => (dto.type === "adr.synced" ? dto.payload.changes : []))
+      .map((change) => change.change);
+    expect([...new Set(changeKinds)].sort()).toEqual(["added", "removed", "restored", "updated"]);
+    expect(rows.find((row) => row.type === "adr.reserved")?.actorSessionId).toBe(c);
     expect(rows.find((row) => row.type === "scope.coverage_lost")?.payload).toMatchObject({
       reason: "collection_superseded",
     });

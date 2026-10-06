@@ -49,6 +49,7 @@ export const ADR_ERROR_CODES = [
   "ADR_FILE_NAME_INVALID",
   "ADR_TOO_LARGE",
   "ADR_NOT_UTF8",
+  "ADR_CONTROL_CHARACTER",
   "ADR_FRONTMATTER_MISSING",
   "ADR_FRONTMATTER_UNTERMINATED",
   "ADR_FRONTMATTER_INVALID",
@@ -69,8 +70,9 @@ export type AdrErrorCode = (typeof ADR_ERROR_CODES)[number];
 /**
  * Problems that do not stop a file from being stored. The first two come from
  * one file (`parseAdrContent`), the next four from a set of files
- * (`validateAdrSet`), and the last two from the server, which compares a
- * synced file with its number's reservation.
+ * (`validateAdrSet`), and the last three from the server, which compares a
+ * synced file with its number's reservation. `ADR_RESERVATION_TAKEN` means a
+ * file took a number reserved for another ADR, which needs a new number.
  */
 export const ADR_WARNING_CODES = [
   "ADR_SECTION_MISSING",
@@ -81,6 +83,7 @@ export const ADR_WARNING_CODES = [
   "ADR_SUPERSEDED_WITHOUT_SUCCESSOR",
   "ADR_NUMBER_UNRESERVED",
   "ADR_SLUG_DIFFERS_FROM_RESERVATION",
+  "ADR_RESERVATION_TAKEN",
 ] as const;
 
 export type AdrWarningCode = (typeof ADR_WARNING_CODES)[number];
@@ -303,7 +306,36 @@ function decodeAdr(contents: string | Uint8Array): Decoded {
       return notUtf8();
     }
   }
+  const control = controlCharacterIndex(text);
+  if (control !== -1) {
+    const line = text.slice(0, control).split("\n").length;
+    const code = text.charCodeAt(control).toString(16).toUpperCase().padStart(4, "0");
+    return {
+      ok: false,
+      error: {
+        code: "ADR_CONTROL_CHARACTER",
+        message: `Line ${line} contains the control character U+${code}; an ADR may contain only tabs and line breaks.`,
+      },
+    };
+  }
   return { ok: true, text: text.startsWith("\uFEFF") ? text.slice(1) : text };
+}
+
+/**
+ * The index of the first C0 control character other than tab, LF and CR, or
+ * of the first DEL, or -1. Postgres text cannot store NUL, a terminal would
+ * act on the others, and JSON writes each as a 6-byte escape, which would let
+ * a 64 KiB file outgrow one upload request (MAX_ADR_UPLOAD_BODY_BYTES in
+ * adr-api.ts).
+ */
+function controlCharacterIndex(text: string): number {
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function notUtf8(): Decoded {

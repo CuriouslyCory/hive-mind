@@ -248,7 +248,7 @@ describe("coordination CLI envelopes", () => {
 });
 
 describe("Project key permissions", () => {
-  it("grants the coordination permissions and keeps project:read", () => {
+  it("grants the coordination and ADR permissions and keeps project:read", () => {
     expect([...PROJECT_KEY_PERMISSIONS]).toEqual([
       "project:read",
       "plan:read",
@@ -260,6 +260,8 @@ describe("Project key permissions", () => {
       "scope:read",
       "scope:write",
       "event:read",
+      "adr:read",
+      "adr:write",
     ]);
   });
 

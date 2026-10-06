@@ -40,7 +40,7 @@ The constraints:
 
 - `hivemind adr sync` reads the tree of one commit through git, never the working tree, so unmerged branches and uncommitted edits are never synced. The default commit is the remote default branch, `origin/HEAD`. `--ref <rev>` names another, such as `HEAD` in a CI job that runs on a push to the default branch.
 - **Phase 1, content.** `POST /projects/{id}/adrs/contents` takes a batch of files addressed by sha256: at most 64 KiB per file and 256 KiB per request. The server parses every file itself and never trusts fields parsed by the client. It stores each valid file once per hash and reports problems per file. The CLI uploads only content hive-mind does not have.
-- **Phase 2, manifest.** `POST /projects/{id}/adrs/sync` sends the commit, the commit the CLI expects hive-mind to have synced last, and the path and hash of every ADR file in the tree, at most 2000. One transaction under the Project lock:
+- **Phase 2, manifest.** `POST /projects/{id}/adrs/sync` sends the commit, the commit the CLI expects hive-mind to have synced last, the ADR directory, and the file name and hash of every ADR file in the tree, at most 1000, so the manifest fits the 256 KiB limit. One transaction under the Project lock:
   1. compares hive-mind's last synced commit with the expected one, and answers `CONFLICT` if they differ;
   2. checks that every hash was uploaded and is valid;
   3. updates the copies, and marks ADRs absent from the commit `removed` without deleting them;

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "command": "adr supersede",
+  "ok": true,
+  "data": {
+    "superseded": {
+      "number": 4,
+      "path": "docs/adr/0004-neon-postgres-and-drizzle.md",
+      "status": "superseded",
+      "previousStatus": "accepted",
+      "date": "2026-10-06",
+      "changed": true
+    },
+    "superseding": {
+      "number": 17,
+      "path": "docs/adr/0017-adr-numbers-and-repo-sync.md",
+      "supersedes": [4],
+      "changed": true
+    },
+    "changed": true
+  }
+}

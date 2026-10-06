@@ -1,9 +1,15 @@
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
+  ADR_DIRECTORY,
   API_BASE_PATH,
   API_ERRORS,
+  adrContentSha256,
+  adrPageSchema,
   feedOriginCursor,
   MAX_CURSOR_LENGTH,
+  renderAdrTemplate,
+  reserveAdrOutputSchema,
   touchedPathsContentHash,
 } from "@hivemind/contract";
 import { agentSession } from "@hivemind/db/schema";
@@ -20,11 +26,16 @@ import {
 
 // The OpenAPI document is generated from the contract the server implements.
 // These tests pin it to the contract's golden route tables (the M1 routes, the
-// coordination routes of #12 and the Event stream of #11) and check that the
-// running handler answers each documented operation with its documented
-// success status.
+// coordination routes of #12, the Event stream of #11 and the ADR routes of
+// #19) and check that the running handler answers each documented operation
+// with its documented success status.
 
-const ROUTE_FIXTURES = ["routes.json", "routes.coordination.json", "routes.realtime.json"];
+const ROUTE_FIXTURES = [
+  "routes.json",
+  "routes.coordination.json",
+  "routes.realtime.json",
+  "routes.adr.json",
+];
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -237,6 +248,20 @@ describeDb("the served API", () => {
       }
       return { "{sessionId}": sessionId, "{collectionId}": String(collectionId) };
     };
+    // A new valid ADR file, uploaded when `store` is set.
+    const adrUpload = async (store: boolean) => {
+      const rendered = renderAdrTemplate({
+        title: `OpenAPI ${crypto.randomUUID()}`,
+        date: "2026-10-05",
+      });
+      if (!rendered.ok) throw new Error("The ADR template did not render.");
+      const file = {
+        sha256: await adrContentSha256(rendered.contents),
+        content: rendered.contents,
+      };
+      if (store) await call("/adrs/contents", { files: [file] });
+      return file;
+    };
 
     // The shared Session most Session routes address; the startSession
     // operation below replays its start (`created: false`).
@@ -265,6 +290,7 @@ describeDb("the served API", () => {
       },
       uploadCollectionBatch: { batchIndex: 0, paths: ["README.md"] },
       finalizeCollection: {},
+      reserveAdr: { adrId: crypto.randomUUID(), title: "OpenAPI", slug: "openapi" },
     };
     // Operations that change what they address get records of their own, so
     // the document's operation order does not matter.
@@ -289,6 +315,25 @@ describeDb("the served API", () => {
         registerCollectionManifest: async () => ({ ids: await collection() }),
         uploadCollectionBatch: async () => ({ ids: await collection(["README.md"]) }),
         finalizeCollection: async () => ({ ids: await collection([]) }),
+        getAdr: async () => {
+          const { adr } = reserveAdrOutputSchema.parse(
+            await call("/adrs", { adrId: crypto.randomUUID(), title: "OpenAPI", slug: "openapi" }),
+          );
+          return { ids: { "{number}": String(adr.number) } };
+        },
+        uploadAdrContents: async () => ({ body: { files: [await adrUpload(false)] } }),
+        syncAdrs: async () => {
+          const { sha256 } = await adrUpload(true);
+          const { lastSync } = adrPageSchema.parse(await call("/adrs?limit=1"));
+          return {
+            body: {
+              commitSha: randomBytes(20).toString("hex"),
+              baseCommitSha: lastSync?.commitSha ?? null,
+              directory: ADR_DIRECTORY,
+              entries: [{ fileName: "0001-openapi.md", sha256 }],
+            },
+          };
+        },
       };
     const nestedIds: Record<string, string> = {
       "{planRef}": "PLAN-1",

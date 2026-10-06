@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "command": "adr status",
+  "ok": true,
+  "data": {
+    "number": 17,
+    "path": "docs/adr/0017-adr-numbers-and-repo-sync.md",
+    "status": "accepted",
+    "previousStatus": "proposed",
+    "date": "2026-10-06",
+    "changed": true
+  }
+}

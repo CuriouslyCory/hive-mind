@@ -2,6 +2,7 @@ import {
   API_BASE_PATH,
   type ApiErrorCode,
   apiContract,
+  MAX_ADR_UPLOAD_BODY_BYTES,
   MAX_MANAGEMENT_BODY_BYTES,
 } from "@hivemind/contract";
 import { describeFailure, ProjectAccessLostError } from "@hivemind/db";
@@ -14,6 +15,7 @@ import {
   StreamEndedError,
   StreamLifecycle,
 } from "../realtime/event-stream";
+import { getAdr, listAdrs, reserveAdr, syncAdrs, uploadAdrContents } from "./adrs";
 import { apiError } from "./authorize";
 import { accessLostError } from "./coordination-auth";
 import { listProjectEvents, listSessionEvents, streamProjectEvents } from "./events";
@@ -100,6 +102,13 @@ export const router = api.router({
     },
     events: { list: listProjectEvents, stream: streamProjectEvents },
     status: getProjectStatus,
+    adrs: {
+      list: listAdrs,
+      reserve: reserveAdr,
+      get: getAdr,
+      contents: uploadAdrContents,
+      sync: syncAdrs,
+    },
   },
 });
 
@@ -178,6 +187,22 @@ const streamHandler = new OpenAPIHandler(
 /** `GET /api/v1/projects/{id}/events/stream`. */
 const EVENT_STREAM_PATH = new RegExp(`^${API_BASE_PATH}/projects/[^/]+/events/stream$`);
 
+/**
+ * `POST /api/v1/projects/{id}/adrs/contents` and `.../adrs/sync`, the two
+ * routes that carry ADR files or a commit's manifest (issue #19).
+ */
+const ADR_UPLOAD_PATH = new RegExp(`^${API_BASE_PATH}/projects/[^/]+/adrs/(?:contents|sync)$`);
+
+/**
+ * The largest body a request may have: `MAX_ADR_UPLOAD_BODY_BYTES` for a POST
+ * to an ADR upload route, `MAX_MANAGEMENT_BODY_BYTES` for everything else.
+ */
+function bodyLimitOf(method: string, pathname: string): number {
+  return method === "POST" && ADR_UPLOAD_PATH.test(pathname)
+    ? MAX_ADR_UPLOAD_BODY_BYTES
+    : MAX_MANAGEMENT_BODY_BYTES;
+}
+
 /** Options of the handlers that can serve the Event stream. */
 export interface EventStreamHandlerOptions {
   /** Overrides of the stream's durations and sizes, for tests. */
@@ -232,7 +257,8 @@ export async function serveEventStream(
  * import, which keeps `next build` free of runtime environment variables),
  * and tests can pass their own.
  *
- * Order per request: body size limit (before anything parses the body),
+ * Order per request: body size limit (before anything parses the body or
+ * authenticates; 16 KiB, or 256 KiB on the two ADR upload routes),
  * principal (401 without one), then oRPC, which validates input, runs the
  * procedure's authorization and validates output. Every answer is JSON with
  * the contract's error shape, except the Event stream's 200 (Server-Sent
@@ -252,7 +278,7 @@ export function createApiHandler(
         return json(await openAPIDocument, 200);
       }
 
-      const bounded = await withBoundedBody(request, MAX_MANAGEMENT_BODY_BYTES);
+      const bounded = await withBoundedBody(request, bodyLimitOf(request.method, url.pathname));
       if (!bounded) return errorResponse("PAYLOAD_TOO_LARGE");
 
       // A request without a bearer token is answered before the database or

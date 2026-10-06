@@ -5,7 +5,8 @@ import { idSchema, pageSchema, paginationInputShape } from "./common.ts";
  * Operations a Project key may perform in its bound Project. The server grants
  * every permission here to every Project key, including keys created before a
  * permission was added: adding coordination permissions in M2 lets existing
- * keys create Plans, run Sessions and claim Tasks (#12). Permissions come
+ * keys create Plans, run Sessions and claim Tasks (#12), and M4 lets them
+ * reserve ADR numbers and run ADR sync (#19, ADR-0017). Permissions come
  * from this constant, never from a request or key metadata. Clients must
  * accept permission strings they do not know; the output schema checks the
  * `resource:action` form, not membership in this list.
@@ -21,6 +22,8 @@ export const PROJECT_KEY_PERMISSIONS = [
   "scope:read",
   "scope:write",
   "event:read",
+  "adr:read",
+  "adr:write",
 ] as const;
 
 export type ProjectKeyPermission = (typeof PROJECT_KEY_PERMISSIONS)[number];
