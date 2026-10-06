@@ -313,7 +313,7 @@ export async function startTask(db: Db, input: TaskActionInput): Promise<TaskAct
 
     const [started] = await tx
       .update(task)
-      .set({ status: "in_progress", blockReason: null, updatedAt: now })
+      .set({ status: "in_progress", blockReason: null, blockedAt: null, updatedAt: now })
       .where(
         and(
           eq(task.id, before.id),
@@ -365,7 +365,13 @@ export async function blockTask(
 
     const [blocked] = await tx
       .update(task)
-      .set({ status: "blocked", blockReason: input.reason, updatedAt: now })
+      .set({
+        status: "blocked",
+        blockReason: input.reason,
+        // A new reason on a blocked Task keeps the time it became blocked.
+        blockedAt: before.status === "blocked" ? before.blockedAt : now,
+        updatedAt: now,
+      })
       .where(and(eq(task.id, before.id), heldBy(session.id, now), ne(task.status, "done")))
       .returning();
     if (!blocked) return notHolderConflict(loaded, now);
@@ -405,6 +411,7 @@ export async function doneTask(db: Db, input: TaskActionInput): Promise<TaskActi
       .set({
         status: "done",
         blockReason: null,
+        blockedAt: null,
         claimedBySessionId: null,
         claimedAt: null,
         leaseExpiresAt: null,

@@ -492,7 +492,11 @@ export async function setPlanStatus(
 
     const [updated] = await tx
       .update(plan)
-      .set({ status: input.status, updatedAt: now })
+      .set({
+        status: input.status,
+        pausedAt: input.status === "paused" ? now : null,
+        updatedAt: now,
+      })
       .where(eq(plan.id, row.id))
       .returning();
     if (!updated) throw new Error("plan update returned no row");

@@ -90,6 +90,11 @@ export const plan = pgTable(
     // Markdown.
     body: text().notNull().default(""),
     status: text({ enum: PLAN_STATUSES }).notNull().default("draft"),
+    // When the Plan last became paused; null while it is not paused. Plans
+    // paused before this column existed were backfilled from their
+    // `plan.status_changed` Event. There is no check tying it to the status
+    // yet, because a deployment from before the column pauses without it.
+    pausedAt: timestamptz(),
     // Optional: a Plan created by a Project key has no owning User.
     ownerUserId: uuid().references(() => user.id, { onDelete: "set null" }),
     ...creatorColumns(),
@@ -125,6 +130,9 @@ export const task = pgTable(
     status: text({ enum: TASK_STATUSES }).notNull().default("todo"),
     // Set exactly while the Task is blocked.
     blockReason: text(),
+    // When the Task last became blocked; null while it is not blocked. Set
+    // like paused_at (see plan), and backfilled from `task.blocked` Events.
+    blockedAt: timestamptz(),
     // The claim: the holding Session, when it claimed, and when the lease
     // expires without renewal. All three are set or all are null. An expired
     // lease is not cleared until a mutation or the sweep reconciles it, so

@@ -18,7 +18,7 @@ import {
   updatePlan,
 } from "../src/plan.ts";
 import type { Principal } from "../src/principal.ts";
-import { task } from "../src/schema/coordination.ts";
+import { plan as planTable, task } from "../src/schema/coordination.ts";
 import { event } from "../src/schema/event.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
 import { insertProject, insertProjectKey, insertSession } from "./support/fixtures.ts";
@@ -167,6 +167,18 @@ describeDb("Plan helpers", () => {
       "plan.updated",
       "plan.status_changed",
     ]);
+  });
+
+  it("records when a Plan was paused, until it leaves paused", async () => {
+    const { writer } = await setup();
+    const ref = (await newPlan(writer, { status: "active" })).id;
+    const paused = await setPlanStatus(testDb.db, { ...writer, ref, status: "paused" });
+    if (paused.status !== "ok") throw new Error(paused.status);
+    const [row] = await testDb.db.select().from(planTable).where(eq(planTable.id, ref));
+    expect(row?.pausedAt).toEqual(row?.updatedAt);
+    await setPlanStatus(testDb.db, { ...writer, ref, status: "active" });
+    const [resumed] = await testDb.db.select().from(planTable).where(eq(planTable.id, ref));
+    expect(resumed?.pausedAt).toBeNull();
   });
 
   it("enforces the transition table and the done precondition", async () => {
