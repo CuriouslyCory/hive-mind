@@ -1,22 +1,11 @@
 import type { Route } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import {
-  Alert,
-  Badge,
-  Button,
-  Cell,
-  type CellTone,
-  Hexagon,
-  Icon,
-  Logo,
-} from "../../../design-system";
-import { buttonClassName } from "../../../design-system/button";
+import { Alert, Badge, Button, Cell, type CellTone } from "../../../design-system";
 import { homeHref } from "../../../server/dashboard/home-params";
 import type { HomeDashboard, HomeParams } from "../../../server/dashboard/home-types";
-import { ThemeSwitch } from "../../../site/theme-switch";
 import { projectPath } from "../_components/paths";
-import { SignOutButton } from "../sign-out-button";
+import { Breadcrumb } from "../_shell/breadcrumb";
 import { FilterInput } from "./filter-input";
 import { homeRoute, listCount, plural, RANGE_TEXT, sessionName } from "./format";
 import { Freshness } from "./freshness";
@@ -26,25 +15,19 @@ import { NeedsAttention, PlansSection, SessionsSection } from "./sections";
 
 // The signed-in home page, `/` (docs/dashboard.md): every Project the User can
 // read, or one of them, with the list views `view=plans` and
-// `view=sessions`. Server components, except the filter, the tabs, the
-// freshness line and the header's two controls. All page state is in the
-// URL, so every control is a link to `homeHref(...)` or navigates to one.
-
-/** The id of the page's `<main>`, the skip link's target. Unique across pages. */
-export const HOME_MAIN_ID = "home-main";
+// `view=sessions`, inside the app shell. Server components, except the
+// filter, the tabs and the freshness line. All page state is in the URL, so
+// every control is a link to `homeHref(...)` or navigates to one.
 
 /** The content of the home page's root for `dashboard`. */
 export function HomeView({ dashboard }: { dashboard: HomeDashboard }) {
   const { params } = dashboard;
   return (
     <>
-      <a className="home-skip" href={`#${HOME_MAIN_ID}`}>
-        Skip to main content
-      </a>
-      <HomeHeader viewerName={dashboard.viewer.name} params={params} />
+      <HomeBreadcrumb params={params} />
       <div className="home-body">
         <ProjectsRail dashboard={dashboard} />
-        <main id={HOME_MAIN_ID} tabIndex={-1} className="home-main">
+        <div className="home-main">
           <MainHeading dashboard={dashboard} />
           <FilterRow params={params} />
           {dashboard.projects.total === 0 ? (
@@ -79,63 +62,29 @@ export function HomeView({ dashboard }: { dashboard: HomeDashboard }) {
               </div>
             </>
           )}
-        </main>
+        </div>
       </div>
     </>
   );
 }
 
-// --- Header -----------------------------------------------------------------------
+// --- Breadcrumb -------------------------------------------------------------------
 
 const LIST_NAMES = { plans: "Plans", sessions: "Sessions" } as const;
 
-export function HomeHeader({ viewerName, params }: { viewerName: string; params: HomeParams }) {
-  const initial = Array.from(viewerName.trim())[0]?.toUpperCase() ?? "?";
+/** The Dashboard, then the list view when one is open. */
+export function HomeBreadcrumb({ params }: { params: HomeParams }) {
   return (
-    <header className="home-topbar">
-      <div className="home-wrap home-topbar-inner">
-        <Link className="home-logo" href="/" aria-label="HiveMind home">
-          <Logo height={24} loading="eager" />
-        </Link>
-        <nav aria-label="Breadcrumb" className="home-breadcrumb">
-          <ol>
-            {params.view === "home" ? (
-              <li>
-                <span aria-current="page" className="home-crumb-current">
-                  Dashboard
-                </span>
-              </li>
-            ) : (
-              <>
-                <li>
-                  <Link className="home-crumb-link" href={homeRoute(params, { view: "home" })}>
-                    Dashboard
-                  </Link>
-                </li>
-                <li>
-                  <Icon name="chevron-right" size={16} className="home-crumb-sep" />
-                  <span aria-current="page" className="home-crumb-current">
-                    {LIST_NAMES[params.view]}
-                  </span>
-                </li>
-              </>
-            )}
-          </ol>
-        </nav>
-        <div className="home-topbar-right">
-          <ThemeSwitch />
-          <span className="home-viewer">
-            <span aria-hidden="true">
-              <Hexagon size={28} tone="hive">
-                <span className="home-viewer-initial">{initial}</span>
-              </Hexagon>
-            </span>
-            <span className="home-viewer-name">{viewerName}</span>
-          </span>
-          <SignOutButton className={buttonClassName({ variant: "quiet", size: "sm" })} />
-        </div>
-      </div>
-    </header>
+    <Breadcrumb
+      items={
+        params.view === "home"
+          ? [{ label: "Dashboard" }]
+          : [
+              { label: "Dashboard", href: homeRoute(params, { view: "home" }) },
+              { label: LIST_NAMES[params.view] },
+            ]
+      }
+    />
   );
 }
 

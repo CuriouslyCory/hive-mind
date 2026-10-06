@@ -1,13 +1,11 @@
 import { createElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CLI_DOCS_URL, DASHBOARD_DOCS_URL, DECISIONS_URL, REPOSITORY_URL } from "../src/site/links";
 import { SiteFooter } from "../src/site/site-footer";
 import { SiteHeader } from "../src/site/site-header";
 import { SitePage, type SitePageProps } from "../src/site/site-page";
 
-// next/font only works inside a Next build; the class names stand in for it.
-vi.mock("../src/design-system/fonts", () => ({ designSystemFontClassName: "fonts hm-fonts" }));
 
 // createElement's types want children among the props when they are
 // required; JSX callers pass them as the element's content.
@@ -101,16 +99,10 @@ describe("SitePage", () => {
       ),
     );
 
-  it("is a design-system root that follows the system theme, with the page's scope class", () => {
+  it("is the page's scope root, leaving the design-system root and theme to <html>", () => {
     const [root] = tags(page(), "div");
-    expect(root?.class?.split(" ")).toEqual([
-      "hm-root",
-      "hm-site",
-      "fonts",
-      "hm-fonts",
-      "hm-sign-in",
-    ]);
-    expect(root?.["data-theme"]).toBe("system");
+    expect(root?.class?.split(" ")).toEqual(["hm-site", "hm-sign-in"]);
+    expect(root?.["data-theme"]).toBeUndefined();
   });
 
   it("starts with a skip link to its focusable main", () => {

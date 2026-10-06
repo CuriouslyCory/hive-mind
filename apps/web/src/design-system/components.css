@@ -32,10 +32,9 @@
   padding: var(--space-4);
 }
 
-/* The focus ring. Inside .hm-root the second selector outranks unscoped
-   rules such as dashboard.css's `button:focus-visible`, which stays loaded
-   after a client navigation; elsewhere the first applies with no
-   specificity. */
+/* The focus ring, as in base.css. Repeated here, unlayered, so a page rule
+   that restyles a control's outline cannot drop it: inside .hm-root (every
+   page, ADR-0019) the second selector outranks such a rule. */
 :where(.hm-btn, .hm-input, .hm-switch, .hm-tab):focus-visible,
 .hm-root :is(.hm-btn, .hm-input, .hm-switch, .hm-tab):focus-visible {
   outline: var(--border-focus) solid var(--focus);

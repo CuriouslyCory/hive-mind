@@ -1,0 +1,249 @@
+/* The Project pages (projects/[projectId]: the overview, Plans, Sessions and
+   ADRs), inside the app shell. The design system's baseline styles their
+   type, links, tables, code and focus (ADR-0019); this file lays out what is
+   theirs: the heading, the live-update line, the cards, the facts, the Event
+   lists and the pagers. Every rule is scoped under .hm-project, the Project
+   layout's root: Next keeps global stylesheets loaded after client
+   navigation, and Cache Components keeps a visited page mounted but hidden,
+   so an unscoped rule would reach the other pages. Status is spelled out in
+   words everywhere; colour only repeats it. */
+
+/* The live-update line (LiveStatus). Its words carry the state; the dot
+   only repeats it, and the line keeps its height while empty. */
+.hm-project .live-status {
+  min-height: 18px;
+  margin-bottom: var(--space-2);
+  text-align: right;
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+}
+.hm-project .live-status output::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--ink-faint);
+  vertical-align: 1px;
+}
+.hm-project .live-status[data-state="idle"] output::before {
+  display: none;
+}
+.hm-project .live-status[data-state="live"] output::before {
+  background: var(--success);
+}
+.hm-project
+  .live-status:is([data-state="delayed"], [data-state="reconnecting"], [data-state="offline"]) {
+  color: var(--honey-ink);
+}
+.hm-project
+  .live-status:is([data-state="delayed"], [data-state="reconnecting"], [data-state="offline"])
+  output::before {
+  background: var(--honey);
+}
+.hm-project .live-status:is([data-state="stopped"], [data-state="access-lost"]) {
+  color: var(--danger);
+}
+.hm-project .live-status:is([data-state="stopped"], [data-state="access-lost"]) output::before {
+  background: var(--danger);
+}
+
+/* Heading: breadcrumb, title and context. */
+.hm-project .project-heading {
+  margin-bottom: var(--space-6);
+}
+.hm-project .project-heading h1 {
+  margin: 0 0 var(--space-2);
+}
+.hm-project .project-meta {
+  margin: 0;
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.hm-project .project-lead {
+  margin: 0 0 var(--space-6);
+  font: 400 17px / 26px var(--font-sans);
+  max-width: 75ch;
+  overflow-wrap: anywhere;
+}
+.hm-project .project-note {
+  margin: 0 0 var(--space-6);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Cards: each section of a page, and its facts. Wide tables scroll inside
+   the card rather than widen the page. */
+.hm-project :is(.project-card, .project-facts) {
+  margin: 0 0 var(--space-6);
+  padding: var(--space-5);
+  border: var(--border-hair) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-cell);
+}
+/* Positioned, so the visually hidden text in a table that scrolls (absolute,
+   as hm-sr-only is) is clipped with it rather than widening the page. */
+.hm-project .project-card {
+  position: relative;
+  min-width: 0;
+  overflow-x: auto;
+}
+.hm-project .project-card > h2 {
+  margin-top: 0;
+}
+.hm-project .project-card > :last-child {
+  margin-bottom: 0;
+}
+.hm-project .project-card table {
+  min-width: 560px;
+}
+.hm-project .project-card :is(th, td):first-child {
+  padding-left: 0;
+}
+.hm-project .project-card :is(th, td):last-child {
+  padding-right: 0;
+}
+.hm-project .project-card tbody tr:last-child td {
+  border-bottom: 0;
+}
+.hm-project .project-card td :is(ul, ol) {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+.hm-project .project-card .hm-alert {
+  margin-bottom: var(--space-4);
+}
+.hm-project [data-testid] > .hm-alert {
+  margin-bottom: var(--space-6);
+}
+
+/* Facts: label and value pairs on one grid. */
+.hm-project .project-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-6);
+}
+.hm-project .project-facts dt {
+  font: 700 12px / 22px var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.hm-project .project-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Text helpers */
+.hm-project :is(.muted, .meta) {
+  color: var(--ink-muted);
+}
+.hm-project :is(.intent, .meta) {
+  font: 400 13px / 18px var(--font-sans);
+}
+.hm-project .intent {
+  margin-top: var(--space-0_5);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.hm-project .markdown {
+  overflow-wrap: anywhere;
+}
+.hm-project .markdown > :last-child {
+  margin-bottom: 0;
+}
+
+/* Progress: the bar only repeats the words beside it. */
+.hm-project .progress {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.hm-project .progress progress {
+  width: 96px;
+  height: 6px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--hive-tint);
+  overflow: hidden;
+  appearance: none;
+}
+.hm-project .progress progress::-webkit-progress-bar {
+  background: var(--hive-tint);
+}
+.hm-project .progress progress::-webkit-progress-value {
+  background: var(--honey);
+}
+.hm-project .progress progress::-moz-progress-bar {
+  background: var(--honey);
+}
+
+/* Event lists: newest first, one hairline between Events. */
+.hm-project .events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hm-project .events > li {
+  padding: var(--space-3) 0;
+  border-top: var(--border-hair) solid var(--line);
+}
+.hm-project .events > li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.hm-project .events p {
+  margin: 0 0 var(--space-1);
+  overflow-wrap: anywhere;
+}
+.hm-project .events .meta {
+  margin: 0;
+}
+
+/* The ADR status filter: the current choice is text, marked by more than
+   colour. */
+.hm-project .project-filter p {
+  color: var(--ink-muted);
+}
+.hm-project .project-filter strong[aria-current] {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--honey);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+/* Pagers: small outline buttons under their list. */
+.hm-project .pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+@media (max-width: 720px) {
+  .hm-project :is(.project-card, .project-facts) {
+    padding: var(--space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .hm-project .project-facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .hm-project .project-facts dd {
+    margin-bottom: var(--space-2);
+  }
+}
+
+/* Touch targets: at least 44px tall on small screens and on any touch screen. */
+@media (max-width: 720px), (pointer: coarse) {
+  .hm-project .pager .hm-btn {
+    height: 44px;
+  }
+}

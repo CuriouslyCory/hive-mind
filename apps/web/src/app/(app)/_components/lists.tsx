@@ -20,7 +20,7 @@ export function SessionTable({
 }) {
   return (
     <table>
-      <caption className="visually-hidden">{caption}</caption>
+      <caption className="hm-sr-only">{caption}</caption>
       <thead>
         <tr>
           <th scope="col">Session</th>

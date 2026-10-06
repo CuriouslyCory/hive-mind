@@ -92,10 +92,15 @@ test("the primary nav's anchors scroll to sections of the page", async ({ page }
   }
 });
 
+/** The design-system root, which carries the theme on every page (ADR-0019). */
+function themeRoot(page: Page) {
+  return page.locator("html");
+}
+
 test("the theme switch reflects the system theme, then forces light or dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/");
-  const root = landingRoot(page);
+  const root = themeRoot(page);
   const toggle = page.getByRole("switch", { name: "Dark theme" });
   await expect(root).toHaveAttribute("data-theme", "system");
   // Checked once mounted: the system theme is dark.
@@ -116,7 +121,7 @@ test("the theme switch reflects the system theme, then forces light or dark", as
 test("a forced theme survives a client navigation away and Back", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/");
-  const root = landingRoot(page);
+  const root = themeRoot(page);
   const toggle = page.getByRole("switch", { name: "Dark theme" });
   await expect(async () => {
     await toggle.click();
@@ -127,10 +132,13 @@ test("a forced theme survives a client navigation away and Back", async ({ page 
   await page.getByRole("banner").getByRole("link", { name: "Sign in with GitHub" }).click();
   await expect(page).toHaveURL("/sign-in");
   await expect(page.getByRole("button", { name: "Sign in with GitHub" })).toBeVisible();
+  // The theme is the document's, so the page navigated to keeps it.
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator(".hm-sign-in")).toHaveCSS("background-color", "rgb(11, 21, 38)");
 
   await page.goBack();
   await expect(page).toHaveURL("/");
-  await expect(root).toBeVisible();
+  await expect(landingRoot(page)).toBeVisible();
   await expect(root).toHaveAttribute("data-theme", "dark");
   await expect(toggle).toHaveAttribute("aria-checked", "true");
 });

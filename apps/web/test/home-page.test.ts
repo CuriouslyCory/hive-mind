@@ -18,8 +18,6 @@ import { AS_OF, homeDashboard, PROJECT_A, PROJECT_B } from "./support/home-dashb
 // `HomeDashboard` (./support/home-dashboard.ts): links built with
 // `homeHref`, empty states, attribution, the list views and the analytics.
 
-// next/font only works inside a Next build; the class name stands in for it.
-vi.mock("../src/design-system/fonts", () => ({ designSystemFontClassName: "fonts" }));
 // The filter, the tabs and the freshness line use the App Router, which is
 // not mounted here.
 vi.mock("next/navigation", () => ({
@@ -76,10 +74,21 @@ describe("the home view", () => {
   it("names the page and the viewer, with Dashboard as the current breadcrumb", () => {
     expect(html).toMatch(/<h1[^>]*>Dashboard<\/h1>/);
     expect(text(html)).toContain("Signed in as Cory");
+    expect(html).toContain('<nav aria-label="Breadcrumb"');
     expect(html).toMatch(/<span aria-current="page"[^>]*>Dashboard<\/span>/);
-    expect(hrefOf(html, "HiveMind home")).toBe("/");
-    expect(html).toContain('id="home-main"');
-    expect(hrefOf(html, "Skip to main content")).toBe("#home-main");
+  });
+
+  it("leaves the skip link, top bar and main landmark to the app shell", () => {
+    expect(html).not.toContain("<main");
+    expect(html).not.toContain("<header");
+    expect(hrefOf(html, "Skip to main content")).toBeUndefined();
+    expect(hrefOf(html, "HiveMind home")).toBeUndefined();
+  });
+
+  it("leads a list view's breadcrumb back to the Dashboard", () => {
+    const plans = page({ view: "plans" });
+    expect(hrefOf(plans, "Dashboard")).toBe("/");
+    expect(plans).toMatch(/<span aria-current="page"[^>]*>Plans<\/span>/);
   });
 
   it("links the rail to each Project's view, marking the selected one", () => {

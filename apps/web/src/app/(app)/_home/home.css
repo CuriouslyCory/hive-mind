@@ -1,33 +1,11 @@
-/* The signed-in home page, `/` (page.tsx and ./*.tsx). Every rule is scoped
-   under .hm-home: Next keeps global stylesheets loaded after client
-   navigation and Cache Components keeps a visited page mounted but hidden,
-   so an unscoped rule would reach the Project pages. The other way round,
-   the (app) layout's dashboard.css styles body, tables, links' focus and a
-   few class names (.muted, .status, .events, …) globally; this page uses
-   none of those class names and restyles what it shares with them (the
-   root's box, tables, focus) at a higher specificity. Breakpoints are 1024px
-   and 720px, as on the public pages. */
+/* The signed-in home page, `/` (page.tsx and ./*.tsx), inside the app shell
+   (../_shell). Every rule is scoped under .hm-home: Next keeps global
+   stylesheets loaded after client navigation and Cache Components keeps a
+   visited page mounted but hidden, so an unscoped rule would reach the
+   Project pages. The element defaults, the focus ring and the theme come
+   from the design system's baseline (ADR-0019). Breakpoints are 1024px and
+   720px, as on the public pages. */
 
-/* The page root. Positioned against the initial containing block, so it
-   spans the viewport whatever margin, padding and max-width <body> has. */
-.hm-home {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface-sunken);
-  color: var(--ink);
-}
-.hm-home :where(a, button, input, main):focus-visible {
-  outline: var(--border-focus) solid var(--focus);
-  outline-offset: 2px;
-}
-.hm-home main:focus {
-  outline: none;
-}
 /* Element defaults, at zero specificity so every class below and in the
    design system wins over them. */
 :where(.hm-home) :where(h1, h2, p, ul, ol, dl, dd, figure) {
@@ -51,25 +29,6 @@
   position: absolute;
   white-space: nowrap;
   width: 1px;
-}
-
-/* Skip link: off screen until focused. */
-.hm-home .home-skip {
-  position: absolute;
-  top: var(--space-3);
-  left: var(--space-3);
-  z-index: 10;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  color: var(--ink);
-  font: 700 15px / 22px var(--font-sans);
-  box-shadow: var(--shadow-float);
-  text-decoration: none;
-  transform: translateY(-200%);
-}
-.hm-home .home-skip:focus-visible {
-  transform: none;
 }
 
 /* Text helpers */
@@ -121,113 +80,14 @@
   text-underline-offset: 3px;
 }
 
-/* The content column. */
-.hm-home .home-wrap {
-  max-width: 1320px;
-  margin: 0 auto;
-  padding-left: clamp(16px, 4vw, 48px);
-  padding-right: clamp(16px, 4vw, 48px);
-}
-
-/* Top bar */
-.hm-home .home-topbar {
-  background: var(--surface);
-  border-bottom: var(--border-hair) solid var(--line);
-}
-.hm-home .home-topbar-inner {
-  min-height: 64px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-4);
-}
-.hm-home .home-logo {
-  display: inline-flex;
-  border-radius: var(--radius-lg);
-  flex: none;
-}
-.hm-home .home-logo .hm-logo-tile {
-  padding: var(--space-1) var(--space-2);
-}
-.hm-home .home-breadcrumb {
-  min-width: 0;
-  font: 700 15px / 22px var(--font-sans);
-  color: var(--ink-muted);
-}
-.hm-home .home-breadcrumb ol,
-.hm-home .home-breadcrumb li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-.hm-home .home-crumb-current {
-  color: var(--ink);
-  padding: var(--space-1) var(--space-2);
-}
-.hm-home .home-crumb-link {
-  color: var(--ink-muted);
-  text-decoration: none;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-md);
-  transition:
-    background-color var(--duration-fast),
-    color var(--duration-fast);
-}
-.hm-home .home-crumb-link:hover {
-  background: var(--hive-tint);
-  color: var(--ink);
-}
-.hm-home .home-crumb-sep {
-  color: var(--ink-faint);
-}
-.hm-home .home-topbar-right {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.hm-home .site-theme {
-  display: inline-flex;
-}
-.hm-home .home-viewer {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font: 700 13px / 18px var(--font-sans);
-  min-width: 0;
-}
-.hm-home .home-viewer > span:first-child {
-  display: inline-flex;
-}
-.hm-home .home-viewer-initial {
-  font: 800 12px / 1 var(--font-display);
-}
-.hm-home .home-viewer-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 16ch;
-}
-.hm-home .home-topbar-right [role="alert"] {
-  font: 400 13px / 18px var(--font-sans);
-  color: var(--danger);
-}
-
-/* Body: the Projects rail and main, side by side; the rail wraps above main
-   when there is no room for both. */
+/* Body: the Projects rail and the page's content, side by side; the rail
+   wraps above the content when there is no room for both. */
 .hm-home .home-body {
-  flex: 1;
-  width: 100%;
-  max-width: 1320px;
-  margin: 0 auto;
-  padding: var(--space-8) clamp(16px, 4vw, 48px) var(--space-16);
+  margin-top: var(--space-4);
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--space-8);
-}
-.hm-home .home-loading {
-  color: var(--ink-muted);
 }
 
 /* Projects rail */
@@ -741,11 +601,7 @@
 
 @media (max-width: 720px) {
   .hm-home .home-body {
-    padding-top: var(--space-6);
     gap: var(--space-6);
-  }
-  .hm-home .home-viewer-name {
-    display: none;
   }
   .hm-home .home-range {
     margin-left: 0;
@@ -757,20 +613,8 @@
 
 /* Touch targets: at least 44px tall on small screens and on any touch screen. */
 @media (max-width: 720px), (pointer: coarse) {
-  .hm-home .home-logo,
-  .hm-home .home-crumb-link,
-  .hm-home .home-rail-item,
-  .hm-home .home-topbar-right .hm-switch {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-  }
   .hm-home .home-rail-item {
-    display: flex;
-  }
-  .hm-home .home-topbar-right .hm-switch {
-    min-width: 44px;
-    justify-content: center;
+    min-height: 44px;
   }
   .hm-home .hm-btn,
   .hm-home .hm-tab {
@@ -782,13 +626,5 @@
 @media (prefers-reduced-motion: reduce) {
   .hm-home .home-cell-link .hm-cell {
     transition: none;
-  }
-}
-
-/* Printed, the page flows from the top of the first sheet like any other. */
-@media print {
-  .hm-home {
-    position: static;
-    min-height: 0;
   }
 }

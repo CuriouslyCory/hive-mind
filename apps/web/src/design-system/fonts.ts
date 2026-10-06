@@ -29,8 +29,8 @@ const jetBrainsMono = localFont({
 });
 
 /**
- * Put this on the root element of a page that uses the design system. It
- * loads the fonts for that page only and points the font tokens at them.
+ * The root layout puts this on <html> (ADR-0019), so every page loads the
+ * fonts and the font tokens point at them.
  */
 export const designSystemFontClassName = [
   sora.variable,

@@ -1,3 +1,6 @@
-/* The whole design system in one import: tokens first, then components. */
+/* The whole design system in one import, which the root layout makes:
+   tokens first, then the baseline element styles (in the hm-base layer),
+   then the components. */
 @import "./tokens.css";
+@import "./base.css";
 @import "./components.css";

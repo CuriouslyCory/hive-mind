@@ -1,0 +1,66 @@
+/* The CLI's device approval page (page.tsx), framed like sign-in. The page
+   root, top bar and footer are the site frame's (apps/web/src/site/site.css),
+   and the element defaults come from the design system's baseline
+   (ADR-0019). Every rule is scoped under .hm-device: Next keeps global
+   stylesheets loaded after client navigation, and Cache Components keeps a
+   visited page mounted but hidden, so an unscoped rule would reach the other
+   pages. */
+
+:where(.hm-device) :where(h1, p) {
+  margin: 0;
+}
+
+.hm-device .dv-main {
+  display: grid;
+  place-items: center;
+  padding: clamp(24px, 6vw, 64px) clamp(16px, 5vw, 48px);
+  background: var(--surface-sunken);
+}
+.hm-device .dv-card {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-8);
+  background: var(--surface-raised);
+  border: var(--border-hair) solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-cell);
+}
+.hm-device .dv-muted {
+  color: var(--ink-muted);
+  text-wrap: pretty;
+}
+/* The code to compare with the terminal: large enough to read at a glance. */
+.hm-device .dv-code strong {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: 0.08em;
+}
+.hm-device :is(.dv-form, .dv-decision) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+.hm-device .dv-form .hm-field {
+  flex: 1 1 220px;
+}
+
+@media (max-width: 480px) {
+  .hm-device .dv-card {
+    padding: var(--space-6) var(--space-4);
+  }
+}
+
+/* Touch targets: at least 44px tall on small screens and on any touch screen. */
+@media (max-width: 720px), (pointer: coarse) {
+  .hm-device .dv-card .hm-btn {
+    height: 44px;
+  }
+}

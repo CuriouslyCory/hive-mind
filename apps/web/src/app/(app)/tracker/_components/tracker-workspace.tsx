@@ -66,7 +66,7 @@ export function TrackerWorkspace({
       <p role="status" className="tracker-status" data-kind={status?.kind}>
         {status?.text}
       </p>
-      <div role="tablist" aria-label="Tracker sections" className="tracker-tabs">
+      <div role="tablist" aria-label="Tracker sections" className="hm-tabs tracker-tabs">
         {TRACKER_TABS.map((id, index) => (
           <button
             key={id}
@@ -76,6 +76,7 @@ export function TrackerWorkspace({
             }}
             type="button"
             role="tab"
+            className="hm-tab"
             id={tabId(id)}
             aria-controls={panelId(id)}
             aria-selected={tab === id}

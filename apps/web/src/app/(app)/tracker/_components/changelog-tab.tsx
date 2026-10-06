@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChangelogEntryView, TrackerScanView } from "@hivemind/tracker";
+import { Badge } from "../../../../design-system/badge";
 import { useTracker } from "./runner";
 import { ScanCard } from "./scan-card";
 import {
@@ -99,16 +100,16 @@ function Entry({
       ) : (
         <>
           <p className="tracker-meta">
-            <span className="status">
-              <span className="visually-hidden">Category: </span>
+            <Badge>
+              <span className="hm-sr-only">Category: </span>
               {entry.category}
-            </span>
+            </Badge>
           </p>
           <p className="tracker-prose">{entry.summary}</p>
           <PrLinks numbers={entry.prNumbers} />
           <div className="tracker-actions">
             <button id={editId} type="button" onClick={() => onEdit(editId)}>
-              Edit<span className="visually-hidden"> {entry.title}</span>
+              Edit<span className="hm-sr-only"> {entry.title}</span>
             </button>
             <DeleteButton
               label={entry.title}

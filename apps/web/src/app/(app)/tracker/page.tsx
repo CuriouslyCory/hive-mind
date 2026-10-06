@@ -13,7 +13,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-// `/tracker`: the dev tracker (docs/tracker.md), a 404 outside local
+// `/tracker`: the dev tracker (docs/tracker.md), inside the app shell; every
+// rule of tracker.css is scoped under .tracker. It is a 404 outside local
 // `next dev`. NODE_ENV is inlined at build time, so a production build
 // prerenders the 404 with its status; checking it inside Suspense would stream
 // a 200 first. The heading is the static shell; the host and login session
@@ -21,12 +22,18 @@ export const metadata: Metadata = {
 export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
   if (process.env.NODE_ENV !== "development") notFound();
   return (
-    <main className="tracker">
+    <div className="tracker">
       <h1>Development tracker</h1>
-      <Suspense fallback={<p role="status">Loading the tracker…</p>}>
+      <Suspense
+        fallback={
+          <p role="status" className="app-loading">
+            Loading the tracker…
+          </p>
+        }
+      >
         <Tracker searchParams={searchParams} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 

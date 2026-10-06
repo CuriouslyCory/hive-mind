@@ -12,11 +12,17 @@ type Props = PageProps<"/projects/[projectId]/plans/[planKey]">;
 // session, params and data are request-time reads, inside Suspense.
 export default function PlanPage({ params, searchParams }: Props) {
   return (
-    <main>
-      <Suspense fallback={<p role="status">Loading the Plan…</p>}>
+    <div>
+      <Suspense
+        fallback={
+          <p role="status" className="app-loading">
+            Loading the Plan…
+          </p>
+        }
+      >
         <Plan params={params} searchParams={searchParams} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 

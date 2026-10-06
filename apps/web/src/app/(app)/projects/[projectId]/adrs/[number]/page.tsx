@@ -12,11 +12,17 @@ type Props = PageProps<"/projects/[projectId]/adrs/[number]">;
 // session, params and data are request-time reads, inside Suspense.
 export default function AdrPage({ params }: Props) {
   return (
-    <main>
-      <Suspense fallback={<p role="status">Loading the ADR…</p>}>
+    <div>
+      <Suspense
+        fallback={
+          <p role="status" className="app-loading">
+            Loading the ADR…
+          </p>
+        }
+      >
         <Adr params={params} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 

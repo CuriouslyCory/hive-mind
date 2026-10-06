@@ -24,13 +24,13 @@ export function adrStatusText(status: AdrStatus): string {
 export function AdrSyncBanner({ lastSync, asOf }: { lastSync: AdrSyncView | null; asOf: Date }) {
   if (lastSync === null) {
     return (
-      <p data-testid="adr-sync-banner">
+      <p className="project-note" data-testid="adr-sync-banner">
         No ADRs synced yet. Run <code>hivemind adr sync</code> on the default branch.
       </p>
     );
   }
   return (
-    <p data-testid="adr-sync-banner">
+    <p className="project-note" data-testid="adr-sync-banner">
       Copied from <code>docs/adr/</code> at commit <code>{lastSync.commitSha.slice(0, 7)}</code>,
       synced <Timestamp date={lastSync.syncedAt} asOf={asOf} /> by{" "}
       <AttributionText value={lastSync.syncedBy} />. The files in the repository are the source of

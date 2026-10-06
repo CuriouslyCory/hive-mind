@@ -3,6 +3,7 @@
 import type { ScanKind, TrackerScanView } from "@hivemind/tracker";
 import { TRACKER_SCAN_SKILLS } from "@hivemind/tracker/constants";
 import { useRef, useState } from "react";
+import { buttonClassName } from "../../../../design-system/button";
 import { useTracker } from "./runner";
 import { Field, formText, TimeText } from "./shared";
 
@@ -98,7 +99,7 @@ export function ScanCard({ kind, scan }: { kind: ScanKind; scan: TrackerScanView
           }}
         >
           <fieldset>
-            <legend className="visually-hidden">Record a completed {title}</legend>
+            <legend className="hm-sr-only">Record a completed {title}</legend>
             <Field
               label="Cursor"
               hint={
@@ -138,7 +139,7 @@ export function ScanCard({ kind, scan }: { kind: ScanKind; scan: TrackerScanView
               {(props) => <textarea {...props} name="note" rows={2} />}
             </Field>
             <div className="tracker-actions">
-              <button type="submit" className="tracker-primary">
+              <button type="submit" className={buttonClassName({ variant: "primary" })}>
                 {saving ? "Saving…" : "Record scan"}
               </button>
             </div>

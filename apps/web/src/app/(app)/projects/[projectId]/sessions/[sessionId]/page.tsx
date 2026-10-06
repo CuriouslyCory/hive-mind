@@ -12,11 +12,17 @@ type Props = PageProps<"/projects/[projectId]/sessions/[sessionId]">;
 // login session, params and data are request-time reads, inside Suspense.
 export default function SessionPage({ params, searchParams }: Props) {
   return (
-    <main>
-      <Suspense fallback={<p role="status">Loading the Session…</p>}>
+    <div>
+      <Suspense
+        fallback={
+          <p role="status" className="app-loading">
+            Loading the Session…
+          </p>
+        }
+      >
         <SessionContent params={params} searchParams={searchParams} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 

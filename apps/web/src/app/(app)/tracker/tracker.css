@@ -1,37 +1,15 @@
-/* The dev tracker (docs/tracker.md), on top of dashboard.css. As there,
-   status is spelled out in text and color only repeats it, and focus stays
-   visible on every control. */
+/* The dev tracker (docs/tracker.md), inside the app shell. The design
+   system's baseline styles its type, links, form controls and focus
+   (ADR-0019): a control without a design-system class looks like the
+   outline Button or the Input, and the primary and danger actions use the
+   Button's classes. This file lays out the tracker's cards, lists and forms.
+   Every rule is scoped under .tracker, the page's root: Next keeps global
+   stylesheets loaded after client navigation, so an unscoped rule would
+   reach the other pages. Status is spelled out in text; colour only repeats
+   it. */
 
-.tracker input:focus-visible,
-.tracker textarea:focus-visible,
-.tracker select:focus-visible {
-  outline: 3px solid #1a5fb4;
-  outline-offset: 2px;
-}
-
-.tracker button {
-  background: #f4f4f4;
-  border: 1px solid #777;
-  border-radius: 0.25rem;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  padding: 0.2rem 0.7rem;
-}
-
-.tracker button:hover {
-  background: #e4e4e4;
-}
-
-.tracker button.tracker-primary {
-  background: #1a5fb4;
-  border-color: #1a5fb4;
-  color: #fff;
-}
-
-.tracker button.tracker-danger {
-  border-color: #a51d2d;
-  color: #a51d2d;
+.tracker .muted {
+  color: var(--ink-muted);
 }
 
 /* A confirm button whose action is running (aria-disabled keeps its focus). */
@@ -40,265 +18,194 @@
   opacity: 0.7;
 }
 
-.tracker input:not([type="checkbox"]),
-.tracker textarea,
-.tracker select {
-  border: 1px solid #777;
-  border-radius: 0.25rem;
-  font: inherit;
-  padding: 0.3rem 0.4rem;
-}
-
-.tracker textarea {
-  resize: vertical;
-}
-
-.tracker input:disabled,
-.tracker textarea:disabled,
-.tracker select:disabled,
-.tracker input[readonly] {
-  background: #eee;
-  color: #555;
-}
-
 .tracker pre {
-  background: #f4f4f4;
   max-height: 20rem;
   overflow: auto;
   overflow-wrap: anywhere;
-  padding: 0.5rem;
   white-space: pre-wrap;
 }
 
 .tracker details > summary {
-  color: #1a5fb4;
-  cursor: pointer;
+  font-weight: 700;
 }
 
-/* The last action's outcome; keeps its height while empty. */
-.tracker-status {
-  min-height: 1.5em;
+/* The last action's outcome; keeps its height while empty. Its words carry
+   the outcome, the dot only repeats it. */
+.tracker .tracker-status {
+  min-height: 22px;
+  margin: 0;
+}
+.tracker .tracker-status:is([data-kind="error"], [data-kind="done"])::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: var(--space-2);
+  border-radius: var(--radius-pill);
+  vertical-align: 1px;
+}
+.tracker .tracker-status[data-kind="error"] {
+  color: var(--danger);
+}
+.tracker .tracker-status[data-kind="error"]::before {
+  background: var(--danger);
+}
+.tracker .tracker-status[data-kind="done"]::before {
+  background: var(--success);
 }
 
-.tracker-status[data-kind="error"] {
-  border-left: 3px solid #a51d2d;
-  padding-left: 0.5rem;
+.tracker .tracker-tabs {
+  margin: var(--space-4) 0 var(--space-6);
 }
 
-.tracker-status[data-kind="done"] {
-  border-left: 3px solid #1d6b2f;
-  padding-left: 0.5rem;
-}
-
-/* The selected tab is bold and joined to the panel, not only colored. */
-.tracker-tabs {
-  border-bottom: 1px solid #999;
-  display: flex;
-  gap: 0.25rem;
-  margin: 1rem 0;
-}
-
-.tracker .tracker-tabs [role="tab"] {
-  background: none;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 0.375rem 0.375rem 0 0;
-  margin-bottom: -1px;
-  padding: 0.4rem 1rem;
-}
-
-.tracker .tracker-tabs [role="tab"][aria-selected="true"] {
-  background: #fff;
-  border-color: #999;
-  border-bottom: 1px solid #fff;
-  font-weight: 600;
-}
-
-.tracker-grid {
+.tracker .tracker-grid {
   display: grid;
-  gap: 0 1rem;
+  gap: 0 var(--space-6);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
 }
 
-.tracker-card {
-  border: 1px solid #ccc;
-  border-radius: 0.375rem;
-  margin: 0 0 1rem;
-  padding: 0.5rem 1rem;
+/* Cards: the scan cards and Up next. */
+.tracker .tracker-card {
+  margin: 0 0 var(--space-6);
+  padding: var(--space-5);
+  border: var(--border-hair) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-cell);
+  min-width: 0;
+}
+.tracker .tracker-card h2 {
+  margin: 0 0 var(--space-3);
+}
+/* Up next is the selected tile: the honey halo, beside its heading. */
+.tracker .tracker-next {
+  box-shadow: var(--shadow-cell), var(--shadow-glow);
+}
+.tracker .tracker-next-step {
+  font-weight: 700;
 }
 
-.tracker-card h2 {
-  font-size: 1.15rem;
-  margin: 0.25rem 0 0.5rem;
-}
-
-.tracker-next {
-  border-left: 4px solid #1a5fb4;
-}
-
-.tracker-next-step {
-  font-weight: 600;
-}
-
-.tracker-facts {
+.tracker .tracker-facts {
   display: grid;
-  gap: 0.1rem 1rem;
-  grid-template-columns: max-content 1fr;
-  margin: 0 0 0.5rem;
+  gap: var(--space-1) var(--space-4);
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: 0 0 var(--space-3);
 }
-
-.tracker-facts > div {
+.tracker .tracker-facts > div {
   display: contents;
 }
-
-.tracker-facts dt {
-  font-weight: 600;
+.tracker .tracker-facts dt {
+  font-weight: 700;
 }
-
-.tracker-facts dd {
+.tracker .tracker-facts dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.tracker-toolbar {
-  align-items: center;
+.tracker .tracker-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  margin: 0 0 1rem;
+  align-items: center;
+  gap: var(--space-2) var(--space-6);
+  margin: 0 0 var(--space-4);
 }
-
-.tracker-toolbar p {
+.tracker .tracker-toolbar p {
   margin: 0;
 }
 
-.tracker-actions {
-  align-items: center;
+.tracker .tracker-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.5rem 0;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
 }
 
-.tracker-confirm {
-  align-items: center;
+.tracker .tracker-confirm {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.tracker-day,
-.tracker-phase > h2 {
-  border-bottom: 1px solid #ccc;
-  font-size: 1.2rem;
-  margin: 1.5rem 0 0.5rem;
-  padding-bottom: 0.25rem;
+/* Day and phase headings, and the entries, ideas and issues under them. */
+.tracker :is(.tracker-day, .tracker-phase > h2) {
+  margin: var(--space-8) 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-hair) solid var(--line);
 }
-
-.tracker-item,
-.tracker-issue {
-  border: 1px solid #ddd;
-  border-radius: 0.375rem;
-  margin: 0.75rem 0;
-  padding: 0.25rem 0.75rem;
+.tracker :is(.tracker-item, .tracker-issue) {
+  margin: var(--space-3) 0;
+  padding: var(--space-4);
+  border: var(--border-hair) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-cell);
 }
-
-.tracker-item h3,
-.tracker-issue h3,
-.tracker-item-title {
-  font-size: 1.05rem;
-  margin: 0.4rem 0;
+.tracker :is(.tracker-item h3, .tracker-issue h3, .tracker-item-title) {
+  margin: 0 0 var(--space-2);
+  font-size: 17px;
+  line-height: 24px;
 }
-
-.tracker-meta {
-  margin: 0.25rem 0;
+.tracker .tracker-meta {
+  margin: var(--space-1) 0;
 }
-
-.tracker-prose {
+.tracker .tracker-prose {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-
-.tracker-prs {
-  margin: 0.25rem 0;
+.tracker .tracker-prs {
+  margin: var(--space-1) 0;
 }
 
-.tracker-steps {
-  list-style: none;
-  margin: 0.5rem 0;
+.tracker .tracker-steps {
+  margin: var(--space-2) 0;
   padding: 0;
+  list-style: none;
 }
-
-.tracker-steps > li {
-  border-top: 1px solid #eee;
-  padding: 0.5rem 0;
+.tracker .tracker-steps > li {
+  padding: var(--space-2) 0;
+  border-top: var(--border-hair) solid var(--line);
 }
-
-.tracker-step-head {
-  align-items: baseline;
+.tracker .tracker-step-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: baseline;
+  gap: var(--space-2);
 }
-
-.tracker-step-head label {
-  font-weight: 600;
-}
-
 .tracker input[type="checkbox"] {
-  height: 1.1rem;
-  width: 1.1rem;
+  width: 18px;
+  height: 18px;
 }
 
-.tracker-form fieldset {
-  border: 1px solid #bbb;
-  border-radius: 0.375rem;
+/* Forms */
+.tracker .tracker-form fieldset {
   display: grid;
-  gap: 0.75rem 1rem;
+  gap: var(--space-3) var(--space-4);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  margin: 0.5rem 0;
-  padding: 0.75rem;
+  margin: var(--space-2) 0;
+  background: var(--surface-raised);
 }
-
-.tracker-form legend {
-  font-weight: 600;
-  padding: 0 0.25rem;
-}
-
-.tracker-field {
+.tracker .tracker-field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: var(--space-1);
 }
-
-.tracker-field label {
-  font-weight: 600;
-}
-
-.tracker-field-wide,
-.tracker-form .tracker-actions {
+.tracker :is(.tracker-field-wide, .tracker-form .tracker-actions) {
   grid-column: 1 / -1;
 }
-
-.tracker-hint {
-  color: #555;
-  font-size: 0.85em;
+.tracker .tracker-hint {
   margin: 0;
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+}
+.tracker .tracker-mono {
+  font-family: var(--font-mono);
 }
 
-.tracker-mono {
-  font-family: ui-monospace, monospace;
-}
-
-.tracker-issue-open,
-.tracker-blog-published {
-  color: #1d6b2f;
-}
-
-.tracker-issue-closed {
-  color: #555;
-}
-
-.tracker-blog-draft {
-  color: #8a4b00;
+/* Touch targets: at least 44px tall on small screens and on any touch screen. */
+@media (max-width: 720px), (pointer: coarse) {
+  .tracker :is(button, .hm-btn) {
+    min-height: 44px;
+  }
 }

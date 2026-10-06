@@ -30,11 +30,10 @@ export function AdrListView({
         asOf={asOf}
         scope={{ kind: "adrs" }}
       />
-      <ProjectHeading project={project} asOf={asOf} linked />
-      <h1>ADRs</h1>
+      <ProjectHeading project={project} asOf={asOf} trail={[{ label: "ADRs" }]} title="ADRs" />
       <AdrSyncBanner lastSync={list.lastSync} asOf={asOf} />
 
-      <section aria-labelledby="adrs-published" data-testid="adr-list">
+      <section className="project-card" aria-labelledby="adrs-published" data-testid="adr-list">
         <h2 id="adrs-published">
           {list.status === null ? "All ADRs" : `${adrStatusText(list.status)} ADRs`}
         </h2>
@@ -53,7 +52,11 @@ export function AdrListView({
         />
       </section>
 
-      <section aria-labelledby="adrs-reserved" data-testid="adr-reservations">
+      <section
+        className="project-card"
+        aria-labelledby="adrs-reserved"
+        data-testid="adr-reservations"
+      >
         <h2 id="adrs-reserved">Reserved, not merged yet</h2>
         <p className="muted">
           Numbers handed out by <code>hivemind adr new</code> whose file is not in a synced commit
@@ -63,7 +66,7 @@ export function AdrListView({
           <p>No reserved numbers are waiting.</p>
         ) : (
           <table>
-            <caption className="visually-hidden">Reserved ADR numbers, newest first</caption>
+            <caption className="hm-sr-only">Reserved ADR numbers, newest first</caption>
             <thead>
               <tr>
                 <th scope="col">ADR</th>
@@ -110,7 +113,7 @@ export function AdrListView({
       </section>
 
       {(list.removed.items.length > 0 || cursors.removed !== undefined) && (
-        <section aria-labelledby="adrs-removed">
+        <section className="project-card" aria-labelledby="adrs-removed">
           <h2 id="adrs-removed">Removed from the repository</h2>
           <p className="muted">
             An earlier sync found these files and a later one did not. hive-mind keeps their last
@@ -141,7 +144,7 @@ function StatusFilter({ path, status }: { path: Route; status: AdrStatus | null 
     ...ADR_STATUSES.map((value) => ({ value, label: adrStatusText(value) })),
   ];
   return (
-    <nav aria-label="Filter ADRs by status">
+    <nav aria-label="Filter ADRs by status" className="project-filter">
       <p>
         Status:{" "}
         {choices.map((choice, index) => (
@@ -172,7 +175,7 @@ function AdrTable({
 }) {
   return (
     <table>
-      <caption className="visually-hidden">{caption}</caption>
+      <caption className="hm-sr-only">{caption}</caption>
       <thead>
         <tr>
           <th scope="col">ADR</th>

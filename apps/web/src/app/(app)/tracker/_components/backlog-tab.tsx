@@ -9,6 +9,8 @@ import type {
 } from "@hivemind/tracker";
 import { issueUrl } from "@hivemind/tracker/constants";
 import { useEffect, useRef, useState } from "react";
+import { Badge } from "../../../../design-system/badge";
+import { buttonClassName } from "../../../../design-system/button";
 import { IssueForm, PhaseForm, StepForm } from "./backlog-forms";
 import { useTracker } from "./runner";
 import { ScanCard } from "./scan-card";
@@ -148,17 +150,17 @@ function UpNext({ next }: { next: NextStepView | null }) {
             <p>
               <button
                 type="button"
-                className="tracker-primary"
+                className={buttonClassName({ variant: "primary" })}
                 onClick={() => void copyPrompt(next.step)}
               >
-                Copy prompt<span className="visually-hidden"> for {next.step.label}</span>
+                Copy prompt<span className="hm-sr-only"> for {next.step.label}</span>
               </button>{" "}
               <span className="muted">Copying marks the step complete.</span>
             </p>
           ) : (
             <p>
               <button type="button" onClick={() => void setStepComplete(next.step, true)}>
-                Mark complete<span className="visually-hidden"> {next.step.label}</span>
+                Mark complete<span className="hm-sr-only"> {next.step.label}</span>
               </button>{" "}
               <span className="muted">This step has no prompt.</span>
             </p>
@@ -204,7 +206,7 @@ function Phase({
               type="button"
               onClick={() => editor.open({ kind: "phase", phase }, editId)}
             >
-              Edit phase<span className="visually-hidden"> {phase.title}</span>
+              Edit phase<span className="hm-sr-only"> {phase.title}</span>
             </button>
             {phase.issues.length === 0 ? (
               <DeleteButton
@@ -248,7 +250,7 @@ function Phase({
               editor.open({ kind: "issue", phaseId: phase.id, issue: null }, addIssueId(phase))
             }
           >
-            Add issue<span className="visually-hidden"> to {phase.title}</span>
+            Add issue<span className="hm-sr-only"> to {phase.title}</span>
           </button>
         </p>
       )}
@@ -289,10 +291,10 @@ function Issue({
       ) : (
         <>
           <p className="tracker-meta">
-            <span className={`status tracker-issue-${issue.state}`}>
-              <span className="visually-hidden">State: </span>
+            <Badge tone={issue.state === "open" ? "success" : "neutral"}>
+              <span className="hm-sr-only">State: </span>
               {issue.state === "open" ? "Open" : "Closed"}
-            </span>{" "}
+            </Badge>{" "}
             {done} of {issue.steps.length} steps complete
           </p>
           {issue.note ? <p className="tracker-prose muted">{issue.note}</p> : null}
@@ -321,14 +323,14 @@ function Issue({
           type="button"
           onClick={() => editor.open({ kind: "step", issue, step: null }, addStepId(issue))}
         >
-          Add step<span className="visually-hidden"> to #{issue.issueNumber}</span>
+          Add step<span className="hm-sr-only"> to #{issue.issueNumber}</span>
         </button>
         <button
           id={editId}
           type="button"
           onClick={() => editor.open({ kind: "issue", phaseId: phase.id, issue }, editId)}
         >
-          Edit issue<span className="visually-hidden"> #{issue.issueNumber}</span>
+          Edit issue<span className="hm-sr-only"> #{issue.issueNumber}</span>
         </button>
         <DeleteButton
           label={`issue #${issue.issueNumber}`}
@@ -387,7 +389,7 @@ function Step({
       <div className="tracker-actions">
         {step.prompt !== null ? (
           <button type="button" onClick={() => void copyPrompt(step)}>
-            Copy prompt<span className="visually-hidden"> for {step.label}</span>
+            Copy prompt<span className="hm-sr-only"> for {step.label}</span>
           </button>
         ) : (
           <span className="muted">No prompt.</span>
@@ -397,7 +399,7 @@ function Step({
           type="button"
           onClick={() => editor.open({ kind: "step", issue, step }, editId)}
         >
-          Edit step<span className="visually-hidden"> {step.label}</span>
+          Edit step<span className="hm-sr-only"> {step.label}</span>
         </button>
         <DeleteButton
           label={`step ${step.label}`}
@@ -415,7 +417,7 @@ function Step({
       {step.prompt !== null ? (
         <details>
           <summary>
-            Show prompt<span className="visually-hidden"> for {step.label}</span>
+            Show prompt<span className="hm-sr-only"> for {step.label}</span>
           </summary>
           <p className="tracker-hint">Copying text from it also marks the step complete.</p>
           <pre

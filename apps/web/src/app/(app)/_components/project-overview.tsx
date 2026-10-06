@@ -2,6 +2,7 @@ import { formatAdrNumber } from "@hivemind/contract";
 import type { Route } from "next";
 import Link from "next/link";
 import { ProjectLivePage } from "../../../components/dashboard/project-live-updates";
+import { Alert } from "../../../design-system/alert";
 import type { OverlapView, ProjectOverview, SessionLabel } from "../../../server/dashboard/queries";
 import { adrStatusText } from "./adr-format";
 import { AttributionText, Optional, ProgressText, SessionStatusText, Timestamp } from "./format";
@@ -31,7 +32,7 @@ export function ProjectOverviewView({
       />
       <ProjectHeading project={project} asOf={asOf} />
 
-      <section aria-labelledby="active-plans">
+      <section className="project-card" aria-labelledby="active-plans">
         <h2 id="active-plans">Active Plans</h2>
         {overview.activePlans.items.length === 0 ? (
           <p>No active Plans.</p>
@@ -68,7 +69,7 @@ export function ProjectOverviewView({
         />
       </section>
 
-      <section aria-labelledby="overlaps">
+      <section className="project-card" aria-labelledby="overlaps">
         <h2 id="overlaps">Overlap warnings</h2>
         <p className="muted">
           Live Sessions whose Scopes overlap. Warnings are advisory: they never block work.
@@ -87,23 +88,20 @@ export function ProjectOverviewView({
           </ul>
         )}
         {!overview.overlaps.complete && (
-          <p className="warning">
-            <strong>Incomplete:</strong> some overlaps may be missing, because a Session's
-            touched-path record is incomplete or there were more Sessions or results than one check
-            covers.
-          </p>
+          <Alert tone="warning" live={false} title="Incomplete">
+            Some overlaps may be missing, because a Session's touched-path record is incomplete or
+            there were more Sessions or results than one check covers.
+          </Alert>
         )}
       </section>
 
-      <section aria-labelledby="live-sessions">
+      <section className="project-card" aria-labelledby="live-sessions">
         <h2 id="live-sessions">Live Sessions</h2>
         {overview.liveSessions.items.length === 0 ? (
           <p>No live Sessions.</p>
         ) : (
           <table>
-            <caption className="visually-hidden">
-              Live Sessions, most recent heartbeat first
-            </caption>
+            <caption className="hm-sr-only">Live Sessions, most recent heartbeat first</caption>
             <thead>
               <tr>
                 <th scope="col">Session</th>
@@ -175,7 +173,7 @@ export function ProjectOverviewView({
         )}
       </section>
 
-      <section aria-labelledby="recent-sessions">
+      <section className="project-card" aria-labelledby="recent-sessions">
         <h2 id="recent-sessions">Recent Sessions</h2>
         {overview.recentSessions.items.length === 0 ? (
           <p>No ended or abandoned Sessions.</p>
@@ -196,7 +194,7 @@ export function ProjectOverviewView({
         />
       </section>
 
-      <section aria-labelledby="recent-adrs" data-testid="recent-adrs">
+      <section className="project-card" aria-labelledby="recent-adrs" data-testid="recent-adrs">
         <h2 id="recent-adrs">Recent ADRs</h2>
         {overview.recentAdrs.length === 0 ? (
           <p>No ADRs synced yet.</p>

@@ -13,11 +13,17 @@ type Props = PageProps<"/projects/[projectId]/adrs">;
 // inside Suspense.
 export default function AdrsPage({ params, searchParams }: Props) {
   return (
-    <main>
-      <Suspense fallback={<p role="status">Loading the ADRs…</p>}>
+    <div>
+      <Suspense
+        fallback={
+          <p role="status" className="app-loading">
+            Loading the ADRs…
+          </p>
+        }
+      >
         <Adrs params={params} searchParams={searchParams} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 

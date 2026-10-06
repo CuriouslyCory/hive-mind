@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
+import { Alert } from "../../design-system/alert";
+import { Button } from "../../design-system/button";
 import type { DecisionFailure } from "../../server/device-approval";
 import { decideDeviceAuthorization } from "./actions";
 
@@ -22,10 +24,14 @@ export function DecisionForm({ userCode }: { userCode: string }) {
   const [result, decide, pending] = useActionState(decideDeviceAuthorization, null);
 
   if (result?.kind === "approved") {
-    return <p role="status">Approved. Return to your terminal; the CLI is now signed in as you.</p>;
+    return (
+      <Alert tone="success">
+        Approved. Return to your terminal; the CLI is now signed in as you.
+      </Alert>
+    );
   }
   if (result?.kind === "denied") {
-    return <p role="status">Denied. The CLI was not signed in. You can close this page.</p>;
+    return <Alert>Denied. The CLI was not signed in. You can close this page.</Alert>;
   }
 
   const finished =
@@ -33,16 +39,22 @@ export function DecisionForm({ userCode }: { userCode: string }) {
     (result.reason === "expired" || result.reason === "already-decided");
   return (
     <>
-      {result?.kind === "error" && <p role="alert">{FAILURE_MESSAGES[result.reason]}</p>}
+      {result?.kind === "error" && <Alert tone="danger">{FAILURE_MESSAGES[result.reason]}</Alert>}
       {!finished && (
-        <form action={decide}>
+        <form className="dv-decision" action={decide}>
           <input type="hidden" name="user_code" value={userCode} />
-          <button type="submit" name="decision" value="approve" disabled={pending}>
+          <Button
+            type="submit"
+            variant="primary"
+            name="decision"
+            value="approve"
+            disabled={pending}
+          >
             Approve
-          </button>{" "}
-          <button type="submit" name="decision" value="deny" disabled={pending}>
+          </Button>
+          <Button type="submit" name="decision" value="deny" disabled={pending}>
             Deny
-          </button>
+          </Button>
         </form>
       )}
     </>

@@ -2,8 +2,8 @@
 // between the Project's pages.
 export default function Loading() {
   return (
-    <main>
-      <p role="status">Loading…</p>
-    </main>
+    <p role="status" className="app-loading">
+      Loading…
+    </p>
   );
 }

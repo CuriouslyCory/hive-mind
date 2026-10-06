@@ -2,6 +2,7 @@ import { formatAdrNumber } from "@hivemind/contract";
 import type { AdrLink } from "@hivemind/db";
 import Link from "next/link";
 import { ProjectLivePage } from "../../../components/dashboard/project-live-updates";
+import { Alert } from "../../../design-system/alert";
 import { SafeMarkdown } from "../../../server/dashboard/markdown";
 import type { AdrDetail } from "../../../server/dashboard/queries";
 import { AdrSyncBanner, adrStatusText } from "./adr-format";
@@ -21,31 +22,32 @@ export function AdrDetailView({ detail }: { detail: AdrDetail }) {
         asOf={asOf}
         scope={{ kind: "adr", number: adr.number }}
       />
-      <ProjectHeading project={project} asOf={asOf} linked />
-      <p>
-        <Link href={adrListPath(project.id)}>All ADRs</Link>
-      </p>
-      <h1>
-        {name}: {adr.title}
-      </h1>
+      <ProjectHeading
+        project={project}
+        asOf={asOf}
+        trail={[{ label: "ADRs", href: adrListPath(project.id) }, { label: name }]}
+        title={`${name}: ${adr.title}`}
+      />
       <AdrSyncBanner lastSync={detail.lastSync} asOf={asOf} />
       {adr.state === "reserved" && (
-        <p>Reserved, not merged yet: no synced commit has a file with this number.</p>
+        <Alert live={false}>
+          Reserved, not merged yet: no synced commit has a file with this number.
+        </Alert>
       )}
       {adr.state === "removed" && (
-        <p className="warning">
+        <Alert tone="warning" live={false}>
           Removed: the last sync found no file with this number. This is the last copy hive-mind
           has.
-        </p>
+        </Alert>
       )}
       {adr.reservationTaken && adr.reservation && (
-        <p className="warning">
+        <Alert tone="warning" live={false}>
           {name} was reserved for “{adr.reservation.title}”; this file took the number, so the
           reserved ADR needs a new number.
-        </p>
+        </Alert>
       )}
 
-      <dl>
+      <dl className="project-facts">
         {adr.status !== null && (
           <>
             <dt>Status</dt>
@@ -94,12 +96,12 @@ export function AdrDetailView({ detail }: { detail: AdrDetail }) {
         )}
       </dl>
 
-      <section aria-labelledby="adr-chain">
+      <section className="project-card" aria-labelledby="adr-chain">
         <h2 id="adr-chain">Supersedes and superseded by</h2>
         <AdrChain projectId={project.id} detail={detail} />
       </section>
 
-      <section aria-labelledby="adr-text">
+      <section className="project-card" aria-labelledby="adr-text">
         <h2 id="adr-text">Text</h2>
         {adr.body !== null ? (
           <SafeMarkdown source={adr.body} />
