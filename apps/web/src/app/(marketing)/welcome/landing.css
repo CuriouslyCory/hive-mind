@@ -1,0 +1,734 @@
+/* The landing page (page.tsx), ported from the design's page styles. Every
+   rule is scoped under .hm-landing: Next keeps global stylesheets loaded
+   after client navigation, and Cache Components keeps a visited page mounted
+   but hidden, so an unscoped rule would reach /sign-in and the dashboard.
+   Nothing here styles html or body, and nothing depends on their styles.
+   Breakpoints are the design's: 1024px and 720px. */
+
+/* The page root. It is positioned against the initial containing block, so
+   it spans the viewport whatever margin or padding <body> has (the browser's
+   default 8px, or the dashboard's rules after a client navigation), and its
+   surface fills at least one screen. */
+.hm-landing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 100dvh;
+}
+.hm-landing :where(a, button, pre, main):focus-visible {
+  outline: var(--border-focus) solid var(--focus);
+  outline-offset: 2px;
+}
+.hm-landing main:focus {
+  outline: none;
+}
+/* No specificity, so component margins (Card eyebrow and title) still apply. */
+:where(.hm-landing) :where(h1, h2, h3, p, ol) {
+  margin: 0;
+}
+
+/* Visually hidden, still read. */
+.hm-landing .lp-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link: off screen until focused. */
+.hm-landing .lp-skip {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 10;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: 700 15px / 22px var(--font-sans);
+  box-shadow: var(--shadow-float);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.hm-landing .lp-skip:focus-visible {
+  transform: none;
+}
+
+/* Layout helpers */
+.hm-landing .lp-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-left: var(--space-12);
+  padding-right: var(--space-12);
+}
+.hm-landing .lp-section {
+  padding-top: 96px;
+  padding-bottom: 96px;
+}
+.hm-landing .lp-sunken {
+  background: var(--surface-sunken);
+}
+.hm-landing .lp-stack {
+  display: flex;
+  flex-direction: column;
+}
+.hm-landing .lp-section-stack {
+  gap: var(--space-12);
+}
+.hm-landing .lp-intro {
+  gap: var(--space-3);
+  max-width: 640px;
+}
+.hm-landing .lp-g2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-12);
+}
+.hm-landing .lp-g3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-6);
+}
+.hm-landing .lp-g4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-6);
+}
+.hm-landing .lp-align-start {
+  align-items: start;
+}
+.hm-landing .lp-align-end {
+  align-items: end;
+}
+.hm-landing .lp-align-center {
+  align-items: center;
+}
+.hm-landing .lp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* Type */
+.hm-landing .lp-eyebrow {
+  font: 700 12px / 16px var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.hm-landing .lp-eyebrow-honey {
+  color: var(--honey-ink);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.hm-landing .lp-h1 {
+  font: 800 56px / 60px var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.hm-landing .lp-h2 {
+  font: 800 40px / 44px var(--font-display);
+  letter-spacing: -0.015em;
+}
+.hm-landing .lp-h3 {
+  font: 700 20px / 26px var(--font-display);
+}
+.hm-landing .lp-lede {
+  font: 400 17px / 26px var(--font-sans);
+  color: var(--ink-muted);
+}
+.hm-landing .lp-muted {
+  color: var(--ink-muted);
+}
+.hm-landing .lp-faint {
+  color: var(--ink-faint);
+}
+.hm-landing .lp-small {
+  font: 400 13px / 18px var(--font-sans);
+}
+.hm-landing .lp-mono {
+  font: 400 13px / 20px var(--font-mono);
+}
+.hm-landing .lp-chip {
+  font: 400 13px / 20px var(--font-mono);
+  background: var(--surface-sunken);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* Top bar (not sticky, as designed) */
+.hm-landing .lp-topbar {
+  border-bottom: var(--border-hair) solid var(--line);
+  background: var(--surface);
+}
+.hm-landing .lp-topbar-inner {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+.hm-landing .lp-home {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-lg);
+  text-decoration: none;
+  flex: none;
+}
+.hm-landing .lp-home .hm-logo-tile {
+  padding: var(--space-1) 10px;
+}
+.hm-landing .lp-nav {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: var(--space-4);
+}
+.hm-landing .lp-nav-link {
+  color: var(--ink-muted);
+  text-decoration: none;
+  font: 700 15px / 22px var(--font-sans);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  transition:
+    background-color var(--duration-fast),
+    color var(--duration-fast);
+}
+.hm-landing .lp-nav-link:hover {
+  color: var(--ink);
+  background: var(--hive-tint);
+}
+.hm-landing .lp-topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.hm-landing .lp-theme {
+  display: inline-flex;
+}
+
+/* Hero */
+.hm-landing .lp-hero {
+  overflow: hidden;
+}
+.hm-landing .lp-hero-grid {
+  align-items: center;
+}
+.hm-landing .lp-hero-copy {
+  gap: var(--space-6);
+  max-width: 560px;
+}
+.hm-landing .lp-hero-visual {
+  position: relative;
+  min-height: 440px;
+}
+.hm-landing .lp-honeycomb {
+  display: block;
+  width: calc(100% + 48px);
+  margin-right: -48px;
+}
+.hm-landing .lp-honeycomb-cells polygon {
+  stroke-width: 8px;
+  stroke-linejoin: round;
+}
+.hm-landing .lp-cell-hive {
+  fill: var(--surface-hive);
+  stroke: var(--surface-hive);
+}
+.hm-landing .lp-cell-tint {
+  fill: var(--hive-tint);
+  stroke: var(--hive-tint);
+}
+.hm-landing .lp-cell-honey {
+  fill: var(--honey);
+  stroke: var(--honey);
+}
+.hm-landing .lp-honeycomb-spokes line {
+  stroke: var(--honey-deep);
+  stroke-width: 2px;
+}
+.hm-landing .lp-honeycomb-nodes circle {
+  fill: var(--honey);
+}
+.hm-landing .lp-honeycomb-pulses circle {
+  fill: var(--honey);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lp-buzz 1.2s ease-in-out infinite;
+}
+@keyframes lp-buzz {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(1.9);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hm-landing .lp-honeycomb-pulses {
+    display: none;
+  }
+}
+.hm-landing .lp-hero-card {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: 100%;
+}
+.hm-landing .lp-sess-list {
+  gap: 10px;
+  margin-top: var(--space-3);
+}
+.hm-landing .lp-sess-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.hm-landing .lp-who {
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-landing .lp-when {
+  margin-left: auto;
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* How it works: steps and terminal */
+.hm-landing .lp-steps {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.hm-landing .lp-step {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+.hm-landing .lp-step-body {
+  gap: 6px;
+  min-width: 0;
+}
+.hm-landing .lp-hex-badge {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%);
+  background: var(--hive-tint);
+  color: var(--ink);
+  font: 800 18px / 1 var(--font-display);
+}
+.hm-landing .lp-hex-badge-honey {
+  background: linear-gradient(135deg, var(--honey), var(--honey-deep));
+  color: var(--on-honey);
+}
+.hm-landing .lp-terminal {
+  background: var(--surface-hive);
+  color: var(--on-surface-hive);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6) 28px;
+  box-shadow: var(--shadow-float);
+  min-width: 0;
+  --focus: var(--honey);
+}
+.hm-landing .lp-terminal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.hm-landing .lp-terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--honey);
+}
+.hm-landing .lp-terminal-label {
+  font: 700 12px / 16px var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--honey);
+}
+.hm-landing .lp-term {
+  margin: 0;
+  white-space: pre;
+  overflow-x: auto;
+  font: 400 13px / 20px var(--font-mono);
+  border-radius: var(--radius-sm);
+}
+.hm-landing .lp-cmt {
+  color: var(--honey);
+}
+.hm-landing .lp-dim {
+  opacity: 0.7;
+}
+
+/* Dashboard mock */
+.hm-landing .lp-dash {
+  padding: 0;
+  overflow: hidden;
+}
+.hm-landing .lp-dash-head {
+  padding: var(--space-5) var(--space-6);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  border-bottom: var(--border-hair) solid var(--line);
+}
+.hm-landing .lp-dash-body {
+  padding: var(--space-5) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.hm-landing .lp-live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+}
+.hm-landing .lp-live svg {
+  color: var(--success);
+}
+.hm-landing .lp-cells {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+/* The grid sizes the Cells; their 184px minimum would overflow the card
+   between 720px and about 900px, and on phones. */
+.hm-landing .lp-cells .hm-cell {
+  min-width: 0;
+}
+.hm-landing .lp-table {
+  display: flex;
+  flex-direction: column;
+}
+.hm-landing .lp-row {
+  display: grid;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) 0;
+  border-top: var(--border-hair) solid var(--line);
+}
+.hm-landing .lp-row-head {
+  border-top: 0;
+  padding-top: 0;
+  color: var(--ink-muted);
+  font: 700 12px / 16px var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.hm-landing .lp-row-sessions {
+  grid-template-columns: 132px minmax(0, 1fr) 148px 88px 92px;
+}
+.hm-landing .lp-row-plans {
+  grid-template-columns: 132px minmax(0, 1fr) 148px 180px;
+}
+.hm-landing .lp-row-events {
+  grid-template-columns: minmax(0, 1fr) 180px 92px;
+}
+.hm-landing .lp-cell-text {
+  min-width: 0;
+}
+
+/* CLI */
+.hm-landing .lp-feature {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hm-landing .lp-feature svg {
+  color: var(--honey-ink);
+}
+.hm-landing .lp-install {
+  background: var(--surface-sunken);
+  border: var(--border-hair) solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+.hm-landing .lp-install-label {
+  font: 700 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+}
+.hm-landing .lp-install-command {
+  flex: 1 1 420px;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+/* Roadmap */
+.hm-landing .lp-roadmap-intro {
+  gap: var(--space-4);
+  max-width: 480px;
+}
+.hm-landing .lp-milestones {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.hm-landing .lp-ms {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 14px 0;
+  border-bottom: var(--border-hair) solid var(--line);
+}
+.hm-landing .lp-ms:last-child {
+  border-bottom: 0;
+}
+.hm-landing .lp-ms-id {
+  width: 36px;
+  flex: none;
+  color: var(--ink-faint);
+}
+.hm-landing .lp-ms-name {
+  flex: 1;
+  font: 700 15px / 22px var(--font-sans);
+}
+.hm-landing .lp-ms-note {
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+/* Get started band */
+.hm-landing .lp-band {
+  background: var(--surface-hive);
+  color: var(--on-surface-hive);
+  /* The light theme's focus colour is dark gold, too dark on navy. */
+  --focus: var(--honey);
+}
+.hm-landing .lp-band-copy {
+  gap: var(--space-5);
+  max-width: 560px;
+}
+.hm-landing .lp-band .lp-eyebrow {
+  color: var(--honey);
+}
+.hm-landing .lp-band .lp-h2 {
+  color: var(--on-surface-hive);
+}
+.hm-landing .lp-band .lp-lede {
+  color: var(--on-surface-hive);
+  opacity: 0.85;
+}
+.hm-landing .lp-band .lp-chip {
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+}
+.hm-landing .lp-cta {
+  padding: 0 var(--space-5);
+}
+.hm-landing a.lp-cta-ghost,
+.hm-landing a.lp-cta-ghost:hover {
+  border-color: rgba(255, 255, 255, 0.55);
+  color: var(--on-surface-hive);
+}
+.hm-landing a.lp-cta-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.hm-landing .lp-lockup-slot {
+  display: flex;
+  justify-content: center;
+}
+.hm-landing .lp-lockup-tile {
+  background: var(--logo-tile);
+  border-radius: var(--radius-xl);
+  padding: var(--space-8) 40px;
+  display: inline-flex;
+}
+.hm-landing .lp-lockup-tile img {
+  height: 200px;
+  width: auto;
+}
+
+/* Footer */
+.hm-landing .lp-footer {
+  border-top: var(--border-hair) solid var(--line);
+  background: var(--surface);
+}
+.hm-landing .lp-footer-inner {
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-8);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+}
+.hm-landing .lp-footer .hm-logo-tile {
+  padding: var(--space-1) 10px;
+}
+.hm-landing .lp-foot-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+.hm-landing .lp-foot-link {
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+.hm-landing .lp-foot-link:hover {
+  color: var(--ink);
+}
+.hm-landing .lp-footer-note {
+  margin-left: auto;
+}
+
+@media (max-width: 1024px) {
+  .hm-landing .lp-g2,
+  .hm-landing .lp-g3 {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  .hm-landing .lp-g4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hm-landing .lp-hero-visual {
+    min-height: 0;
+  }
+  .hm-landing .lp-hero-card {
+    position: static;
+    margin-top: var(--space-6);
+  }
+  .hm-landing .lp-nav {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .hm-landing .lp-wrap {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+  .hm-landing .lp-section {
+    padding-top: var(--space-16);
+    padding-bottom: var(--space-16);
+  }
+  .hm-landing .lp-g4 {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  .hm-landing .lp-cells {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hm-landing .lp-h1 {
+    font-size: 40px;
+    line-height: 44px;
+  }
+  .hm-landing .lp-h2 {
+    font-size: 28px;
+    line-height: 34px;
+  }
+  .hm-landing .lp-hide-sm {
+    display: none;
+  }
+  .hm-landing .lp-lockup-tile img {
+    height: 140px;
+  }
+
+  /* Not in the design, which is 560px wide at a 390px viewport: the top bar
+     drops "Early access" and " with GitHub" and shrinks the logo, the
+     honeycomb stays inside the column, and the tables keep three columns. */
+  .hm-landing .lp-topbar-inner {
+    gap: var(--space-3);
+  }
+  .hm-landing .lp-topbar-right {
+    gap: var(--space-2);
+  }
+  .hm-landing .lp-home .hm-logo-tile {
+    padding: var(--space-1) var(--space-2);
+  }
+  .hm-landing .lp-home .hm-logo-tile img {
+    width: auto;
+  }
+  .hm-landing .lp-home .hm-logo-tile img:first-child {
+    height: 26px;
+  }
+  .hm-landing .lp-home .hm-logo-tile img:last-child {
+    height: 22px;
+  }
+  .hm-landing .lp-honeycomb {
+    width: 100%;
+    margin-right: 0;
+  }
+  .hm-landing .lp-dash-head,
+  .hm-landing .lp-dash-body {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+  .hm-landing .lp-live {
+    margin-left: 0;
+  }
+  .hm-landing .lp-row-sessions {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .hm-landing .lp-row-plans {
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+  }
+  .hm-landing .lp-row-events {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .hm-landing .lp-footer-note {
+    margin-left: 0;
+  }
+
+  /* Touch targets: at least 44px tall. */
+  .hm-landing .lp-home,
+  .hm-landing .hm-switch,
+  .hm-landing .lp-foot-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .hm-landing .hm-switch {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .hm-landing .lp-topbar-cta,
+  .hm-landing .lp-copy,
+  .hm-landing .lp-touch {
+    height: 44px;
+  }
+  .hm-landing .hm-tab {
+    height: 44px;
+  }
+}
+
+/* Two Cells per row would be narrower than the design system's 184px, and
+   the labels would run under the corner hexagon. */
+@media (max-width: 480px) {
+  .hm-landing .lp-cells {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}
