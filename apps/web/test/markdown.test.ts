@@ -1,3 +1,4 @@
+import { parseAdrContent } from "@hivemind/contract";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -173,6 +174,48 @@ describe("SafeMarkdown", () => {
     expect(html).not.toContain('id="login"');
     expect(html).not.toContain("title=");
     expect(html).not.toContain('class="status"');
+  });
+
+  it("renders hostile ADR bodies inert, and relative ADR links as text", () => {
+    const contents = [
+      "---",
+      "status: accepted",
+      "date: 2026-10-01",
+      "---",
+      "",
+      "# Use <img src=x onerror=alert(1)>",
+      "",
+      "## Context",
+      "",
+      "<script>alert(1)</script>",
+      "",
+      '<img src="x" onerror="alert(1)">',
+      "",
+      "[x](javascript:alert(1)) and [ADR-0004](0004-x.md) and [up](../README.md)",
+      "",
+      "---",
+      "status: superseded",
+      "---",
+    ].join("\n");
+    // What the ADR page renders: the file after its frontmatter.
+    const parsed = parseAdrContent(contents);
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+    const html = render(parsed.adr.body);
+    expectInert(html);
+    expect(html).not.toContain("<a");
+    expect(html).not.toContain('href="0004-x.md"');
+    expect(html).not.toContain("../README.md");
+    expect(html).toContain("<span>ADR-0004</span>");
+    expect(html).toContain("<span>up</span>");
+    // The real frontmatter is not in the body; a later `---` block is a rule
+    // and a heading, never metadata.
+    expect(html).not.toContain("2026-10-01");
+    expect(html).toContain("<hr/>");
+    expect(html).toContain("<h4>status: superseded</h4>");
+    // The title as the page shows it: plain text.
+    expect(renderToStaticMarkup(createElement("h1", null, parsed.adr.title))).toBe(
+      "<h1>Use &lt;img src=x onerror=alert(1)&gt;</h1>",
+    );
   });
 
   it("renders autolinked URLs only with allowed schemes", () => {

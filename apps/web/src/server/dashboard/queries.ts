@@ -1,5 +1,15 @@
-import { MAX_STATUS_SECTION_ITEMS } from "@hivemind/contract";
 import {
+  ADR_STATUSES,
+  type AdrStatus,
+  MAX_STATUS_SECTION_ITEMS,
+  parseAdrContent,
+  parseAdrIdentifier,
+} from "@hivemind/contract";
+import {
+  type AdrLink,
+  type AdrState,
+  type AdrSyncState,
+  type AdrView,
   type CoordinationContext,
   type Db,
   type Event as EventRow,
@@ -8,13 +18,17 @@ import {
   listEvents,
   type PlanProgress,
   type PlanStatus,
+  type Principal,
   ProjectAccessLostError,
   planKey,
   planNumbers,
+  readAdr,
+  readAdrs,
   readPlan,
   readPlans,
   readPlanTasks,
   readProjectStatus,
+  readRecentAdrs,
   readScopes,
   readSession,
   readSessions,
@@ -80,6 +94,8 @@ export const DASHBOARD_PAGE_SIZE = 20;
 export const DASHBOARD_EVENT_PAGE_SIZE = 50;
 /** The longest cursor a search param may carry (the API's cursor bound). */
 export const MAX_CURSOR_LENGTH = 512;
+/** ADRs in the overview's "Recent ADRs". */
+export const RECENT_ADR_COUNT = 5;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -235,6 +251,8 @@ export interface ProjectOverview extends ProjectPageBase {
   liveSessions: DashboardSection<LiveSessionSummary>;
   recentSessions: DashboardPage<SessionSummary>;
   overlaps: DashboardSection<OverlapView>;
+  /** The published ADRs a sync changed most recently, at most `RECENT_ADR_COUNT`. */
+  recentAdrs: AdrSummary[];
 }
 
 export interface PlanDetail extends ProjectPageBase {
@@ -254,6 +272,74 @@ export interface SessionDetail extends ProjectPageBase {
   session: SessionSummary & { summary: string | null };
   scopes: DashboardPage<ScopeView>;
   events: DashboardPage<EventView>;
+}
+
+/** What hive-mind's copy of the ADRs is as of: the Project's last ADR sync. */
+export interface AdrSyncView {
+  commitSha: string;
+  syncedAt: Date;
+  syncedBy: Attribution;
+}
+
+/** An ADR number as a list shows it. `state` is never shown as a status. */
+export interface AdrSummary {
+  number: number;
+  /** The file's H1, or the reserved title while no file was synced. */
+  title: string;
+  /** From the synced file; null while only reserved. */
+  status: AdrStatus | null;
+  state: AdrState;
+  /** When a sync last changed the row. */
+  syncedAt: Date | null;
+}
+
+/** A number reserved with `adr new` whose file has not been synced yet. */
+export interface AdrReservationView {
+  number: number;
+  title: string;
+  slug: string;
+  gitBranch: string | null;
+  reservedBy: Attribution;
+  reservedAt: Date;
+}
+
+/** Pages on the ADR list: every ADR page carries the last sync. */
+export interface AdrPageBase extends ProjectPageBase {
+  /** Null when the Project's ADRs were never synced. */
+  lastSync: AdrSyncView | null;
+}
+
+export interface AdrList extends AdrPageBase {
+  /** The `?status=` filter applied, or null for every status. */
+  status: AdrStatus | null;
+  /** Published ADRs with the status, highest number first. */
+  adrs: DashboardPage<AdrSummary>;
+  /** ADRs an earlier sync found and a later one did not, highest number first. */
+  removed: DashboardPage<AdrSummary>;
+  /** Reserved numbers with no synced file, whatever the filter, highest first. */
+  reservations: DashboardPage<AdrReservationView>;
+}
+
+export interface AdrDetail extends AdrPageBase {
+  adr: AdrSummary & {
+    slug: string;
+    /** The synced file's path; null while only reserved. */
+    path: string | null;
+    date: string | null;
+    /** The sync head commit at which this copy's content last changed. */
+    commitSha: string | null;
+    /** The file after its frontmatter, for the markdown renderer; null while only reserved. */
+    body: string | null;
+    reservation: AdrReservationView | null;
+    /** A file took this number though it was reserved for another ADR. */
+    reservationTaken: boolean;
+  };
+  /** What this ADR supersedes, then what those supersede, with depth. */
+  supersedes: AdrLink[];
+  /** Published ADRs that supersede this one, then their successors, with depth. */
+  supersededBy: AdrLink[];
+  /** The links continue past `MAX_ADR_CHAIN_DEPTH` in at least one direction. */
+  chainTruncated: boolean;
 }
 
 // --- Cursors ------------------------------------------------------------------
@@ -535,6 +621,85 @@ async function viewEvents(
   });
 }
 
+function principalAttribution(principal: Principal, names: Attributions): Attribution {
+  return principal.kind === "user" ? names.user(principal.userId) : names.key(principal.keyId);
+}
+
+/** The ids `loadAttributions` needs to name `principals`. */
+function principalIds(principals: readonly (Principal | null | undefined)[]): AttributionIds {
+  return {
+    userIds: principals.map((p) => (p?.kind === "user" ? p.userId : null)),
+    keyIds: principals.map((p) => (p?.kind === "project_key" ? p.keyId : null)),
+  };
+}
+
+function toAdrSyncView(sync: AdrSyncState | null, names: Attributions): AdrSyncView | null {
+  return (
+    sync && {
+      commitSha: sync.commitSha,
+      syncedAt: sync.syncedAt,
+      syncedBy: principalAttribution(sync.syncedBy, names),
+    }
+  );
+}
+
+function toAdrSummary(view: AdrView): AdrSummary {
+  return {
+    number: view.number,
+    title: view.title,
+    status: view.status,
+    state: view.state,
+    syncedAt: view.syncedAt,
+  };
+}
+
+function toAdrReservationView(view: AdrView, names: Attributions): AdrReservationView | null {
+  const reservation = view.reservation;
+  return (
+    reservation && {
+      number: view.number,
+      title: reservation.title,
+      slug: reservation.slug,
+      gitBranch: reservation.gitBranch,
+      reservedBy: principalAttribution(reservation.principal, names),
+      reservedAt: reservation.reservedAt,
+    }
+  );
+}
+
+/**
+ * The file after its frontmatter, which is shown separately and never
+ * rendered as markdown. Null for a stored file this build cannot parse.
+ */
+function adrBody(contentMd: string | null): string | null {
+  if (contentMd === null) return null;
+  const parsed = parseAdrContent(contentMd);
+  return parsed.ok ? parsed.adr.body : null;
+}
+
+/** A page of the Project's ADRs matching `filter`, highest number first. */
+async function adrPage(
+  tx: Transaction,
+  projectId: string,
+  filter: { status?: AdrStatus; state: AdrState },
+  scope: CursorScope,
+  cursor: string | undefined,
+): Promise<DashboardPage<AdrView> & { sync: AdrSyncState | null }> {
+  const position = decodePosition(scope, cursor, [INT4_POSITION]);
+  const page = await readAdrs(tx, {
+    projectId,
+    ...filter,
+    limit: DASHBOARD_PAGE_SIZE,
+    beforeNumber: position ? Number(position[0]) : undefined,
+  });
+  const last = page.items.at(-1);
+  return {
+    items: page.items,
+    nextCursor: page.hasMore && last ? encodeKeysetCursor(scope, [String(last.number)]) : null,
+    sync: page.sync,
+  };
+}
+
 function toScopeView(row: ScopeRow): ScopeView {
   return { id: row.id, source: row.source, value: row.value, createdAt: row.createdAt };
 }
@@ -652,8 +817,8 @@ export interface OverviewCursors {
 
 /**
  * `/projects/[projectId]`: active Plans with progress, live Sessions with
- * declared Scopes, recent Sessions and overlap warnings. Null when the
- * Project is absent or the User cannot read it.
+ * declared Scopes, recent Sessions, overlap warnings and recent ADRs. Null
+ * when the Project is absent or the User cannot read it.
  */
 export async function loadProjectOverview(
   db: Db,
@@ -705,6 +870,8 @@ export async function loadProjectOverview(
       cursors.recent,
     );
 
+    const recentAdrs = await readRecentAdrs(context.tx, { projectId, limit: RECENT_ADR_COUNT });
+
     const overlapItems = status.overlaps.items;
     const labels = await loadSessionLabels(
       context,
@@ -727,6 +894,7 @@ export async function loadProjectOverview(
         items: overlapItems.map((item) => toOverlapView(item, labels)),
         complete: status.overlaps.complete,
       },
+      recentAdrs: recentAdrs.map(toAdrSummary),
     };
   });
 }
@@ -910,6 +1078,133 @@ export async function loadSessionDetail(
           : null,
       },
       events,
+    };
+  });
+}
+
+/** A `?status=` value as an ADR status; anything else means no filter. */
+export function adrStatusParam(value: string | string[] | undefined): AdrStatus | undefined {
+  return typeof value === "string" && (ADR_STATUSES as readonly string[]).includes(value)
+    ? (value as AdrStatus)
+    : undefined;
+}
+
+export interface AdrListCursors {
+  /** Published ADRs page. */
+  adrs?: string;
+  /** Removed ADRs page. */
+  removed?: string;
+  /** Reserved numbers page. */
+  reserved?: string;
+}
+
+export interface AdrListOptions extends AdrListCursors {
+  /** The `?status=` filter; a value that is not an ADR status is ignored. */
+  status?: string;
+}
+
+/**
+ * `/projects/[projectId]/adrs`: the Project's ADRs with their status, the
+ * removed ones, and the reserved numbers with no synced file, with the last
+ * sync. A `status` that is not an ADR status shows every status. Null when
+ * the Project is absent or the User cannot read it.
+ */
+export async function loadAdrList(
+  db: Db,
+  userId: string,
+  projectId: string,
+  options: AdrListOptions = {},
+): Promise<DashboardSnapshot<AdrList | null>> {
+  const status = adrStatusParam(options.status) ?? null;
+  return runDashboardSnapshot(db, async (context) => {
+    const header = await readableProject(context, userId, projectId);
+    if (!header) return null;
+    const { tx } = context;
+    const filter = status === null ? {} : { status };
+    const published = await adrPage(
+      tx,
+      projectId,
+      { ...filter, state: "published" },
+      ["dashboard.adrs", projectId, status ?? ""],
+      options.adrs,
+    );
+    const removed = await adrPage(
+      tx,
+      projectId,
+      { ...filter, state: "removed" },
+      ["dashboard.removedAdrs", projectId, status ?? ""],
+      options.removed,
+    );
+    const reserved = await adrPage(
+      tx,
+      projectId,
+      { state: "reserved" },
+      ["dashboard.reservedAdrs", projectId],
+      options.reserved,
+    );
+    const names = await loadAttributions(
+      tx,
+      projectId,
+      principalIds([
+        published.sync?.syncedBy,
+        ...reserved.items.map((view) => view.reservation?.principal),
+      ]),
+    );
+    return {
+      ...pageBase(header, context),
+      lastSync: toAdrSyncView(published.sync, names),
+      status,
+      adrs: { items: published.items.map(toAdrSummary), nextCursor: published.nextCursor },
+      removed: { items: removed.items.map(toAdrSummary), nextCursor: removed.nextCursor },
+      reservations: {
+        items: reserved.items.flatMap((view) => toAdrReservationView(view, names) ?? []),
+        nextCursor: reserved.nextCursor,
+      },
+    };
+  });
+}
+
+/**
+ * `/projects/[projectId]/adrs/[number]`: one ADR by number (`3`, `0003` or
+ * `ADR-0003`) with its metadata, its file's text after the frontmatter, its
+ * reservation and its supersedes links both ways (bounded depth), with the
+ * last sync. Null when the Project is unreadable or the number names no ADR
+ * of it.
+ */
+export async function loadAdrDetail(
+  db: Db,
+  userId: string,
+  projectId: string,
+  ref: string,
+): Promise<DashboardSnapshot<AdrDetail | null>> {
+  const number = parseAdrIdentifier(ref);
+  return runDashboardSnapshot(db, async (context) => {
+    const header = await readableProject(context, userId, projectId);
+    if (!header || number === null) return null;
+    const found = await readAdr(context.tx, { projectId, number });
+    if (!found) return null;
+    const { adr: view } = found;
+    const names = await loadAttributions(
+      context.tx,
+      projectId,
+      principalIds([found.sync?.syncedBy, view.reservation?.principal]),
+    );
+    return {
+      ...pageBase(header, context),
+      lastSync: toAdrSyncView(found.sync, names),
+      adr: {
+        ...toAdrSummary(view),
+        slug: view.slug,
+        path: view.path,
+        date: view.date,
+        commitSha: view.commitSha,
+        body: adrBody(view.contentMd),
+        reservation: toAdrReservationView(view, names),
+        reservationTaken: view.reservationTaken,
+      },
+      supersedes: found.supersedes,
+      supersededBy: found.supersededBy,
+      chainTruncated: found.chainTruncated,
     };
   });
 }

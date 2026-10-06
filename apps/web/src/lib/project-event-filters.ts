@@ -4,8 +4,9 @@ import type { StreamEvent } from "./project-event-stream";
 // Which live Events make a dashboard page re-read itself from the server
 // (issue #11). The overview shows the whole Project, so every Event counts.
 // Detail pages count Events whose affected records they show, including the
-// claim, Scope and liveness changes of the Sessions they list. An Event type
-// this build does not know refreshes every page.
+// claim, Scope and liveness changes of the Sessions they list. ADR pages
+// count ADR Events. An Event type this build does not know refreshes every
+// page.
 
 /** What a page shows, as it registers with `ProjectLivePage` from its server render. */
 export type LiveUpdateScope =
@@ -26,7 +27,11 @@ export type LiveUpdateScope =
    * A Session page, with the Task it is attached to, if any. It shows only
    * its Plan's key, which never changes, so `plan.*` Events do not refresh it.
    */
-  | { kind: "session"; sessionId: string; taskId?: string | null };
+  | { kind: "session"; sessionId: string; taskId?: string | null }
+  /** The ADR list: every ADR Event. */
+  | { kind: "adrs" }
+  /** One ADR's page, by number. */
+  | { kind: "adr"; number: number };
 
 const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set(EVENT_TYPES);
 
@@ -82,6 +87,34 @@ export function affectsSession(
   return Boolean(scope.taskId) && event.taskId === scope.taskId;
 }
 
+function payloadNumber(event: StreamEvent): unknown {
+  const payload = event.payload;
+  return typeof payload === "object" && payload !== null && "number" in payload
+    ? payload.number
+    : undefined;
+}
+
+/**
+ * The ADR list: every ADR Event. A reservation adds a row to its reserved
+ * section, and a sync changes rows, the reserved section and the banner.
+ */
+export function affectsAdrList(event: StreamEvent): boolean {
+  if (!isKnownEventType(event.type)) return true;
+  return event.type.startsWith("adr.");
+}
+
+/**
+ * One ADR's page: a reservation of its number, and every sync. A sync's
+ * Event lists at most 100 changes, and a newly added ADR can supersede this
+ * one without the payload saying so, so the page cannot tell from the
+ * payload whether its "superseded by" links or the banner changed.
+ */
+export function affectsAdr(event: StreamEvent, scope: { number: number }): boolean {
+  if (!isKnownEventType(event.type)) return true;
+  if (event.type === "adr.synced") return true;
+  return event.type === "adr.reserved" && payloadNumber(event) === scope.number;
+}
+
 /** The filter for `scope`. */
 export function shouldRefreshFor(scope: LiveUpdateScope, event: StreamEvent): boolean {
   switch (scope.kind) {
@@ -91,6 +124,10 @@ export function shouldRefreshFor(scope: LiveUpdateScope, event: StreamEvent): bo
       return affectsPlan(event, scope);
     case "session":
       return affectsSession(event, scope);
+    case "adrs":
+      return affectsAdrList(event);
+    case "adr":
+      return affectsAdr(event, scope);
   }
 }
 
@@ -116,5 +153,9 @@ export function liveUpdateScopeKey(scope: LiveUpdateScope): string {
       ]);
     case "session":
       return JSON.stringify(["session", scope.sessionId, scope.taskId ?? null]);
+    case "adrs":
+      return JSON.stringify(["adrs"]);
+    case "adr":
+      return JSON.stringify(["adr", scope.number]);
   }
 }

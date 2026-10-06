@@ -1,17 +1,38 @@
-import { decodeFeedCursor } from "@hivemind/contract";
+import {
+  type AdrStatus,
+  adrContentSha256,
+  adrFilePath,
+  decodeFeedCursor,
+  parseAdrContent,
+  serializeAdrFrontmatter,
+} from "@hivemind/contract";
+import {
+  type AdrContentInput,
+  MAX_ADR_CHAIN_DEPTH,
+  type Principal,
+  reserveAdr,
+  storeAdrContents,
+  syncAdrs,
+} from "@hivemind/db";
 import { describeDb } from "@hivemind/db/testing";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AdrDetailView } from "../src/app/(app)/_components/adr-detail";
+import { AdrListView } from "../src/app/(app)/_components/adr-list";
 import { AttributionText } from "../src/app/(app)/_components/format";
 import { EventList } from "../src/app/(app)/_components/lists";
 import {
+  type AdrDetail,
   DASHBOARD_PAGE_SIZE,
   type EventView,
+  loadAdrDetail,
+  loadAdrList,
   loadPlanDetail,
   loadProjectList,
   loadProjectOverview,
   loadSessionDetail,
+  RECENT_ADR_COUNT,
 } from "../src/server/dashboard/queries";
 import { type ApiHarness, createApiHarness, type SignedInUser } from "./support/api";
 import { canary, futureShapes, insertFutureEvent } from "./support/future-events";
@@ -576,6 +597,429 @@ describeDb("dashboard queries", () => {
       const { data } = await loadProjectOverview(db(), owner.id, project);
       expect(data?.activePlans.items.map((item) => item.key)).toEqual([plan.key]);
       expect(JSON.stringify(data)).not.toContain(secret);
+    });
+  });
+  describe("ADRs", () => {
+    // ADR data is written with @hivemind/db's functions, as the API does:
+    // content parsed by the contract's parser, stored, then synced.
+    const C1 = "c1".repeat(20);
+    const C2 = "c2".repeat(20);
+    const hostileTitle = "<img src=x onerror=alert(1)>";
+    let adrProject: string;
+    let keyProject: string;
+    let chainProject: string;
+    let key: { id: string; secret: string };
+
+    interface AdrFile {
+      number: number;
+      slug: string;
+      title: string;
+      status: AdrStatus;
+      supersedes?: number[];
+      body?: string;
+    }
+
+    function contents(file: AdrFile): string {
+      const frontmatter = serializeAdrFrontmatter({
+        status: file.status,
+        date: "2026-10-01",
+        supersedes: file.supersedes ?? [],
+      });
+      return `${frontmatter}\n# ${file.title}\n\n## Context\n\nWhy.\n\n## Decision\n\n${
+        file.body ?? "What."
+      }\n\n## Consequences\n\nWhat follows.\n`;
+    }
+
+    async function sync(
+      projectId: string,
+      principal: Principal,
+      files: AdrFile[],
+      commitSha: string,
+      baseCommitSha: string | null,
+    ) {
+      const items: AdrContentInput[] = [];
+      for (const file of files) {
+        const contentMd = contents(file);
+        const parsed = parseAdrContent(contentMd);
+        if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+        const { title, status, date, supersedes, warnings } = parsed.adr;
+        const sha256 = await adrContentSha256(contentMd);
+        items.push({ sha256, contentMd, title, status, date, supersedes, warnings });
+      }
+      const stored = await storeAdrContents(db(), { projectId, principal, items });
+      if (stored.status !== "ok") throw new Error(JSON.stringify(stored));
+      const outcome = await syncAdrs(db(), {
+        projectId,
+        principal,
+        commitSha,
+        baseCommitSha,
+        forced: false,
+        entries: files.map((file, index) => ({
+          path: adrFilePath(file.number, file.slug),
+          sha256: items[index]?.sha256 ?? "",
+          number: file.number,
+          slug: file.slug,
+        })),
+      });
+      if (outcome.status !== "ok") throw new Error(JSON.stringify(outcome));
+    }
+
+    async function reserve(projectId: string, principal: Principal, title: string, slug: string) {
+      const outcome = await reserveAdr(db(), { projectId, principal, id: uuid(), title, slug });
+      if (outcome.status !== "created") throw new Error(JSON.stringify(outcome));
+      return outcome.adr.number;
+    }
+
+    async function detail(projectId: string, number: string): Promise<AdrDetail> {
+      const { data } = await loadAdrDetail(db(), owner.id, projectId, number);
+      if (!data) throw new Error(`expected ADR ${number}`);
+      return data;
+    }
+
+    const HOSTILE_BODY = [
+      "<script>alert(1)</script>",
+      "",
+      "[next](0004-missing-target.md) and [x](javascript:alert(1))",
+      "",
+      "---",
+      "status: accepted",
+      "---",
+    ].join("\n");
+
+    beforeAll(async () => {
+      const ownerPrincipal: Principal = { kind: "user", userId: owner.id };
+      adrProject = await api.createProject(owner);
+      await sync(
+        adrProject,
+        ownerPrincipal,
+        [
+          { number: 1, slug: "use-postgres", title: "Use Postgres", status: "accepted" },
+          { number: 2, slug: "old-cache", title: "Old cache", status: "superseded" },
+          {
+            number: 3,
+            slug: "new-cache",
+            title: "New cache",
+            status: "accepted",
+            supersedes: [2],
+          },
+          {
+            number: 4,
+            slug: "missing-target",
+            title: "Missing target",
+            status: "proposed",
+            supersedes: [99],
+          },
+          {
+            number: 5,
+            slug: "hostile",
+            title: hostileTitle,
+            status: "accepted",
+            supersedes: [6],
+            body: HOSTILE_BODY,
+          },
+          { number: 6, slug: "cycle", title: "Cycle", status: "accepted", supersedes: [5] },
+        ],
+        C1,
+        null,
+      );
+      await reserve(adrProject, ownerPrincipal, "Reserved title", "reserved-title");
+
+      // Synced by a Project key, with a removed file and a reserved number
+      // that a hand-numbered file took.
+      keyProject = await api.createProject(owner);
+      key = await api.createKey(owner, keyProject, { name: "adr-sync" });
+      const keyPrincipal: Principal = { kind: "project_key", keyId: key.id };
+      await sync(
+        keyProject,
+        ownerPrincipal,
+        [
+          { number: 1, slug: "first", title: "First", status: "accepted" },
+          { number: 2, slug: "second", title: "Second", status: "accepted" },
+        ],
+        C1,
+        null,
+      );
+      await reserve(keyProject, ownerPrincipal, "Planned title", "planned-title");
+      await sync(
+        keyProject,
+        keyPrincipal,
+        [
+          { number: 1, slug: "first", title: "First", status: "accepted" },
+          { number: 3, slug: "something-else", title: "Something else", status: "proposed" },
+        ],
+        C2,
+        C1,
+      );
+
+      // 12 ADRs, each superseding the one before.
+      chainProject = await api.createProject(owner);
+      await sync(
+        chainProject,
+        ownerPrincipal,
+        Array.from({ length: 12 }, (_, index) => ({
+          number: index + 1,
+          slug: `step-${index + 1}`,
+          title: `Step ${index + 1}`,
+          status: index === 11 ? "accepted" : "superseded",
+          supersedes: index === 0 ? [] : [index],
+        })),
+        C1,
+        null,
+      );
+    });
+
+    it("lets Members read the ADR pages and answers null for a non-Member", async () => {
+      for (const user of [owner, member]) {
+        expect((await loadAdrList(db(), user.id, adrProject)).data).not.toBeNull();
+        expect((await loadAdrDetail(db(), user.id, adrProject, "1")).data).not.toBeNull();
+      }
+      expect((await loadAdrList(db(), outsider.id, adrProject)).data).toBeNull();
+      expect((await loadAdrDetail(db(), outsider.id, adrProject, "1")).data).toBeNull();
+
+      const leaver = await api.signUp();
+      await api.addMember(owner.organizationId, leaver.id, "member");
+      expect((await loadAdrDetail(db(), leaver.id, adrProject, "1")).data).not.toBeNull();
+      await api.removeMember(owner.organizationId, leaver.id);
+      expect((await loadAdrList(db(), leaver.id, adrProject)).data).toBeNull();
+      expect((await loadAdrDetail(db(), leaver.id, adrProject, "1")).data).toBeNull();
+    });
+
+    it("answers another Project's ADR and malformed numbers like an absent one", async () => {
+      // keyProject has ADR 3 with this owner; projectA has no ADRs.
+      const foreign = await loadAdrDetail(db(), owner.id, projectA, "3");
+      const absent = await loadAdrDetail(db(), owner.id, adrProject, "42");
+      expect(foreign.data).toBeNull();
+      expect(absent.data).toEqual(foreign.data);
+      for (const ref of ["0", "10000", "abc", "1'; --", "", "-1", "1.0", "ADR-00001"]) {
+        expect((await loadAdrDetail(db(), owner.id, adrProject, ref)).data).toBeNull();
+      }
+      expect((await loadAdrList(db(), owner.id, "not-a-uuid")).data).toBeNull();
+      // The ADR forms the CLI accepts name the same ADR.
+      for (const ref of ["3", "0003", "ADR-0003"]) {
+        expect((await detail(adrProject, ref)).adr.number).toBe(3);
+      }
+      // No aborted transaction: the Project's pages still load.
+      expect((await loadProjectOverview(db(), owner.id, adrProject)).data).not.toBeNull();
+    });
+
+    it("lists published ADRs by number with status and state, and reservations apart", async () => {
+      const { data, fence } = await loadAdrList(db(), owner.id, adrProject);
+      if (!data) throw new Error("expected the ADR list");
+      expect(data.status).toBeNull();
+      expect(data.adrs.items.map((adr) => [adr.number, adr.title, adr.status, adr.state])).toEqual([
+        [6, "Cycle", "accepted", "published"],
+        [5, hostileTitle, "accepted", "published"],
+        [4, "Missing target", "proposed", "published"],
+        [3, "New cache", "accepted", "published"],
+        [2, "Old cache", "superseded", "published"],
+        [1, "Use Postgres", "accepted", "published"],
+      ]);
+      expect(data.adrs.nextCursor).toBeNull();
+      expect(data.removed).toEqual({ items: [], nextCursor: null });
+      expect(data.reservations.items).toEqual([
+        {
+          number: 7,
+          title: "Reserved title",
+          slug: "reserved-title",
+          gitBranch: null,
+          reservedBy: { kind: "user", userId: owner.id, name: owner.name },
+          reservedAt: expect.any(Date),
+        },
+      ]);
+      expect(fence.seq).toBe("0");
+      expect(decodeFeedCursor(data.feedCursor, adrProject)).toEqual({ ok: true, position: fence });
+
+      const superseded = await loadAdrList(db(), owner.id, adrProject, { status: "superseded" });
+      expect(superseded.data?.status).toBe("superseded");
+      expect(superseded.data?.adrs.items.map((adr) => adr.number)).toEqual([2]);
+      // Reservations have no status; they stay listed apart under any filter.
+      expect(superseded.data?.reservations.items.map((item) => item.number)).toEqual([7]);
+
+      // A value that is not an ADR status shows every status.
+      for (const status of ["bogus", "Superseded", "reserved", "published", ""]) {
+        const list = await loadAdrList(db(), owner.id, adrProject, { status });
+        expect(list.data?.status).toBeNull();
+        expect(list.data?.adrs.items).toHaveLength(6);
+      }
+    });
+
+    it("shows removed ADRs apart and a taken reservation on its ADR", async () => {
+      const { data } = await loadAdrList(db(), owner.id, keyProject);
+      expect(data?.adrs.items.map((adr) => [adr.number, adr.state])).toEqual([
+        [3, "published"],
+        [1, "published"],
+      ]);
+      expect(data?.removed.items.map((adr) => [adr.number, adr.title, adr.state])).toEqual([
+        [2, "Second", "removed"],
+      ]);
+      expect(data?.reservations.items).toEqual([]);
+
+      const removed = await detail(keyProject, "2");
+      expect(removed.adr).toMatchObject({ state: "removed", status: "accepted", commitSha: C1 });
+      expect(removed.adr.body).toContain("# Second");
+
+      const taken = await detail(keyProject, "3");
+      expect(taken.adr).toMatchObject({
+        title: "Something else",
+        slug: "something-else",
+        reservationTaken: true,
+        commitSha: C2,
+        reservation: { title: "Planned title", slug: "planned-title" },
+      });
+      expect(taken.adr.reservation?.reservedBy).toMatchObject({ kind: "user", userId: owner.id });
+    });
+
+    it("shows a reserved number with its reservation and no text", async () => {
+      const reserved = await detail(adrProject, "7");
+      expect(reserved.adr).toMatchObject({
+        number: 7,
+        title: "Reserved title",
+        status: null,
+        state: "reserved",
+        path: null,
+        commitSha: null,
+        body: null,
+        reservationTaken: false,
+      });
+      expect(reserved.supersedes).toEqual([]);
+      expect(reserved.supersededBy).toEqual([]);
+    });
+
+    it("follows supersedes links both ways, marking missing targets", async () => {
+      const three = await detail(adrProject, "3");
+      expect(three.supersedes).toEqual([
+        {
+          number: 2,
+          depth: 1,
+          found: true,
+          title: "Old cache",
+          status: "superseded",
+          state: "published",
+        },
+      ]);
+      expect(three.supersededBy).toEqual([]);
+
+      const two = await detail(adrProject, "2");
+      expect(two.supersedes).toEqual([]);
+      expect(two.supersededBy.map((link) => [link.number, link.depth, link.found])).toEqual([
+        [3, 1, true],
+      ]);
+
+      const four = await detail(adrProject, "4");
+      expect(four.supersedes).toEqual([
+        { number: 99, depth: 1, found: false, title: null, status: null, state: null },
+      ]);
+      const html = renderToStaticMarkup(createElement(AdrDetailView, { detail: four }));
+      expect(html).toContain("Supersedes <span>ADR-0099 (not found)</span>.");
+      expect(html).not.toContain("/adrs/99");
+
+      // A cycle returns instead of looping.
+      const five = await detail(adrProject, "5");
+      expect(five.supersedes.map((link) => link.number)).toEqual([6]);
+      expect(five.supersededBy.map((link) => link.number)).toEqual([6]);
+      expect(five.chainTruncated).toBe(false);
+    });
+
+    it("bounds a long chain and says it continues", async () => {
+      const last = await detail(chainProject, "12");
+      expect(last.supersedes.map((link) => [link.number, link.depth])).toEqual(
+        Array.from({ length: MAX_ADR_CHAIN_DEPTH }, (_, index) => [11 - index, index + 1]),
+      );
+      expect(last.chainTruncated).toBe(true);
+      const first = await detail(chainProject, "1");
+      expect(first.supersededBy).toHaveLength(MAX_ADR_CHAIN_DEPTH);
+      expect(first.chainTruncated).toBe(true);
+      const middle = await detail(chainProject, "6");
+      expect(middle.supersedes.map((link) => link.number)).toEqual([5, 4, 3, 2, 1]);
+      expect(middle.supersededBy.map((link) => link.number)).toEqual([7, 8, 9, 10, 11, 12]);
+      expect(middle.chainTruncated).toBe(false);
+      const html = renderToStaticMarkup(createElement(AdrDetailView, { detail: last }));
+      expect(html).toContain("The chain continues past the ADRs shown.");
+    });
+
+    it("gives the body without its frontmatter, and renders the title as text", async () => {
+      const five = await detail(adrProject, "5");
+      expect(five.adr.body).not.toBeNull();
+      expect(five.adr.body?.startsWith("---")).toBe(false);
+      expect(five.adr.body).not.toContain("date: 2026-10-01");
+      expect(five.adr.body).not.toContain("supersedes: [6]");
+      expect(five.adr).toMatchObject({ date: "2026-10-01", path: "docs/adr/0005-hostile.md" });
+
+      const html = renderToStaticMarkup(createElement(AdrDetailView, { detail: five }));
+      expect(html).toContain('data-testid="adr-detail"');
+      expect(html).toContain("ADR-0005: &lt;img src=x onerror=alert(1)&gt;");
+      expect(html).not.toMatch(/<(?:script|img)/i);
+      expect(html).not.toContain('href="0004-missing-target.md"');
+      expect(html).not.toMatch(/href="javascript:/i);
+      expect(html).toContain("<span>next</span>");
+    });
+
+    it("carries the last sync for the banner, by a User or a Project key", async () => {
+      const { data } = await loadAdrList(db(), owner.id, adrProject);
+      expect(data?.lastSync).toEqual({
+        commitSha: C1,
+        syncedAt: expect.any(Date),
+        syncedBy: { kind: "user", userId: owner.id, name: owner.name },
+      });
+      expect((await detail(adrProject, "1")).lastSync).toEqual(data?.lastSync);
+
+      const byKey = await loadAdrList(db(), owner.id, keyProject);
+      expect(byKey.data?.lastSync).toEqual({
+        commitSha: C2,
+        syncedAt: expect.any(Date),
+        syncedBy: { kind: "project_key", keyId: key.id, name: "adr-sync", revoked: false },
+      });
+      expect(JSON.stringify(byKey.data?.lastSync)).not.toContain(owner.id);
+
+      const none = await loadAdrList(db(), owner.id, projectA);
+      expect(none.data?.lastSync).toBeNull();
+      expect(none.data?.adrs.items).toEqual([]);
+      if (!none.data || !data) throw new Error("expected the ADR lists");
+      const empty = renderToStaticMarkup(
+        createElement(AdrListView, { list: none.data, path: "/x" as never, cursors: {} }),
+      );
+      expect(empty).toContain(
+        "No ADRs synced yet. Run <code>hivemind adr sync</code> on the default branch.",
+      );
+      const synced = renderToStaticMarkup(
+        createElement(AdrListView, { list: data, path: "/x" as never, cursors: {} }),
+      );
+      expect(synced).toContain(`at commit <code>${C1.slice(0, 7)}</code>`);
+      expect(synced).toContain("The files in the repository are the source of truth.");
+    });
+
+    it("renders the list with the selectors the end-to-end test uses", async () => {
+      const { data } = await loadAdrList(db(), owner.id, adrProject, { status: "accepted" });
+      if (!data) throw new Error("expected the ADR list");
+      const html = renderToStaticMarkup(
+        createElement(AdrListView, { list: data, path: "/x" as never, cursors: {} }),
+      );
+      expect(html).toContain('data-testid="adr-list"');
+      expect(html).toContain('data-testid="adr-sync-banner"');
+      expect(html).toContain('data-testid="adr-reservations"');
+      expect(html.match(/data-testid="adr-row"/g)).toHaveLength(4);
+      expect(html).toContain(
+        'data-testid="adr-row" data-adr-number="3" data-adr-status="accepted" data-adr-state="published"',
+      );
+      // Reservations are listed apart, never as ADR rows.
+      expect(html).toContain('data-testid="adr-reservation" data-adr-number="7"');
+      expect(html).toContain("Reserved title");
+      // The filter: plain links, the current choice as text.
+      expect(html).toContain('<a href="/x?status=superseded">Superseded</a>');
+      expect(html).toContain('<a href="/x">All</a>');
+      expect(html).toContain('<strong aria-current="page">Accepted</strong>');
+      // A hostile title is text.
+      expect(html).toContain("<td>&lt;img src=x onerror=alert(1)&gt;</td>");
+      expect(html).not.toMatch(/<img/i);
+    });
+
+    it("lists the most recently synced ADRs on the overview, bounded", async () => {
+      const { data } = await loadProjectOverview(db(), owner.id, adrProject);
+      expect(data?.recentAdrs.map((adr) => adr.number)).toEqual([6, 5, 4, 3, 2]);
+      expect(data?.recentAdrs).toHaveLength(RECENT_ADR_COUNT);
+      expect(data?.recentAdrs.every((adr) => adr.state === "published")).toBe(true);
+      const empty = await loadProjectOverview(db(), owner.id, projectA);
+      expect(empty.data?.recentAdrs).toEqual([]);
     });
   });
 });

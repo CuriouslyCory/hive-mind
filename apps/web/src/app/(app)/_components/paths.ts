@@ -15,6 +15,14 @@ export function sessionPath(projectId: string, sessionId: string): Route {
   return `${projectPath(projectId)}/sessions/${encodeURIComponent(sessionId)}` as Route;
 }
 
+export function adrListPath(projectId: string): Route {
+  return `${projectPath(projectId)}/adrs` as Route;
+}
+
+export function adrPath(projectId: string, number: number): Route {
+  return `${adrListPath(projectId)}/${encodeURIComponent(String(number))}` as Route;
+}
+
 /** The cursor search params a page reads, by name. */
 export type CursorParams = Record<string, string | undefined>;
 
