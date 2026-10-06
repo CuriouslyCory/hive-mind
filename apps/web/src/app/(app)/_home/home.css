@@ -1,0 +1,794 @@
+/* The signed-in home page, `/` (page.tsx and ./*.tsx). Every rule is scoped
+   under .hm-home: Next keeps global stylesheets loaded after client
+   navigation and Cache Components keeps a visited page mounted but hidden,
+   so an unscoped rule would reach the Project pages. The other way round,
+   the (app) layout's dashboard.css styles body, tables, links' focus and a
+   few class names (.muted, .status, .events, …) globally; this page uses
+   none of those class names and restyles what it shares with them (the
+   root's box, tables, focus) at a higher specificity. Breakpoints are 1024px
+   and 720px, as on the public pages. */
+
+/* The page root. Positioned against the initial containing block, so it
+   spans the viewport whatever margin, padding and max-width <body> has. */
+.hm-home {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+.hm-home :where(a, button, input, main):focus-visible {
+  outline: var(--border-focus) solid var(--focus);
+  outline-offset: 2px;
+}
+.hm-home main:focus {
+  outline: none;
+}
+/* Element defaults, at zero specificity so every class below and in the
+   design system wins over them. */
+:where(.hm-home) :where(h1, h2, p, ul, ol, dl, dd, figure) {
+  margin: 0;
+}
+:where(.hm-home) :where(ul, ol) {
+  list-style: none;
+  padding: 0;
+}
+:where(.hm-home) :where(a) {
+  color: var(--ink-muted);
+}
+:where(.hm-home) :where(a:hover) {
+  color: var(--ink);
+}
+.hm-home .home-sr-only {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* Skip link: off screen until focused. */
+.hm-home .home-skip {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 10;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: 700 15px / 22px var(--font-sans);
+  box-shadow: var(--shadow-float);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.hm-home .home-skip:focus-visible {
+  transform: none;
+}
+
+/* Text helpers */
+.hm-home .home-eyebrow {
+  font: 700 12px / 16px var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.hm-home .home-small {
+  font: 400 13px / 18px var(--font-sans);
+}
+.hm-home .home-muted {
+  color: var(--ink-muted);
+}
+.hm-home .home-faint {
+  color: var(--ink-faint);
+}
+.hm-home .home-strong {
+  font-weight: 700;
+}
+.hm-home .home-num {
+  font-variant-numeric: tabular-nums;
+}
+.hm-home .home-mono {
+  font: 400 13px / 20px var(--font-mono);
+}
+.hm-home .home-mono-meta {
+  font: 500 11px / 16px var(--font-mono);
+  color: var(--ink-faint);
+}
+.hm-home .home-link {
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+.hm-home .home-link.home-mono {
+  font-weight: 400;
+}
+.hm-home .home-link:hover {
+  text-decoration-color: currentColor;
+}
+.hm-home .home-link-quiet {
+  color: var(--ink-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+/* The content column. */
+.hm-home .home-wrap {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-left: clamp(16px, 4vw, 48px);
+  padding-right: clamp(16px, 4vw, 48px);
+}
+
+/* Top bar */
+.hm-home .home-topbar {
+  background: var(--surface);
+  border-bottom: var(--border-hair) solid var(--line);
+}
+.hm-home .home-topbar-inner {
+  min-height: 64px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.hm-home .home-logo {
+  display: inline-flex;
+  border-radius: var(--radius-lg);
+  flex: none;
+}
+.hm-home .home-logo .hm-logo-tile {
+  padding: var(--space-1) var(--space-2);
+}
+.hm-home .home-breadcrumb {
+  min-width: 0;
+  font: 700 15px / 22px var(--font-sans);
+  color: var(--ink-muted);
+}
+.hm-home .home-breadcrumb ol,
+.hm-home .home-breadcrumb li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.hm-home .home-crumb-current {
+  color: var(--ink);
+  padding: var(--space-1) var(--space-2);
+}
+.hm-home .home-crumb-link {
+  color: var(--ink-muted);
+  text-decoration: none;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  transition:
+    background-color var(--duration-fast),
+    color var(--duration-fast);
+}
+.hm-home .home-crumb-link:hover {
+  background: var(--hive-tint);
+  color: var(--ink);
+}
+.hm-home .home-crumb-sep {
+  color: var(--ink-faint);
+}
+.hm-home .home-topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.hm-home .site-theme {
+  display: inline-flex;
+}
+.hm-home .home-viewer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: 700 13px / 18px var(--font-sans);
+  min-width: 0;
+}
+.hm-home .home-viewer > span:first-child {
+  display: inline-flex;
+}
+.hm-home .home-viewer-initial {
+  font: 800 12px / 1 var(--font-display);
+}
+.hm-home .home-viewer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16ch;
+}
+.hm-home .home-topbar-right [role="alert"] {
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--danger);
+}
+
+/* Body: the Projects rail and main, side by side; the rail wraps above main
+   when there is no room for both. */
+.hm-home .home-body {
+  flex: 1;
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: var(--space-8) clamp(16px, 4vw, 48px) var(--space-16);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+.hm-home .home-loading {
+  color: var(--ink-muted);
+}
+
+/* Projects rail */
+.hm-home .home-rail {
+  flex: 1 1 220px;
+  /* Not the default min-content: a long Project name (which does not wrap)
+     would otherwise widen the rail and squeeze main into one column. */
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.hm-home .home-rail-heading {
+  padding: 0 var(--space-3);
+  margin-bottom: var(--space-1);
+}
+.hm-home .home-rail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.hm-home .home-rail-list > li {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.hm-home .home-rail-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background-color var(--duration-fast);
+}
+.hm-home .home-rail-item:hover {
+  color: var(--ink);
+  background: var(--hive-tint);
+}
+.hm-home .home-rail-item[aria-current="page"] {
+  background: var(--surface-raised);
+  border-color: var(--line-strong);
+}
+.hm-home .home-rail-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.hm-home .home-rail-name {
+  font: 700 15px / 22px var(--font-sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-home .home-rail-sub,
+.hm-home .home-rail-note {
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-faint);
+}
+.hm-home .home-rail-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-home .home-rail-note {
+  padding: 0 var(--space-3);
+  text-wrap: pretty;
+}
+.hm-home .home-rail-foot {
+  margin-top: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: var(--border-hair) solid var(--line);
+}
+.hm-home .home-rail-foot .hm-code {
+  color: var(--ink);
+}
+
+/* Main */
+.hm-home .home-main {
+  flex: 999 1 500px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.hm-home .home-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+.hm-home .home-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.hm-home .home-title {
+  font: 800 clamp(28px, 4vw, 40px) / 1.1 var(--font-display);
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.hm-home .home-meta {
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+}
+.hm-home .home-heading-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.hm-home .home-freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.hm-home .home-freshness svg {
+  color: var(--success);
+  margin-right: var(--space-1);
+}
+.hm-home .home-freshness[data-state="offline"] svg {
+  color: var(--ink-faint);
+}
+
+/* Filters */
+.hm-home .home-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+.hm-home .home-filter {
+  flex: 1 1 280px;
+  max-width: 420px;
+}
+.hm-home .home-range {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Summary cells: whole tiles are links. */
+.hm-home .home-cells {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: var(--space-4);
+}
+.hm-home .home-cell-link {
+  display: flex;
+  height: 100%;
+  border-radius: var(--radius-lg);
+  color: inherit;
+  text-decoration: none;
+}
+.hm-home .home-cell-link .hm-cell {
+  width: 100%;
+  min-width: 0;
+  transition: box-shadow var(--duration-base);
+}
+.hm-home .home-cell-link:hover .hm-cell {
+  box-shadow: var(--shadow-float);
+}
+
+/* Overlap alerts */
+.hm-home .home-overlaps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.hm-home .home-overlap-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.hm-home .home-overlap-body p {
+  flex: 1 1 320px;
+}
+
+/* The two columns under the cells: tables on the left, feeds on the right. */
+.hm-home .home-columns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-6);
+}
+.hm-home .home-column-main {
+  flex: 999 1 520px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.hm-home .home-column-side {
+  flex: 1 1 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Cards */
+.hm-home .home-card {
+  padding: 0;
+  overflow: hidden;
+  min-width: 0;
+}
+.hm-home .home-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) 0;
+}
+.hm-home .home-card-head-ruled {
+  padding-bottom: var(--space-4);
+  border-bottom: var(--border-hair) solid var(--line);
+}
+.hm-home .home-card-title {
+  font: 700 20px / 26px var(--font-display);
+}
+.hm-home .home-card-aside {
+  margin-left: auto;
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-faint);
+}
+.hm-home .home-card-tabs {
+  padding: var(--space-3) var(--space-5) 0;
+}
+.hm-home .home-card-body {
+  padding: var(--space-5);
+}
+.hm-home .home-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-top: var(--border-hair) solid var(--line);
+  background: var(--surface-sunken);
+  font: 400 13px / 18px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.hm-home .home-card-foot-more {
+  margin-left: auto;
+}
+.hm-home .home-empty {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  color: var(--ink-muted);
+}
+.hm-home .home-empty-card {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Tables: scroll sideways on narrow screens rather than squeeze. */
+.hm-home .home-table-scroll {
+  overflow-x: auto;
+  padding: 0 var(--space-5);
+}
+.hm-home .home-table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font: 400 15px / 22px var(--font-sans);
+}
+.hm-home .home-agents-table {
+  min-width: 560px;
+}
+.hm-home .home-table th,
+.hm-home .home-table td {
+  padding: var(--space-3);
+  border-bottom: 0;
+  text-align: left;
+  vertical-align: top;
+}
+.hm-home .home-table th {
+  padding-top: var(--space-4);
+  font: 700 12px / 16px var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.hm-home .home-table td {
+  border-top: var(--border-hair) solid var(--line);
+}
+.hm-home .home-table :is(th, td):first-child {
+  padding-left: 0;
+}
+.hm-home .home-table :is(th, td):last-child {
+  padding-right: 0;
+}
+.hm-home .home-table tbody tr:hover {
+  background: var(--hive-tint);
+}
+.hm-home .home-col-status {
+  width: 104px;
+}
+.hm-home .home-col-plan {
+  width: 112px;
+}
+.hm-home .home-col-focus {
+  width: 128px;
+}
+.hm-home .home-col-branch {
+  width: 136px;
+}
+.hm-home .home-col-progress {
+  width: 152px;
+}
+.hm-home .home-col-time {
+  width: 104px;
+}
+.hm-home .home-col-num {
+  width: 100px;
+}
+.hm-home .home-col-wide {
+  width: 120px;
+}
+.hm-home .home-table th.home-col-num,
+.hm-home .home-num-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hm-home .home-byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-0_5);
+}
+.hm-home .home-branch {
+  font: 500 11px / 18px var(--font-mono);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.hm-home .home-time {
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Progress meters (decorative: the text beside them carries the number). */
+.hm-home .home-meter {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--hive-tint);
+  overflow: hidden;
+}
+.hm-home .home-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--honey);
+}
+.hm-home .home-meter-fill-alt {
+  background: var(--chart-2);
+}
+
+/* Feeds: Needs attention, Activity, Decisions, Hot paths. */
+.hm-home .home-feed {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1) var(--space-5) var(--space-3);
+}
+.hm-home .home-feed-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3) 0;
+}
+.hm-home .home-feed-item + .home-feed-item {
+  border-top: var(--border-hair) solid var(--line);
+}
+.hm-home .home-feed-icon {
+  display: inline-flex;
+  padding-top: 1px;
+}
+.hm-home .home-feed-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0_5);
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.hm-home .home-feed-when {
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.hm-home .home-tone-danger {
+  color: var(--danger);
+}
+.hm-home .home-tone-honey {
+  color: var(--honey-ink);
+}
+.hm-home .home-tone-info {
+  color: var(--info);
+}
+.hm-home .home-tone-muted {
+  color: var(--ink-muted);
+}
+.hm-home .home-decision,
+.hm-home .home-hot-path {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+}
+.hm-home .home-decision p {
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.hm-home .home-decision-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.hm-home .home-decision-meta .home-mono {
+  font-size: 13px;
+  line-height: 18px;
+}
+.hm-home .home-hot-path-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.hm-home .home-hot-path-name {
+  flex: 1;
+  min-width: 0;
+  font: 400 13px / 20px var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-home .home-hot-path .home-meter {
+  margin-top: 0;
+}
+
+/* Throughput */
+.hm-home .home-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: var(--space-4) var(--space-6);
+}
+.hm-home .home-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0_5);
+  min-width: 0;
+}
+.hm-home .home-stat-value {
+  font: 700 28px / 34px var(--font-display);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.hm-home .home-delta-good {
+  color: var(--success);
+}
+.hm-home .home-delta-bad {
+  color: var(--danger);
+}
+.hm-home .home-delta-flat {
+  color: var(--ink-faint);
+}
+.hm-home .home-chart {
+  margin-top: var(--space-6);
+}
+.hm-home .home-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 140px;
+  border-bottom: var(--border-hair) solid var(--line-strong);
+}
+.hm-home .home-bars[data-dense] {
+  gap: 2px;
+}
+.hm-home .home-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--honey);
+  border-radius: 3px 3px 0 0;
+}
+.hm-home .home-bar-current {
+  background: var(--honey-deep);
+}
+.hm-home .home-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+@media (max-width: 720px) {
+  .hm-home .home-body {
+    padding-top: var(--space-6);
+    gap: var(--space-6);
+  }
+  .hm-home .home-viewer-name {
+    display: none;
+  }
+  .hm-home .home-range {
+    margin-left: 0;
+  }
+  .hm-home .home-heading-actions {
+    margin-left: 0;
+  }
+}
+
+/* Touch targets: at least 44px tall on small screens and on any touch screen. */
+@media (max-width: 720px), (pointer: coarse) {
+  .hm-home .home-logo,
+  .hm-home .home-crumb-link,
+  .hm-home .home-rail-item,
+  .hm-home .home-topbar-right .hm-switch {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .hm-home .home-rail-item {
+    display: flex;
+  }
+  .hm-home .home-topbar-right .hm-switch {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .hm-home .hm-btn,
+  .hm-home .hm-tab {
+    height: 44px;
+  }
+}
+
+/* Under reduced motion the cells keep still on hover. */
+@media (prefers-reduced-motion: reduce) {
+  .hm-home .home-cell-link .hm-cell {
+    transition: none;
+  }
+}
+
+/* Printed, the page flows from the top of the first sheet like any other. */
+@media print {
+  .hm-home {
+    position: static;
+    min-height: 0;
+  }
+}

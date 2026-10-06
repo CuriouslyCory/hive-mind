@@ -357,6 +357,16 @@ a.hm-btn {
   cursor: not-allowed;
 }
 
+/* Visually hidden text, for screen readers only. */
+.hm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* Tabs */
 /* The tabs wrap onto another row rather than overflow a narrow container. */
 .hm-tabs {

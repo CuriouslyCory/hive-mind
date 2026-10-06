@@ -50,6 +50,13 @@
       "when": 1791262830042,
       "tag": "0006_m4_adrs",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791299663028,
+      "tag": "0007_home_dashboard",
+      "breakpoints": true
     }
   ]
 }

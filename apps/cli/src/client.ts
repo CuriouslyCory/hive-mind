@@ -17,6 +17,7 @@ import {
   isApiErrorCode,
   type ListAdrsInput,
   type PlanStatus,
+  type RecordPlanDecisionInput,
   type RegisterCollectionManifestInput,
   type RemoveSessionScopeInput,
   type ReserveAdrInput,
@@ -336,6 +337,7 @@ const planStatusChange = z.looseObject({
   releasedClaimCount: z.number(),
 });
 const appendedLog = z.looseObject({ event, created: z.boolean() });
+const recordedDecision = z.looseObject({ event, created: z.boolean() });
 const createdTask = z.looseObject({ task, created: z.boolean() });
 const taskAction = z.looseObject({ task, changed: z.boolean() });
 const claimedTask = z.looseObject({
@@ -482,6 +484,10 @@ export interface HivemindApi {
   appendPlanLog(
     projectId: string,
     input: Omit<AppendPlanLogInput, "id">,
+  ): Promise<{ event: ApiEvent; created: boolean }>;
+  recordPlanDecision(
+    projectId: string,
+    input: Omit<RecordPlanDecisionInput, "id">,
   ): Promise<{ event: ApiEvent; created: boolean }>;
   listPlanTasks(
     projectId: string,
@@ -914,6 +920,10 @@ export function createApiClient(options: ApiClientOptions): HivemindApi {
     appendPlanLog: (projectId, input) =>
       call("projects.plans.log.append", appendedLog, () =>
         orpc.projects.plans.log.append({ id: projectId, ...input }),
+      ),
+    recordPlanDecision: (projectId, input) =>
+      call("projects.plans.decisions.record", recordedDecision, () =>
+        orpc.projects.plans.decisions.record({ id: projectId, ...input }),
       ),
     listPlanTasks: (projectId, planRef, input = {}) =>
       call("projects.plans.tasks.list", lenientSchemas.taskPage, () =>

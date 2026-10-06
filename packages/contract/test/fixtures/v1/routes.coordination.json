@@ -49,6 +49,13 @@
     "successStatus": 200
   },
   {
+    "procedure": "projects.plans.decisions.record",
+    "operationId": "recordPlanDecision",
+    "method": "POST",
+    "path": "/projects/{id}/plans/{planRef}/decisions",
+    "successStatus": 200
+  },
+  {
     "procedure": "projects.plans.tasks.list",
     "operationId": "listPlanTasks",
     "method": "GET",

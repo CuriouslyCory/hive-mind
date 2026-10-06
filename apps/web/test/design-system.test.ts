@@ -13,7 +13,7 @@ import { Hexagon, hexagonPoints, Icon, iconNames } from "../src/design-system/ic
 import { Input } from "../src/design-system/input";
 import { Logo, LogoLockup } from "../src/design-system/logo";
 import { Switch, switchToggle } from "../src/design-system/switch";
-import { Tabs, tabIndexForKey } from "../src/design-system/tabs";
+import { Tabs, tabElementId, tabIndexForKey, tabKeyAction } from "../src/design-system/tabs";
 
 // createElement only sees the last overload of Button; JSX callers get both.
 const Button = OverloadedButton as (props: ButtonProps) => ReactElement;
@@ -254,6 +254,49 @@ describe("Tabs", () => {
     expect(tabs.map((tab) => tab["aria-selected"])).toEqual(["false", "true", "false"]);
     expect(tabs.map((tab) => tab.tabindex)).toEqual(["-1", "0", "-1"]);
     expect(html).toContain('<span class="hm-tab-count">4</span>');
+  });
+
+  it("reads a count after its label with a hidden separator", () => {
+    const html = render(createElement(Tabs, { items }));
+    expect(html).toContain(
+      'Sessions<span class="hm-sr-only">, </span><span class="hm-tab-count">4</span>',
+    );
+    // No separator without a count.
+    expect(html).toContain("Activity</button>");
+  });
+
+  it("selects with the arrow keys by default, and only moves focus with manual activation", () => {
+    expect(tabKeyAction("ArrowRight", 0, 3)).toEqual({ focus: 1, select: true });
+    expect(tabKeyAction("End", 0, 3, "automatic")).toEqual({ focus: 2, select: true });
+    expect(tabKeyAction("ArrowRight", 0, 3, "manual")).toEqual({ focus: 1, select: false });
+    expect(tabKeyAction("Home", 2, 3, "manual")).toEqual({ focus: 0, select: false });
+    // Enter and Space are the buttons' own click, which selects.
+    expect(tabKeyAction("Enter", 1, 3, "manual")).toBeNull();
+    expect(tabKeyAction(" ", 1, 3, "manual")).toBeNull();
+  });
+
+  it("renders the same markup with manual activation", () => {
+    const props = { items, value: "plans", id: "views" };
+    expect(render(createElement(Tabs, { ...props, activation: "manual" }))).toBe(
+      render(createElement(Tabs, props)),
+    );
+  });
+
+  it("names its tabs from id and ties them to a panel rendered elsewhere", () => {
+    const html = render(
+      createElement(Tabs, {
+        items: items.map(({ value, label }) => ({ value, label })),
+        value: "sessions",
+        id: "views",
+        controls: "views-panel",
+      }),
+    );
+    const tabs = tags(html, "button");
+    expect(tabs.map((tab) => tab.id)).toEqual(
+      [0, 1, 2].map((index) => tabElementId("views", index)),
+    );
+    expect(tabs.every((tab) => tab["aria-controls"] === "views-panel")).toBe(true);
+    expect(html).not.toContain("tabpanel");
   });
 
   it("ties every tab to its panel and shows only the selected panel", () => {

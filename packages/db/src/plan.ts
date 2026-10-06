@@ -7,7 +7,7 @@ import {
   withCoordinationRead,
 } from "./coordination.ts";
 import { createOnce } from "./creation.ts";
-import { insertEvent } from "./event.ts";
+import { type EventPayloads, insertEvent } from "./event.ts";
 import { creationFingerprint } from "./fingerprint.ts";
 import type { Db } from "./index.ts";
 import { releaseClaims } from "./lifecycle.ts";
@@ -184,6 +184,7 @@ const PROGRESS_FIELD: { readonly [S in TaskStatus]: keyof PlanProgress } = {
   done: "done",
 };
 
+/** Each Plan's Task counts by status (`PlanProgress`), by Plan id; zeros for a Plan with no Tasks. */
 export async function progressOf(
   tx: Db | Transaction,
   planIds: string[],
@@ -492,7 +493,11 @@ export async function setPlanStatus(
 
     const [updated] = await tx
       .update(plan)
-      .set({ status: input.status, updatedAt: now })
+      .set({
+        status: input.status,
+        pausedAt: input.status === "paused" ? now : null,
+        updatedAt: now,
+      })
       .where(eq(plan.id, row.id))
       .returning();
     if (!updated) throw new Error("plan update returned no row");
@@ -542,6 +547,47 @@ export async function appendPlanLog(
   input: PlanWriter & { ref: string; eventId: string; message: string },
 ): Promise<AppendPlanLogOutcome> {
   assertStorableText({ message: input.message });
+  return writePlanEventOnce(db, input, {
+    kind: "plan_log",
+    type: "plan.log_appended",
+    payload: { message: input.message },
+  });
+}
+
+export type RecordPlanDecisionOutcome = AppendPlanLogOutcome;
+
+/**
+ * Records a decision against a Plan: a `plan.decision_recorded` Event whose
+ * UUID is the caller's decision ID. `text` is one trimmed line of plain text,
+ * already validated by the caller (`decisionTextSchema` in the contract).
+ * Allowed in every Plan status, terminal ones included, like a Plan log entry.
+ * A retry with the same ID, Plan, text, Session and principal returns the
+ * stored Event without writing another; the same ID with any other input, or
+ * already used by a Plan log entry, is a conflict.
+ */
+export async function recordPlanDecision(
+  db: Db,
+  input: PlanWriter & { ref: string; eventId: string; text: string },
+): Promise<RecordPlanDecisionOutcome> {
+  assertStorableText({ text: input.text });
+  return writePlanEventOnce(db, input, {
+    kind: "plan_decision",
+    type: "plan.decision_recorded",
+    payload: { text: input.text },
+  });
+}
+
+/**
+ * Writes a Plan Event under the caller's UUID, once: the shared body of
+ * `appendPlanLog` and `recordPlanDecision`. The creation fingerprint is the
+ * Plan, the payload's fields and the actor Session, so a Plan log entry's
+ * fingerprint is `{ planId, message, sessionId }` as it always was.
+ */
+async function writePlanEventOnce<T extends "plan.log_appended" | "plan.decision_recorded">(
+  db: Db,
+  input: PlanWriter & { ref: string; eventId: string },
+  write: { kind: "plan_log" | "plan_decision"; type: T; payload: EventPayloads[T] },
+): Promise<AppendPlanLogOutcome> {
   return returningOutcome(() =>
     withAuthorizedCoordinationLock(db, input, async ({ tx, now }) => {
       const row = await resolvePlan(tx, input.projectId, input.ref);
@@ -550,13 +596,13 @@ export async function appendPlanLog(
       if (foreign) return foreign;
       const fingerprint = creationFingerprint({
         planId: row.id,
-        message: input.message,
+        ...write.payload,
         sessionId: input.sessionId ?? null,
       });
       const outcome = await createOnce(
         tx,
         {
-          kind: "plan_log",
+          kind: write.kind,
           projectId: input.projectId,
           id: input.eventId,
           principal: input.principal,
@@ -568,8 +614,8 @@ export async function appendPlanLog(
           return insertEvent(sp, {
             id: input.eventId,
             projectId: input.projectId,
-            type: "plan.log_appended",
-            payload: { message: input.message },
+            type: write.type,
+            payload: write.payload,
             actor: actorOf(input),
             planId: row.id,
             creationFingerprint: fingerprint,

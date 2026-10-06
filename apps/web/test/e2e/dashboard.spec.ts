@@ -10,6 +10,7 @@ import {
   followByKeyboard,
   HOSTILE,
   insertFutureEvent,
+  organizationName,
   personalOrganizationId,
   signedInPage,
   testUsers,
@@ -81,12 +82,17 @@ test("a Member follows / → Project → Plan → Session by keyboard and sees e
   await api.addScope(project.id, sessionId, "src/lexer/**");
   const emptyPlan = await api.createPlan(project.id, { title: "Nothing here yet" });
 
-  // `/`: the User's Projects.
+  // `/`: the home page's rail lists the User's Projects, each under its
+  // Organization's name. Choosing one scopes the page to it, and Open
+  // Project leads to the Project overview.
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
-  const projectItem = page.getByRole("listitem").filter({ hasText: project.name });
-  await expect(projectItem).toContainText(project.slug);
-  await followByKeyboard(page, projectItem.getByRole("link", { name: project.name }));
+  const rail = page.getByRole("navigation", { name: "Projects" });
+  const projectLink = rail.getByRole("link").filter({ hasText: project.name });
+  await expect(projectLink).toContainText(await organizationName(pool, organizationId));
+  await followByKeyboard(page, projectLink);
+  await expect(page).toHaveURL(`/?project=${project.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: project.name })).toBeVisible();
+  await followByKeyboard(page, page.getByRole("link", { name: "Open Project" }));
 
   // The Project overview.
   await expect(page).toHaveURL(`/projects/${project.id}`);
@@ -198,7 +204,13 @@ test("a User with no Projects is told how to create one, and an empty Project sa
     "Empty project",
   );
   await page.reload();
-  await page.getByRole("link", { name: "Empty project" }).click();
+  await page
+    .getByRole("navigation", { name: "Projects" })
+    .getByRole("link")
+    .filter({ hasText: "Empty project" })
+    .click();
+  await expect(page).toHaveURL(`/?project=${project.id}`);
+  await page.getByRole("link", { name: "Open Project" }).click();
   const overview = page.getByTestId("project-overview");
   for (const text of [
     "No active Plans.",
@@ -263,14 +275,15 @@ test("a signed-out visitor sees the landing page at /, and is sent to sign in fr
   await page.goto("/");
   await expect(page).toHaveURL("/");
   // The landing headline only renders on the landing page, so this waits for
-  // it rather than passing before the Projects heading could stream in.
+  // it rather than passing before the home page could stream in.
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
     "Many agents, one codebase, no collisions.",
   );
-  await expect(page.getByRole("heading", { name: "Projects" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Projects" })).toHaveCount(0);
 
-  // A `cursor` the Projects list would ignore still shows the landing page.
-  for (const query of ["?cursor=", "?cursor=a&cursor=b"]) {
+  // A query the home page ignores (here the old Projects list's cursor, an
+  // unknown view and an empty filter) still shows the landing page.
+  for (const query of ["?cursor=abc", "?view=agents", "?q="]) {
     await page.goto(`/${query}`);
     await expect(page).toHaveURL(`/${query}`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -278,10 +291,8 @@ test("a signed-out visitor sees the landing page at /, and is sent to sign in fr
     );
   }
 
-  // A link to a page of the Projects list is a signed-in page like any other.
-  await page.goto("/?cursor=abc");
-  await expect(page).toHaveURL(`/sign-in?${new URLSearchParams({ returnTo: "/?cursor=abc" })}`);
-  await expect(page.getByRole("button", { name: "Sign in with GitHub" })).toBeVisible();
+  // A link to a state of the home page redirects like any other signed-in
+  // page (home.spec.ts).
 
   const path = `/projects/${randomUUID()}/plans/PLAN-1`;
   await page.goto(path);

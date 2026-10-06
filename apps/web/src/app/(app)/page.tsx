@@ -1,67 +1,54 @@
-import Link from "next/link";
+import "../../design-system/styles.css";
+// After the design system, so the page's rules come after its rules.
+import "./_home/home.css";
 import { Suspense } from "react";
-import { cursorParam, loadProjectList } from "../../server/dashboard/queries";
+import { designSystemFontClassName } from "../../design-system/fonts";
+import { Logo } from "../../design-system/logo";
+import { loadHomeDashboard } from "../../server/dashboard/home";
+import { homeHref, parseHomeParams } from "../../server/dashboard/home-params";
 import { getDb } from "../../server/db";
 import { requireFreshLoginSession } from "../../server/login-session";
-import { Pager } from "./_components/pager";
-import { projectPath, withParams } from "./_components/paths";
-import { SignOutButton } from "./sign-out-button";
+import { HomeView } from "./_home/home-view";
 
-// `/`: the Projects of every Organization the User is a Member of (issue
-// #11). The heading is the static shell; the login session and the list are
-// read at request time, inside Suspense.
+// `/` signed in: the Dashboard across every Project the User can read, or
+// one of them (docs/dashboard.md). The design-system root is the static
+// shell; the login session and the dashboard are read at request time,
+// inside Suspense (ADR-0003). A signed-out `/` is the landing page
+// (ADR-0016).
+//
+// The root covers the viewport whatever styles <body> has (the (app)
+// layout's dashboard.css styles body for the Project pages), and every rule
+// of home.css is scoped under .hm-home.
 export default function HomePage({ searchParams }: PageProps<"/">) {
   return (
-    <main>
-      <h1>hive-mind</h1>
-      <Suspense fallback={<p role="status">Loading your Projects…</p>}>
-        <Projects searchParams={searchParams} />
+    <div className={`hm-root hm-home ${designSystemFontClassName}`} data-theme="system">
+      <Suspense fallback={<HomeLoading />}>
+        <Home searchParams={searchParams} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 
-async function Projects({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
-  const cursor = cursorParam((await searchParams).cursor);
-  const returnPath = withParams("/", { cursor });
-  const { user } = await requireFreshLoginSession(returnPath);
-  const { data: page } = await loadProjectList(getDb(), user.id, cursor);
+async function Home({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
+  const params = parseHomeParams(await searchParams);
+  const { user } = await requireFreshLoginSession(homeHref(params));
+  const dashboard = await loadHomeDashboard(getDb(), { id: user.id, name: user.name }, params);
+  return <HomeView dashboard={dashboard} />;
+}
 
+function HomeLoading() {
   return (
     <>
-      <p>
-        Signed in as {user.name}. <SignOutButton />
-      </p>
-      <h2>Projects</h2>
-      {page.items.length === 0 && cursor === undefined ? (
-        <p>
-          You have no Projects yet. In your repository, run{" "}
-          <code>hivemind init --name &apos;My project&apos; --slug my-project</code> to create one
-          and link the repository to it (see{" "}
-          <a href="https://github.com/CuriouslyCory/hive-mind/blob/main/docs/cli.md#hivemind-init">
-            the CLI guide
-          </a>
-          ).
+      <header className="home-topbar">
+        <div className="home-wrap home-topbar-inner">
+          <Logo height={24} loading="eager" />
+        </div>
+      </header>
+      <div className="home-body">
+        <p role="status" className="home-loading">
+          Loading your dashboard…
         </p>
-      ) : (
-        <ul>
-          {page.items.map((project) => (
-            <li key={project.id}>
-              <Link href={projectPath(project.id)}>{project.name}</Link>{" "}
-              <span className="muted">
-                ({project.organizationName}, {project.slug})
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Pager
-        path="/"
-        current={{ cursor }}
-        param="cursor"
-        nextCursor={page.nextCursor}
-        label="Projects"
-      />
+      </div>
     </>
   );
 }

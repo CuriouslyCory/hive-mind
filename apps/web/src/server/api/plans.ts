@@ -5,6 +5,7 @@ import {
   getPlan as getPlanRecord,
   listPlans as listPlanRecords,
   listPlanTasks as listPlanTaskRecords,
+  recordPlanDecision as recordPlanDecisionRecord,
   resolvePlan,
   setPlanStatus as setPlanStatusRecord,
   updatePlan as updatePlanRecord,
@@ -16,10 +17,10 @@ import { api } from "./implementer";
 import { decodeKeysetCursor, encodeKeysetCursor, INT4_POSITION, UUID_POSITION } from "./keyset";
 import { pageLimit } from "./pagination";
 
-// Plans, their Tasks (add and list) and their log (issue #12 step 5). Each
-// handler authorizes the Project and the route's permissions first
-// (`coordination-auth.ts`), then calls `@hivemind/db`, which resolves the Plan
-// within that Project and maps nothing to HTTP itself.
+// Plans, their Tasks (add and list), their log (issue #12 step 5) and their
+// recorded decisions. Each handler authorizes the Project and the route's
+// permissions first (`coordination-auth.ts`), then calls `@hivemind/db`, which
+// resolves the Plan within that Project and maps nothing to HTTP itself.
 
 /** `GET /projects/{id}/plans`: newest Plan first, optionally one status. */
 export const listPlans = api.projects.plans.list.handler(
@@ -133,6 +134,28 @@ export const appendPlanLog = api.projects.plans.log.append.handler(
       ref: input.planRef,
       eventId: input.eventId,
       message: input.message,
+    });
+    if (outcome.status !== "created" && outcome.status !== "replay") {
+      throw coordinationError(outcome);
+    }
+    return { event: toEventDto(outcome.event), created: outcome.status === "created" };
+  },
+);
+
+/**
+ * `POST /projects/{id}/plans/{planRef}/decisions`: record a one-line decision,
+ * replay-safe, with the Plan log's permission and replay rules.
+ */
+export const recordPlanDecision = api.projects.plans.decisions.record.handler(
+  async ({ input, context: { principal, db } }) => {
+    const access = await authorizeProject(db, principal, input.id, ["plan:write"]);
+    const outcome = await recordPlanDecisionRecord(db, {
+      projectId: input.id,
+      principal: access.principal,
+      sessionId: input.sessionId,
+      ref: input.planRef,
+      eventId: input.eventId,
+      text: input.text,
     });
     if (outcome.status !== "created" && outcome.status !== "replay") {
       throw coordinationError(outcome);

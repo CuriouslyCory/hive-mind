@@ -237,7 +237,7 @@ unset HIVEMIND_SESSION
 The CLI never picks a Session from the server's list of live Sessions. A value that is not a UUID, from either source, is `USAGE_ERROR` (exit 1) before any request.
 
 - **Required** by `task claim`, `release`, `start`, `block` and `done`; `session heartbeat`, `update`, `attach` and `end`; and every `scope` command. Without a Session they fail with `USAGE_ERROR`.
-- **Optional attribution** on `plan create`, `plan edit`, `plan status`, `plan log --message`, `task add`, `adr new` and `adr sync`: when a Session is set, the Event names it as the actor Session. It must then be one of your Sessions and not ended or abandoned, so unset `HIVEMIND_SESSION` after `session end`; otherwise these commands fail with `CONFLICT` (exit 2).
+- **Optional attribution** on `plan create`, `plan edit`, `plan status`, `plan log --message`, `plan decide`, `task add`, `adr new` and `adr sync`: when a Session is set, the Event names it as the actor Session. It must then be one of your Sessions and not ended or abandoned, so unset `HIVEMIND_SESSION` after `session end`; otherwise these commands fail with `CONFLICT` (exit 2).
 - `status` uses the Session only to fill `myClaims`. `session show`, `session claims` and `session log` take the Session as an argument or from these two sources.
 
 Your Sessions are the ones started by the same principal: the same User (through any of that User's logins) or the same Project key. A Session started with a Project key cannot be used with a user login, and the reverse.
@@ -263,8 +263,9 @@ Your Sessions are the ones started by the same principal: the same User (through
 - `plan create` makes a `draft` Plan, or an `active` one with `--status active`, and prints its key.
 - `plan status <plan> <status>` takes `active`, `paused`, `done` or `abandoned`. The current status is a no-op (`changed: false`); a move not in the table is `CONFLICT`. `done` needs every Task done and no claims left. `abandoned` releases the remaining claims and reports how many in `releasedClaimCount`.
 - Tasks can be claimed and started only in an `active` Plan. In a `paused` Plan the current holders can still heartbeat, block, finish and release.
-- In a `done` or `abandoned` Plan, `plan log --message` still works; `plan edit` and `task add` are `CONFLICT`.
-- `plan log <plan>` without `--message` lists the Plan's Events, log entries included, newest first. A Session attached to the Plan when it ends adds its `session end` summary there too.
+- In a `done` or `abandoned` Plan, `plan log --message` and `plan decide` still work; `plan edit` and `task add` are `CONFLICT`.
+- `plan log <plan>` without `--message` lists the Plan's Events, log entries and decisions included, newest first. A Session attached to the Plan when it ends adds its `session end` summary there too.
+- `plan decide <plan> <text>` records a decision as a `plan.decision_recorded` Event. It is shown in the dashboard's Decisions panel and in the Plan's activity (`plan log`). Quote the text: it is one line, trimmed, of 1 to 500 characters, with no line breaks (U+2028 and U+2029 included) or other control characters; anything else is `USAGE_ERROR` (exit 1) before any request. Put longer reasoning in `plan log --message`.
 
 ### Tasks
 
@@ -416,7 +417,7 @@ List commands return one page: `{ items, nextCursor }`. `--limit` takes 1 to 100
 
 ### Lost answers and retries
 
-The CLI never retries a write. `plan create`, `plan log --message`, `task add`, `session start` and `adr new` generate the new record's UUID once per run. Unless the server rejected the request with a documented 4xx code (`BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`) or the CLI stopped before sending it, the record may exist anyway. That covers a timeout, a lost connection, a cancel, an unreadable answer and any 5xx: a gateway timeout or a failed output check can come after the server committed. The error says so and names the generated id (on stderr in `--json` mode too):
+The CLI never retries a write. `plan create`, `plan log --message`, `plan decide`, `task add`, `session start` and `adr new` generate the new record's UUID once per run. Unless the server rejected the request with a documented 4xx code (`BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`) or the CLI stopped before sending it, the record may exist anyway. That covers a timeout, a lost connection, a cancel, an unreadable answer and any 5xx: a gateway timeout or a failed output check can come after the server committed. The error says so and names the generated id (on stderr in `--json` mode too):
 
 ```text
 The Plan may have been created anyway with id 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b. Check with 'hivemind plan show 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b' before retrying, and retry only with --id 6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b.
@@ -480,6 +481,7 @@ All take `--project <id>`. "Session" means `--session <id>` or `HIVEMIND_SESSION
 | `plan edit <plan>` | `--title`, `--body` or `--body-file`, `--clear-body`, Session optional | `{ plan, changed }` |
 | `plan status <plan> <status>` | Session optional | `{ plan, changed, releasedClaimCount }` |
 | `plan log <plan>` | to read: `--limit`, `--cursor`. To append: `--message` or `--message-file`, `--id`, Session optional | read: `{ items, nextCursor }` of Events; append: `{ event, created }` |
+| `plan decide <plan> <text>` | `--id`, Session optional | `{ event, created }` |
 | `task add <plan>` | `--title` (required), `--id`, Session optional | `{ task, created }`; human output is the Task id |
 | `task claim <taskId>` | `--steal`, Session | `{ task, changed, stolenFromSessionId }` |
 | `task release\|start\|done <taskId>` | Session | `{ task, changed }` |
@@ -503,7 +505,7 @@ The schemas of these `data` objects are the `/api/v1` output schemas in `package
 **Events the server cannot read.** After a rollback, the server can hold Events that a newer deployment wrote, with a type, payload version or enum value it does not know. It returns each one with `type: "event.unavailable"`, `payloadVersion: 1` and `payload: {}`, and keeps its `id`, `seq`, `writerXid`, `actor`, `actorSessionId`, `planId`, `taskId`, `sessionId`, `effectiveAt` and `createdAt` (ADR-0015). The CLI treats it like any other Event:
 
 - Human output prints its usual line, `<createdAt>  #<seq>  event.unavailable`, followed by the actor Session if there is one.
-- `--json` passes it through unchanged wherever Events appear: `items` of `plan log` and `session log`, `events.items` of `session show`, and `event` of `plan log --message`. The command succeeds with exit 0.
+- `--json` passes it through unchanged wherever Events appear: `items` of `plan log` and `session log`, `events.items` of `session show`, and `event` of `plan log --message` and `plan decide`. The command succeeds with exit 0.
 - Scripts must accept Event types they do not know, since later versions add types. Do not read `payloadVersion` as the stored Event's version: the stored type, version and payload are withheld.
 
 An Event the server finds corrupt rather than newer fails the whole read with `INTERNAL_SERVER_ERROR` (exit 1).

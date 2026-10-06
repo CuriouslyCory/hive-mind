@@ -226,6 +226,7 @@ export function eventLine(event: ApiEvent): string {
   const session = event.actorSessionId ? `  Session ${event.actorSessionId}` : "";
   const payload = event.payload as {
     message?: unknown;
+    text?: unknown;
     reason?: unknown;
     stolenFromSessionId?: unknown;
   } | null;
@@ -242,7 +243,9 @@ export function eventLine(event: ApiEvent): string {
   const message =
     event.type === "plan.log_appended" && typeof payload?.message === "string"
       ? `  ${firstLine(payload.message)}`
-      : "";
+      : event.type === "plan.decision_recorded" && typeof payload?.text === "string"
+        ? `  ${firstLine(payload.text)}`
+        : "";
   return `${event.createdAt}  #${event.seq}  ${event.type}${session}${detail}${message}`;
 }
 

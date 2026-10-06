@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { listEvents, projectHasSession } from "../src/event-read.ts";
+import { creationFingerprint } from "../src/fingerprint.ts";
 import { createDb, type Db } from "../src/index.ts";
 import {
   addTask,
@@ -12,13 +13,14 @@ import {
   listPlans,
   listPlanTasks,
   type PlanWriter,
+  recordPlanDecision,
   resolvePlan,
   setPlanStatus,
   UnstorableTextError,
   updatePlan,
 } from "../src/plan.ts";
 import type { Principal } from "../src/principal.ts";
-import { task } from "../src/schema/coordination.ts";
+import { plan as planTable, task } from "../src/schema/coordination.ts";
 import { event } from "../src/schema/event.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
 import { insertProject, insertProjectKey, insertSession } from "./support/fixtures.ts";
@@ -167,6 +169,18 @@ describeDb("Plan helpers", () => {
       "plan.updated",
       "plan.status_changed",
     ]);
+  });
+
+  it("records when a Plan was paused, until it leaves paused", async () => {
+    const { writer } = await setup();
+    const ref = (await newPlan(writer, { status: "active" })).id;
+    const paused = await setPlanStatus(testDb.db, { ...writer, ref, status: "paused" });
+    if (paused.status !== "ok") throw new Error(paused.status);
+    const [row] = await testDb.db.select().from(planTable).where(eq(planTable.id, ref));
+    expect(row?.pausedAt).toEqual(row?.updatedAt);
+    await setPlanStatus(testDb.db, { ...writer, ref, status: "active" });
+    const [resumed] = await testDb.db.select().from(planTable).where(eq(planTable.id, ref));
+    expect(resumed?.pausedAt).toBeNull();
   });
 
   it("enforces the transition table and the done precondition", async () => {
@@ -387,5 +401,112 @@ describeDb("Plan helpers", () => {
     expect(await projectHasSession(testDb.db, project.id, session.id)).toBe(true);
     expect(await projectHasSession(testDb.db, randomUUID(), session.id)).toBe(false);
     expect((await getPlan(testDb.db, project.id, "PLAN-2"))?.plan.id).toBe(second.id);
+  });
+
+  it("records decisions once, attributed to the actor and its Session", async () => {
+    const { project, writer, principal } = await setup();
+    const other = await setup();
+    const plan = await newPlan(writer, { status: "active" });
+    const session = await insertSession(testDb.db, project.id, principal);
+    const eventId = randomUUID();
+    const text = "Retry with jittered backoff, capped at 30 seconds.";
+    const input = { ...writer, sessionId: session.id, ref: "PLAN-1", eventId, text };
+
+    const created = await recordPlanDecision(testDb.db, input);
+    expect(created).toMatchObject({
+      status: "created",
+      event: {
+        id: eventId,
+        projectId: project.id,
+        type: "plan.decision_recorded",
+        payloadVersion: 1,
+        payload: { text },
+        actorKind: "user",
+        actorUserId: principal.kind === "user" ? principal.userId : null,
+        actorSessionId: session.id,
+        planId: plan.id,
+        taskId: null,
+        sessionId: null,
+        creationFingerprint: creationFingerprint({
+          planId: plan.id,
+          text,
+          sessionId: session.id,
+        }),
+      },
+    });
+
+    // A retry is a replay, by the Plan's key or its UUID, and writes nothing.
+    expect(await recordPlanDecision(testDb.db, input)).toMatchObject({
+      status: "replay",
+      event: { id: eventId, seq: created.status === "created" ? created.event.seq : "" },
+    });
+    expect(await recordPlanDecision(testDb.db, { ...input, ref: plan.id })).toMatchObject({
+      status: "replay",
+    });
+    // The same id with other input, another principal or in another Project.
+    expect(await recordPlanDecision(testDb.db, { ...input, text: "Other" })).toEqual({
+      status: "conflict",
+    });
+    expect(await recordPlanDecision(testDb.db, { ...input, sessionId: null })).toEqual({
+      status: "conflict",
+    });
+    expect(
+      await recordPlanDecision(testDb.db, {
+        ...input,
+        sessionId: null,
+        principal: await insertProjectKey(testDb.db, project.id),
+      }),
+    ).toEqual({ status: "conflict" });
+    const elsewhere = await newPlan(other.writer);
+    expect(
+      await recordPlanDecision(testDb.db, { ...other.writer, ref: elsewhere.id, eventId, text }),
+    ).toEqual({ status: "id_not_found" });
+    // A decision id and a Plan log entry id never replay as each other.
+    expect(
+      await appendPlanLog(testDb.db, { ...writer, ref: plan.id, eventId, message: text }),
+    ).toEqual({ status: "conflict" });
+    const logId = randomUUID();
+    await appendPlanLog(testDb.db, { ...writer, ref: plan.id, eventId: logId, message: text });
+    expect(
+      await recordPlanDecision(testDb.db, { ...writer, ref: plan.id, eventId: logId, text }),
+    ).toEqual({ status: "conflict" });
+    expect(await eventTypes(project.id)).toEqual([
+      "plan.created",
+      "plan.decision_recorded",
+      "plan.log_appended",
+    ]);
+    // A Plan log entry's fingerprint is unchanged by the shared writer.
+    const [log] = await testDb.db.select().from(event).where(eq(event.id, logId));
+    expect(log?.creationFingerprint).toBe(
+      creationFingerprint({ planId: plan.id, message: text, sessionId: null }),
+    );
+  });
+
+  it("records decisions in every Plan status and checks the Plan and Session", async () => {
+    const { project, writer, principal } = await setup();
+    const decide = (overrides: Partial<PlanWriter> & { ref: string; text?: string }) =>
+      recordPlanDecision(testDb.db, { ...writer, eventId: randomUUID(), text: "D", ...overrides });
+    const draft = await newPlan(writer);
+    expect(await decide({ ref: draft.id })).toMatchObject({ status: "created" });
+    const done = await newPlan(writer, { status: "active" });
+    expect(
+      await setPlanStatus(testDb.db, { ...writer, ref: done.id, status: "done" }),
+    ).toMatchObject({ status: "ok" });
+    expect(await decide({ ref: done.id })).toMatchObject({
+      status: "created",
+      event: { planId: done.id },
+    });
+    expect(await decide({ ref: "PLAN-99" })).toEqual({ status: "plan_not_found" });
+    const ended = await insertSession(testDb.db, project.id, principal, {
+      status: "ended",
+      endedAt: new Date(),
+    });
+    expect(await decide({ ref: draft.id, sessionId: ended.id })).toEqual({
+      status: "session_ended",
+    });
+    expect(await decide({ ref: draft.id, sessionId: randomUUID() })).toEqual({
+      status: "session_not_found",
+    });
+    await expect(decide({ ref: draft.id, text: "a\u0000" })).rejects.toThrow(UnstorableTextError);
   });
 });

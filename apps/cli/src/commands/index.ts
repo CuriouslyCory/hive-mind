@@ -4,7 +4,15 @@ import { init } from "./init.ts";
 import { keyCreate, keyList, keyRevoke } from "./key.ts";
 import { login } from "./login.ts";
 import { logout } from "./logout.ts";
-import { planCreate, planEdit, planList, planLog, planShow, planStatus } from "./plan.ts";
+import {
+  planCreate,
+  planDecide,
+  planEdit,
+  planList,
+  planLog,
+  planShow,
+  planStatus,
+} from "./plan.ts";
 import { scopeAdd, scopeCheck, scopeList, scopeRemove } from "./scope.ts";
 import {
   sessionAttach,
@@ -39,6 +47,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
   planCreate,
   planEdit,
   planLog,
+  planDecide,
   planStatus,
   taskAdd,
   taskClaim,

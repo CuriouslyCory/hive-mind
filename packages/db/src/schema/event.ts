@@ -84,6 +84,13 @@ export const event = pgTable(
     index("event_task_id_seq_idx").on(table.taskId, table.seq),
     index("event_session_id_seq_idx").on(table.sessionId, table.seq),
     index("event_actor_session_id_seq_idx").on(table.actorSessionId, table.seq),
+    // Events of one type in a time range, for the home page's throughput,
+    // agent and decision summaries.
+    index("event_project_id_type_effective_at_idx").on(
+      table.projectId,
+      table.type,
+      table.effectiveAt,
+    ),
     check("event_actor_kind_check", oneOf("actor_kind", EVENT_ACTOR_KINDS)),
     check(
       "event_actor_check",

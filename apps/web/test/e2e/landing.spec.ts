@@ -263,11 +263,12 @@ for (const width of [320, 360, 390, 430]) {
   });
 }
 
-test("a signed-in User at / gets the Projects list, not the landing page", async ({ browser }) => {
+test("a signed-in User at / gets the home page, not the landing page", async ({ browser }) => {
   const { page } = await signedInPage(browser, users);
   await page.goto("/");
   await expect(page).toHaveURL("/");
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Projects" })).toBeVisible();
   await expect(page.getByRole("heading", { name: HEADLINE })).toHaveCount(0);
   await expect(landingRoot(page)).toHaveCount(0);
   await page.context().close();

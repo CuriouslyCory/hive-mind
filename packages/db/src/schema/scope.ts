@@ -80,6 +80,8 @@ export const scopeCollectionBatch = pgTable(
       table.collectionId,
       table.batchIndex,
     ),
+    // Touched-path batches in a time range, for the home page's hot paths.
+    index("scope_collection_batch_project_id_created_at_idx").on(table.projectId, table.createdAt),
     check("scope_collection_batch_index_check", sql`${table.batchIndex} >= 0`),
     check("scope_collection_batch_fingerprint_check", isSha256Hex("fingerprint")),
   ],

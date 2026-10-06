@@ -352,6 +352,24 @@ describeDb("start, block and done", () => {
     ]);
   });
 
+  it("record when a Task became blocked, through a new reason, until it is unblocked", async () => {
+    const { task, a, as } = await setup();
+    await claimTask(testDb.db, as(a.id));
+    const blocked = await blockTask(testDb.db, { ...as(a.id), reason: "Waiting" });
+    if (blocked.status !== "ok") throw new Error(blocked.status);
+    expect(blocked.task.blockedAt).toEqual(blocked.task.updatedAt);
+    const since = blocked.task.blockedAt;
+    expect(await blockTask(testDb.db, { ...as(a.id), reason: "Still waiting" })).toMatchObject({
+      changed: true,
+      task: { blockReason: "Still waiting", blockedAt: since },
+    });
+    await startTask(testDb.db, as(a.id));
+    expect((await taskRow(testDb.db, task.id)).blockedAt).toBeNull();
+    await blockTask(testDb.db, { ...as(a.id), reason: "Again" });
+    await doneTask(testDb.db, as(a.id));
+    expect((await taskRow(testDb.db, task.id)).blockedAt).toBeNull();
+  });
+
   it("need an unexpired claim", async () => {
     const { task, a, as } = await setup();
     await setClaim(testDb.db, task.id, a.id, -SECOND);

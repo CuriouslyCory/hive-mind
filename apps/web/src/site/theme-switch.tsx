@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Switch } from "../design-system/switch";
 
-/** The page's root (`SitePage`), which carries `data-theme`. */
-const ROOT_SELECTOR = ".hm-site";
+/**
+ * The page's design-system root, which carries `data-theme`: `SitePage` on
+ * the public pages, the home page's root on `/` signed in.
+ */
+const ROOT_SELECTOR = ".hm-root";
 
 /**
- * The dark theme switch, for a `SiteHeader`. `SitePage` renders
- * `data-theme="system"`, so the first paint follows the operating system in
- * CSS alone; this switch only reflects the effective theme once mounted and,
+ * The dark theme switch, for a `SiteHeader` or any page header inside a
+ * design-system root. The root renders `data-theme="system"`, so the first
+ * paint follows the operating system in CSS alone; this switch only reflects the effective theme once mounted and,
  * when toggled, forces `light` or `dark` on the page root. The choice is not
  * kept across visits.
  */

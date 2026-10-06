@@ -39,7 +39,7 @@ A repository path area a Session reports: either declared (a restricted glob of 
 _Avoid_: OAuth scope, area, lock
 
 **Event**:
-An immutable record of one change in a Project, written in the same transaction as the change, attributed to a User, a Project key or the system. Events are the Project's activity feed; a Plan's log entries are Events.
+An immutable record of one change in a Project, written in the same transaction as the change, attributed to a User, a Project key or the system. Events are the Project's activity feed; a Plan's log entries and recorded decisions (one line of plain text each) are Events.
 _Avoid_: activity, audit log entry, log line
 
 ### Identity and access

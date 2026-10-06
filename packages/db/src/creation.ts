@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { Transaction } from "./coordination.ts";
+import type { EventType } from "./event.ts";
 import { type Principal, samePrincipal, sessionOwner } from "./principal.ts";
 import { type Adr, adr } from "./schema/adr.ts";
 import {
@@ -13,23 +14,36 @@ import {
 import { type Event, event } from "./schema/event.ts";
 
 // Creation replay (issue #12, "Transaction, identity and Event invariants").
-// Plan, Task and Session creation, Plan log appends and ADR reservations take
-// a UUID the client generated once, so a client that lost the response can
-// retry safely. The server stores a fingerprint of the original input and the
-// authenticated principal with the record, and a retry is recognized by
-// comparing them, never the record's current (possibly edited) fields.
+// Plan, Task and Session creation, Plan log appends, recorded decisions and
+// ADR reservations take a UUID the client generated once, so a client that
+// lost the response can retry safely. The server stores a fingerprint of the
+// original input and the authenticated principal with the record, and a retry
+// is recognized by comparing them, never the record's current (possibly
+// edited) fields.
 
 /**
  * What a caller-supplied UUID creates. A Plan log entry is a
- * `plan.log_appended` Event; an `adr` is an ADR reservation (src/adr.ts).
+ * `plan.log_appended` Event, a recorded decision a `plan.decision_recorded`
+ * Event, and an `adr` an ADR reservation (src/adr.ts).
  */
-export type CreationKind = "plan" | "task" | "session" | "plan_log" | "adr";
+export type CreationKind = "plan" | "task" | "session" | "plan_log" | "plan_decision" | "adr";
+
+/** The Event type an Event-backed creation kind writes; null for the other kinds. */
+const EVENT_CREATION_TYPES: { readonly [K in CreationKind]: EventType | null } = {
+  plan: null,
+  task: null,
+  session: null,
+  plan_log: "plan.log_appended",
+  plan_decision: "plan.decision_recorded",
+  adr: null,
+};
 
 export interface CreationRows {
   plan: Plan;
   task: Task;
   session: AgentSession;
   plan_log: Event;
+  plan_decision: Event;
   adr: Adr;
 }
 
@@ -134,7 +148,7 @@ async function findCreation<K extends CreationKind>(
     row: row as CreationRows[K],
     stored: {
       projectId: row.projectId,
-      sameAction: row.type === "plan.log_appended",
+      sameAction: row.type === EVENT_CREATION_TYPES[kind],
       principal:
         row.actorKind === "user" && row.actorUserId
           ? { kind: "user", userId: row.actorUserId }
@@ -166,6 +180,7 @@ const PRIMARY_KEYS: Record<CreationKind, string> = {
   task: "task_pkey",
   session: "agent_session_pkey",
   plan_log: "event_pkey",
+  plan_decision: "event_pkey",
   adr: "adr_pkey",
 };
 

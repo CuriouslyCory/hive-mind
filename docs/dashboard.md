@@ -1,14 +1,14 @@
 # The dashboard
 
-The dashboard is the read-only web view of coordination state. A signed-in User sees the Projects of every Organization they are a Member of, opens a Project, follows a Plan or a Session, and sees changes arrive without reloading. It edits nothing: Plans, Tasks, claims and Sessions change only through the CLI and `/api/v1` (ADR-0014), and ADRs change only in the repository (ADR-0017).
+The dashboard is the read-only web view of coordination state. A signed-in User starts on the home page, which summarizes every Project of every Organization they are a Member of, opens a Project, follows a Plan or a Session, and sees changes arrive without reloading. It edits nothing: Plans, Tasks, claims and Sessions change only through the CLI and `/api/v1` (ADR-0014), and ADRs change only in the repository (ADR-0017).
 
-The design is in [#11](https://github.com/CuriouslyCory/hive-mind/issues/11) and ADR-0010. This page describes what the code does.
+The design is in [#11](https://github.com/CuriouslyCory/hive-mind/issues/11) and ADR-0010; the home page's is in [ADR-0018](adr/0018-home-dashboard.md). This page describes what the code does.
 
 ## Pages
 
 | Route | Shows |
 |---|---|
-| `/` | Signed out: the public landing page (`/welcome`), which `apps/web/src/proxy.ts` serves at `/` by a rewrite. Signed in: the Projects of every Organization the User is a Member of, oldest first, 20 per page, each with its Organization's name and its slug. A User with no Projects sees how to create one with `hivemind init` ([docs/cli.md](cli.md)). |
+| `/` | Signed out: the public landing page (`/welcome`), which `apps/web/src/proxy.ts` serves at `/` by a rewrite; a `/` that names a home-page state (below) redirects to `/sign-in` and returns to it. Signed in: the home page (see [Home page](#home-page)): a rail of the User's Projects, summary cells, overlap warnings, Needs attention, Sessions and Plans tables, Throughput, Agents, recent Activity, Decisions and Hot paths, across every readable Project or within one. Its list views show the Plans or the Sessions alone. All its state is in the URL: `project` (a Project id), `q` (the filter), `view` (`plans` or `sessions`), `sessions` (`active`, `ended`, `overlap`, `all`), `plans` (`all`, `active`, `paused`, `done`) and `range` (`24h`, `7d`, `30d`). A User with no Projects sees how to create one with `hivemind init` ([docs/cli.md](cli.md)). |
 | `/projects/[projectId]` | Active Plans with Task progress (20 per page); overlap warnings (advisory, up to 20); live Sessions (up to 20) with agent, status, owner, machine and branch, focus (Plan or Task), last heartbeat and declared Scope; recent ended or abandoned Sessions (20 per page); recent ADRs (the 5 published ADRs a sync changed most recently) and a link to the ADR list. |
 | `/projects/[projectId]/plans/[planKey]` | The Plan's status, progress, creator and owner; its body as sanitized markdown; its Tasks in order with their claim holders (20 per page); the Sessions attached to it; its activity (Events, 50 per page). `planKey` is the Plan's key, such as `PLAN-3`. |
 | `/projects/[projectId]/sessions/[sessionId]` | The Session's agent, intent, status, owner, machine, branch and commit, focus, start, last heartbeat and end; its end summary as sanitized markdown; its declared and touched Scope; its Event timeline (newest first, 50 per page). |
@@ -17,7 +17,60 @@ The design is in [#11](https://github.com/CuriouslyCory/hive-mind/issues/11) and
 
 Every ADR page starts with what the copy is as of: "Copied from `docs/adr/` at commit `<sha7>`, synced `<time>` by `<User or Project key>`. The files in the repository are the source of truth." Before the first sync it says: "No ADRs synced yet. Run `hivemind adr sync` on the default branch." The ADR list's status filter is a row of plain links (All, Proposed, Accepted, Superseded, Deprecated) that set `?status=`; a value that is not an ADR status shows every status. Reservations have no status, so they are listed under any filter. An ADR's state (reserved, published, removed) is never shown as a status.
 
-A Session or Event started with a Project key is attributed to the key, never to the key's creator. Task progress, usable claims, effective Session status and overlaps come from M2's read functions in `@hivemind/db`, judged at the database time of the page's snapshot; the dashboard does not recompute them from timestamps. Lists are keyset-paged with opaque cursors in the URL's search parameters; a cursor that does not decode shows the first page.
+A Session or Event started with a Project key is attributed to the key, never to the key's creator. Task progress, usable claims, effective Session status and overlaps come from M2's read functions in `@hivemind/db`, judged at the database time of the page's snapshot; the dashboard does not recompute them from timestamps. The Project pages' lists are keyset-paged with opaque cursors in the URL's search parameters; a cursor that does not decode shows the first page. The home page has no cursors: its lists are bounded instead.
+
+## Home page
+
+`/` signed in is `apps/web/src/app/(app)/page.tsx`, built from `_home/` on the design system ([docs/design-system.md](design-system.md)). Its data is `loadHomeDashboard` in `apps/web/src/server/dashboard/home.ts`; the read model and its limits are in `home-types.ts`, the analytics in `home-analytics.ts` and the decisions in `home-decisions.ts`.
+
+**State.** `parseHomeParams` (`home-params.ts`) reads the search parameters listed under Pages; an unknown or malformed value falls back to the default (all Projects, no filter, the home view, the `active` Sessions tab, the `all` Plans tab, `7d`), and `homeHref` leaves defaults out of the URL. Every control is a link to another state, and the filter replaces the URL 300 ms after typing stops (at once on Enter), so a filtered view can be shared and a refresh re-reads exactly what is on screen. The filter never overrides a navigation the User made meanwhile (`createFilterController`, `_home/filter-controller.ts`): another navigation that renders, Back or Forward drops a pending edit, and the field then shows the URL's filter; moving focus elsewhere on the page applies the pending edit first, so a link clicked next is requested after it and wins. Enter that confirms an IME composition does not apply. A `project` the User cannot read is treated as none.
+
+**The read.** One `runDashboardSnapshot` transaction, like a Project page. It reads the Projects of the Organizations the User is a current Member of, and limits every other query to them, or to the selected one. Lists are set-based across those Projects; only M2's overlap summary runs per Project, for Projects with at least two live Sessions. `q` is a case-insensitive substring, matched in SQL with its wildcards escaped, against the fields each section shows: intents, agents, owners, machines, branches, Plan keys and titles, Project names, Task titles and block reasons, decision text, paths. Needs attention also matches each kind's label as the page shows it (`ATTENTION_LABELS`), so `lapsed` lists every lapsed claim. Events are described before they can be matched, so the Activity list filters the newest 200 Events in scope (`HOME_EVENT_WINDOW`) in memory.
+
+**Bounds** (`home-types.ts` and `home.ts`):
+
+| What | Bound |
+|---|---|
+| Projects in the rail | 50 (`HOME_PROJECT_LIMIT`), with a "Showing 50 of N" note |
+| Sessions and Plans tables | 5 rows on the home view (`HOME_TABLE_ROWS`), with "See all" to the list view; 100 on the list views (`LIST_TABLE_ROWS`) |
+| Needs attention | 10 items (`HOME_ATTENTION_LIMIT`); each kind is one bounded query that also counts all its matches |
+| Overlap warnings | 5 (`HOME_OVERLAP_LIMIT`), from at most 100 live Sessions and 100 overlaps per Project |
+| Activity | 7 Events (`HOME_EVENT_LIMIT`) out of the newest 200 |
+| Decisions | 4 (`HOME_DECISION_LIMIT`) |
+| Hot paths | 6 (`HOME_HOT_PATH_LIMIT`) |
+| Agents | 10 (`HOME_AGENT_LIMIT`) |
+
+The list views (`view=plans`, `view=sessions`) read only the rail, their table and its tab counts; Needs attention, Activity, Decisions and the analytics come back empty.
+
+**Summary cells.** Active Plans (status `active`); Buzzing (Sessions effectively `active`); Open Tasks (not `done`, in Plans that are not `done` or `abandoned`); Tasks done (`task.done` Events in the range); Blocked Tasks (status `blocked`, in open Plans); Overlaps (current overlap pairs between live Sessions). Each links to the list view and tab that shows them.
+
+**Needs attention.** Advisory: nothing is blocked by these items. Most urgent kind first, then:
+
+| Kind | An item when | Order within the kind |
+|---|---|---|
+| Lease ending | A usable claim's lease ends within 120 s (`LEASE_ENDING_SECONDS`). | Soonest first |
+| Claim lapsed | Within the last hour (`LAPSED_CLAIM_WINDOW_SECONDS`), a claim stopped being usable (its lease expired or its holder is no longer live) and nothing has reconciled it yet, or the Task's latest claim change was a time-driven `task.released` (`lease_expired`, `session_stale`, `session_abandoned`) and the Task is still unclaimed and not done. The Task's Plan is open. | Most recent first |
+| Blocked Task | A Task has status `blocked` in an open Plan. Shows its reason and `task.blocked_at`. | Most recently blocked first |
+| Unclaimed Plan | An `active` Plan with open Tasks has no usable claim, and for 24 hours (`UNCLAIMED_PLAN_SECONDS`) has had no update, no `task.claimed`, `task.released` or `task.done`, and no Task holding a usable claim. | Most recently idle first |
+| Paused Plan | A `paused` Plan still has open Tasks. Shows `plan.paused_at`. | Most recently paused first |
+
+`blocked_at` and `paused_at` are set when the status changes and cleared when it changes back. Rows that were already blocked or paused before the columns existed were backfilled from their latest matching Event; one with no such Event shows no time. Status changes made by a deployment without the columns leave them unchanged (Known limitations).
+
+**Throughput, Agents and Hot paths** (`home-analytics.ts`). Every boundary derives from the snapshot's database time. The range `24h` is 24 hourly buckets, `7d` and `30d` are 7 or 30 UTC days; the last bucket holds now and is partial, and each figure is compared with the same elapsed time one range earlier, from the start of the range minus its length to now minus its length, so a steady rate compares as equal.
+
+- **Throughput:** `task.done` Events per bucket; Sessions started (`session.started`); Plans finished (`plan.status_changed` to `done`); and the median minutes from a Task's latest `task.claimed` before its `task.done` to that `task.done`.
+- **Agents:** grouped by the Sessions' agent name: their machines, Projects, Sessions started, `task.done` Events written through them, and active time. Active time sums the gaps between a Session's consecutive `session.started` and `session.heartbeat` Events that are shorter than 5 minutes (`ACTIVE_GAP_SECONDS`), clipped to the range; a longer gap counts as away. Most active first.
+- **Hot paths:** touched paths from the Sessions' collection batches (`scope_collection_batch`) in the range, ranked by touches (the number of batches that carried the path), then by distinct Sessions. A path is marked when the Scope of a current overlap matches it. Batches outlive their Session, so the history does too.
+
+These read existing Events and batches through two indexes added for them, `event (project_id, type, effective_at)` and `scope_collection_batch (project_id, created_at)`; there is no rollup table (ADR-0018).
+
+**Decisions.** The newest `plan.decision_recorded` Events in scope, written by `POST /api/v1/projects/{id}/plans/{planRef}/decisions`. Each goes through the shared projection (ADR-0015); one this build cannot read is left out rather than shown as unavailable.
+
+**Live behavior.** The home page opens no Event stream. One page spans up to every readable Project, and the stream is per Project ([The stream](#the-stream)), so live updates would need one connection per Project in every open tab, and tabs do not share streams. Instead `Freshness` (`_home/freshness.tsx`, scheduled by `createHomeFreshness` in `_home/freshness-controller.ts`) calls `router.refresh()` every 15 seconds (`HOME_REFRESH_MS`) while the browser tab is visible and online. Each refresh is a new snapshot. The page says "Live" with the age of its data, or "Offline".
+
+- **Age.** The age runs from when the browser first received the snapshot (its `asOf`). Showing a page again does not reset it: only a newer snapshot does. The receipt times outlive the component, so an older render of `/` that Back or Forward restores from Next's cache keeps its age.
+- **Catching up.** Becoming visible or online refreshes at once if the data is older than 5 seconds (`HOME_CATCH_UP_MS`). When the page is hidden in a React Activity (Cache Components; see `AGENTS.md`), its timers stop; when Back shows it again, it refreshes at once if its data is older than the interval, or is older than a snapshot already received.
+- **One at a time.** A tick while a refresh is in flight is skipped, until a new snapshot arrives, the refresh's transition ends, or 20 seconds pass (`HOME_REFRESH_TIMEOUT_MS`). Every refresh restarts the interval, so a catch-up is not followed by a tick moments later. No timer runs while the tab is hidden or the browser is offline.
 
 ## Authorization
 
@@ -38,7 +91,7 @@ A Project page also gets the fence `(H, 0)`, encoded as a feed cursor for that P
 
 ### In the browser
 
-One subscription runs per open Project (`createProjectEventStream` in `apps/web/src/lib/project-event-stream.ts`, used by `ProjectLiveUpdates` in `apps/web/src/components/dashboard/project-live-updates.tsx`). It reads the cookie stream with `fetch`, so it sees HTTP statuses and can send `Last-Event-ID`. The subscription and its cursor survive page refreshes. Changing Project closes it and opens a new one from the new page's fence, so no cursor crosses Projects.
+The home page does not subscribe; it refreshes on a timer ([Home page](#home-page) → Live behavior). One subscription runs per open Project (`createProjectEventStream` in `apps/web/src/lib/project-event-stream.ts`, used by `ProjectLiveUpdates` in `apps/web/src/components/dashboard/project-live-updates.tsx`). It reads the cookie stream with `fetch`, so it sees HTTP statuses and can send `Last-Event-ID`. The subscription and its cursor survive page refreshes. Changing Project closes it and opens a new one from the new page's fence, so no cursor crosses Projects.
 
 The browser never renders Event content from the stream. An Event is only an invalidation:
 
@@ -139,7 +192,7 @@ Plan bodies, Plan log entries, Session end summaries and ADR files are written b
 
 An ADR page renders only the part of the file after its frontmatter (`parseAdrContent(...).adr.body` from `@hivemind/contract`); the status, date and supersedes list come from the stored copy and render as plain text. A later `---` block in the body is a rule and a heading, never metadata. Links between ADRs in the repository are relative (`[ADR-0004](0004-x.md)`), so under the rules above they render as plain text, not links; the page's supersedes and superseded-by links point to the other ADR pages instead. The ADR's title is plain text.
 
-Labels, intents, ADR titles and Event text are not markdown. They render as plain React text, and Event text is built only from known payload fields of projected Events (`apps/web/src/server/dashboard/event-text.ts`), never by spreading a payload into HTML or props.
+Labels, intents, ADR titles, recorded decisions and Event text are not markdown. They render as plain React text, and Event text is built only from known payload fields of projected Events (`apps/web/src/server/dashboard/event-text.ts`), never by spreading a payload into HTML or props.
 
 ## Known limitations
 
@@ -148,6 +201,11 @@ Labels, intents, ADR titles and Event text are not markdown. They render as plai
 - **No per-caller cap on concurrent streams.** One User or Project key can open any number of streams, each holding a function instance and polling once a second until it rotates. This is an accepted risk; general rate limiting is M7's ([#1](https://github.com/CuriouslyCory/hive-mind/issues/1), [#11](https://github.com/CuriouslyCory/hive-mind/issues/11)).
 - **A fence can be wrong after a Postgres crash.** A page's fence `(H, 0)` can name a transaction ID that was assigned but never made durable, and crash recovery can issue such IDs again. Resuming from that fence can then fail with 400 while the server's next ID is below H (the dashboard takes a fresh snapshot once), or, once new IDs pass H, skip Events written under reissued IDs below H. A committed Event's ID is never reused, so a cursor from a delivered Event is unaffected (ADR-0010). Fixing this is follow-up work ([#17](https://github.com/CuriouslyCory/hive-mind/issues/17)).
 - **Delivery is at least once, and cursor order is not commit order.** The dashboard is unaffected because it re-reads server state; other clients must apply Events idempotently and must not treat feed order as time order.
+- **The home page's refresh re-runs its aggregates.** Every 15 seconds, each visible home page tab runs the whole read again: the counts, every Needs-attention kind, the overlap summary per Project with live Sessions, and the Throughput, Agents and Hot paths aggregates over the range (up to 30 days of Events and batches). The indexes bound each statement, but the cost grows with the number of readable Projects, the range and the open tabs. Agents and Hot paths scan every `session.started` and `session.heartbeat` Event and every collection batch receipt in the range, so theirs also grows with the number of agents heartbeating. ADR-0018 says when to add a rollup.
+- **Blocked and paused times can be early or missing for a while.** Migration `0007_home_dashboard` adds and backfills `task.blocked_at` and `plan.paused_at` before the new code is live. Until then, and after a rollback, the previous deployment changes statuses without touching the columns, so a Task or Plan it blocks or pauses can show no time or an earlier block's or pause's time, until its next status change through current code. A reconciliation migration in a later release fixes such rows (ADR-0018).
+- **Migration `0007_home_dashboard` builds its indexes without `CONCURRENTLY`.** It blocks writes to `event` and `scope_collection_batch` while it runs, which is brief at the current sizes; on a large `event` table, build such an index concurrently in a separate step (ADR-0018).
+- **Hot path touches count collection batches, not edits.** Each `hivemind session heartbeat` uploads the worktree's changed paths in batches of at most 16 ([docs/cli.md](cli.md)), and a path is in one batch per heartbeat. So a path counts once per heartbeat while it stays changed, however often it was edited, and a change committed between two heartbeats is not counted at all. A Session that heartbeats more often makes its paths look hotter.
+- **Claim lapsed looks back one hour.** A claim that lapsed earlier and was never picked up again no longer shows; the Task still shows as unclaimed on its Plan.
 - **No Event retention until M7.** Events are never deleted yet, so `feedOriginCursor` replays everything. Before M7 prunes Events that a cursor could still replay, it needs an expired-cursor protocol (ADR-0010).
 
 ## Tests
@@ -158,4 +216,6 @@ Labels, intents, ADR titles and Event text are not markdown. They render as plai
 - `apps/web/test/project-event-stream.test.ts`: the browser engine's decoding, deduplication, refresh coalescing, reconnects and terminal states, and which Events refresh which page, ADR pages included.
 - `apps/web/test/project-live-registry.test.ts`: one stream across a Project's pages, its cursor when the page changes (from a Plan page to the ADR pages, for example), lost access and hidden layouts.
 - `apps/web/test/dashboard-queries.test.ts` and `apps/web/test/markdown.test.ts`: page reads, cross-Project children, attribution and hostile markdown. For ADRs: membership, malformed and foreign numbers, the status filter, reservations and removed ADRs listed apart, a taken reservation, supersedes chains with missing targets, cycles and the depth bound, the banner's last sync by a User or a Project key, the overview's recent ADRs, and ADR bodies with their frontmatter removed, hostile HTML dropped and relative links shown as text.
+- `apps/web/test/home-dashboard.test.ts`, `home-analytics.test.ts`, `home-decisions.test.ts`, `home-params.test.ts` and `home-page.test.ts`: the home page's read across Organizations, its filter, each attention kind, the analytics boundaries, decisions, the URL state and the rendered sections. `home-freshness.test.ts` and `home-filter.test.ts`: the refresh schedule and the filter's races with other navigation, with fake timers. `apps/web/test/proxy.test.ts` checks that the proxy and `parseHomeParams` agree on which `/` queries are signed-in links.
+- `apps/web/test/e2e/home.spec.ts` (Playwright): the home page with real data, scoping, the filter, the list views, a decision reaching an open page on its next refresh, the layout with a long Project name, hostile intents, titles and decisions rendering as text, the tabs' manual activation, and the signed-out redirect.
 - `apps/web/test/event-projection.test.ts`: the shared projection, with a pinned reader from before #14's `stolen` reason, unreadable details, corrupt rows and sanitized errors. The stream, page and browser tests above also cover Events a newer deployment wrote (ADR-0015).

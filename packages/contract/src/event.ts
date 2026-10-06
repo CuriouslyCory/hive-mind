@@ -20,6 +20,7 @@ import {
 } from "./common.ts";
 import {
   actorSessionInputShape,
+  decisionTextSchema,
   planKeySchema,
   planRefSchema,
   planStatusSchema,
@@ -152,6 +153,13 @@ const eventPayloads = {
   /** A Plan log entry. Its Event UUID is the client-generated entry ID. */
   "plan.log_appended": z.strictObject({
     message: markdownSchema(),
+  }),
+  /**
+   * A decision recorded against the Plan: one line of plain text. Its Event
+   * UUID is the client-generated decision ID.
+   */
+  "plan.decision_recorded": z.strictObject({
+    text: decisionTextSchema,
   }),
   "task.added": z.strictObject({
     title: taskTitleSchema,
@@ -311,6 +319,7 @@ export const knownEventSchema = z.discriminatedUnion("type", [
   eventVariant("plan.updated"),
   eventVariant("plan.status_changed"),
   eventVariant("plan.log_appended"),
+  eventVariant("plan.decision_recorded"),
   eventVariant("task.added"),
   eventVariant("task.claimed"),
   eventVariant("task.released"),
@@ -438,3 +447,26 @@ export const appendPlanLogOutputSchema = z.strictObject({
 });
 
 export type AppendPlanLogOutput = z.infer<typeof appendPlanLogOutputSchema>;
+
+/**
+ * `POST /projects/{id}/plans/{planRef}/decisions`: record a decision, allowed
+ * in any Plan status, as a `plan.decision_recorded` Event. `eventId` is
+ * generated once by the client and becomes the Event's UUID; replay follows
+ * `createPlanInputSchema`, as for a Plan log entry.
+ */
+export const recordPlanDecisionInputSchema = z.strictObject({
+  id: idSchema,
+  planRef: planRefSchema,
+  eventId: idSchema,
+  text: decisionTextSchema,
+  ...actorSessionInputShape,
+});
+
+export type RecordPlanDecisionInput = z.input<typeof recordPlanDecisionInputSchema>;
+
+export const recordPlanDecisionOutputSchema = z.strictObject({
+  event: eventSchema,
+  created: z.boolean(),
+});
+
+export type RecordPlanDecisionOutput = z.infer<typeof recordPlanDecisionOutputSchema>;

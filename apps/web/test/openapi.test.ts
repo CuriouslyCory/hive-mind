@@ -276,6 +276,7 @@ describeDb("the served API", () => {
       updatePlan: { title: "OpenAPI" },
       setPlanStatus: { status: "active" },
       appendPlanLog: { eventId: crypto.randomUUID(), message: "Progress." },
+      recordPlanDecision: { eventId: crypto.randomUUID(), text: "Keep it." },
       addTask: { taskId: crypto.randomUUID(), title: "OpenAPI" },
       startSession: { sessionId, ...startBody },
       updateSession: { status: "idle" },

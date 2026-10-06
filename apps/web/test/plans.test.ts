@@ -5,12 +5,14 @@ import {
   createPlanOutputSchema,
   type Event as EventDto,
   eventPageSchema,
+  MAX_DECISION_TEXT_LENGTH,
   MAX_EVENT_BYTES,
   MAX_MARKDOWN_BYTES,
   MAX_PLAN_TITLE_LENGTH,
   type ProjectKeyPermission,
   planPageSchema,
   planSchema,
+  recordPlanDecisionOutputSchema,
   setPlanStatusOutputSchema,
   startSessionOutputSchema,
   taskPageSchema,
@@ -171,6 +173,10 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
           path: `${base}/plans/${plan.key}/log`,
           body: { eventId: uuid(), message: "Progress." },
         },
+        recordPlanDecision: {
+          path: `${base}/plans/${plan.key}/decisions`,
+          body: { eventId: uuid(), text: "Keep it." },
+        },
         listPlanTasks: { path: `${base}/plans/${plan.key}/tasks` },
         addTask: { path: `${base}/plans/${plan.key}/tasks`, body: { taskId: uuid(), title: "T" } },
         listProjectEvents: { path: `${base}/events` },
@@ -275,6 +281,7 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
           [`${base}/status`, { body: { status: "active" } }],
           [`${base}/log`, {}],
           [`${base}/log`, { body: { eventId: uuid(), message: "X" } }],
+          [`${base}/decisions`, { body: { eventId: uuid(), text: "X" } }],
           [`${base}/tasks`, {}],
           [`${base}/tasks`, { body: { taskId: uuid(), title: "X" } }],
         ];
@@ -733,6 +740,142 @@ describeDb("/api/v1 Plans, Tasks and Events", () => {
         { body: logBody },
       );
       expect(foreignLog.status).toBe(404);
+    });
+  });
+
+  describe("recorded decisions", () => {
+    const decisionsOf = (projectId: string, planRef: string) =>
+      `/projects/${projectId}/plans/${planRef}/decisions`;
+
+    it("records a trimmed decision attributed to the caller and its Session", async () => {
+      const session = await insertSession(projectA, { userId: member.id });
+      const plan = await createPlan(member.token, projectA);
+      const body = {
+        eventId: uuid(),
+        text: "  Retry with jittered backoff, capped at 30 seconds.  ",
+        sessionId: session.id,
+      };
+      const response = await call(member.token, decisionsOf(projectA, plan.key), { body });
+      expect(response.status).toBe(200);
+      const recorded = recordPlanDecisionOutputSchema.parse(await response.json());
+      expect(recorded).toMatchObject({
+        created: true,
+        event: {
+          id: body.eventId,
+          type: "plan.decision_recorded",
+          payloadVersion: 1,
+          actor: { kind: "user", userId: member.id },
+          actorSessionId: session.id,
+          planId: plan.id,
+          taskId: null,
+          sessionId: null,
+          payload: { text: "Retry with jittered backoff, capped at 30 seconds." },
+        },
+      });
+      // It is part of the Plan's activity.
+      const log = eventPageSchema.parse(
+        await (await call(owner.token, `/projects/${projectA}/plans/${plan.key}/log`)).json(),
+      );
+      expect(log.items[0]).toEqual(recorded.event);
+    });
+
+    it("replays a retry and refuses the same id with other input", async () => {
+      const plan = await createPlan(owner.token, projectA);
+      const foreignPlan = await createPlan(owner.token, projectB);
+      const path = decisionsOf(projectA, plan.key);
+      const body = { eventId: uuid(), text: "Use one queue per Project." };
+      const first = recordPlanDecisionOutputSchema.parse(
+        await (await call(owner.token, path, { body })).json(),
+      );
+      const before = (await eventsOf(projectA)).length;
+      // Trimming happens before the fingerprint, so padding is the same input.
+      const again = await call(owner.token, decisionsOf(projectA, plan.id), {
+        body: { ...body, text: ` ${body.text} ` },
+      });
+      expect(recordPlanDecisionOutputSchema.parse(await again.json())).toEqual({
+        ...first,
+        created: false,
+      });
+      expect(await eventsOf(projectA)).toHaveLength(before);
+      for (const [token, other] of [
+        [owner.token, { ...body, text: "Use two queues." }],
+        [keyA.secret, body],
+      ] as const) {
+        const conflict = await call(token, path, { body: other });
+        expect(conflict.status).toBe(409);
+        expect(await errorCode(conflict)).toBe("CONFLICT");
+      }
+      // A Plan log entry's id is not a decision id, and the reverse.
+      const logBody = { eventId: uuid(), message: body.text };
+      await call(owner.token, `/projects/${projectA}/plans/${plan.key}/log`, { body: logBody });
+      expect(
+        (await call(owner.token, path, { body: { eventId: logBody.eventId, text: body.text } }))
+          .status,
+      ).toBe(409);
+      expect(
+        (
+          await call(owner.token, `/projects/${projectA}/plans/${plan.key}/log`, {
+            body: { eventId: body.eventId, message: body.text },
+          })
+        ).status,
+      ).toBe(409);
+      // Another Project's decision id.
+      const foreign = await call(owner.token, decisionsOf(projectB, foreignPlan.key), { body });
+      expect(foreign.status).toBe(404);
+      expect(await errorCode(foreign)).toBe("NOT_FOUND");
+    });
+
+    it("accepts a decision in every Plan status", async () => {
+      const plan = await createPlan(owner.token, projectA, { status: "active" });
+      for (const status of ["paused", "abandoned"]) {
+        expect((await setStatus(owner.token, projectA, plan.key, status)).status).toBe(200);
+        const response = await call(owner.token, decisionsOf(projectA, plan.key), {
+          body: { eventId: uuid(), text: `Decided while ${status}.` },
+        });
+        expect([status, response.status]).toEqual([status, 200]);
+      }
+    });
+
+    it("refuses multi-line, blank, over-long and attributed input with 400", async () => {
+      const plan = await createPlan(owner.token, projectA);
+      const before = (await eventsOf(projectA)).length;
+      const bodies = [
+        { text: "two\nlines" },
+        { text: "tab\there" },
+        { text: "   " },
+        { text: "d".repeat(MAX_DECISION_TEXT_LENGTH + 1) },
+        { text: "No id.", eventId: undefined },
+        { text: "Forged.", actor: { kind: "system" } },
+        { message: "A log field." },
+      ];
+      for (const extra of bodies) {
+        const response = await call(owner.token, decisionsOf(projectA, plan.key), {
+          body: { eventId: uuid(), ...extra },
+        });
+        expect([extra, response.status]).toEqual([extra, 400]);
+      }
+      expect(await eventsOf(projectA)).toHaveLength(before);
+      const longest = await call(owner.token, decisionsOf(projectA, plan.key), {
+        body: { eventId: uuid(), text: "d".repeat(MAX_DECISION_TEXT_LENGTH) },
+      });
+      expect(longest.status).toBe(200);
+    });
+
+    it("answers 403, 404 and 409 for Sessions as the log does", async () => {
+      const others = await insertSession(projectA, { userId: owner.id });
+      const ended = await insertSession(
+        projectA,
+        { userId: member.id },
+        { status: "ended", endedAt: new Date() },
+      );
+      const plan = await createPlan(owner.token, projectA);
+      const decide = (sessionId: string) =>
+        call(member.token, decisionsOf(projectA, plan.key), {
+          body: { eventId: uuid(), text: "X", sessionId },
+        });
+      expect((await decide(others.id)).status).toBe(403);
+      expect((await decide(uuid())).status).toBe(404);
+      expect((await decide(ended.id)).status).toBe(409);
     });
   });
 

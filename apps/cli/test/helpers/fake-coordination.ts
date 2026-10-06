@@ -380,6 +380,24 @@ export function createFakeCoordination(): FakeCoordination {
         );
         return ok({ event, created: true });
       }
+      if (sub === "decisions" && method === "POST") {
+        const actor = actorSession();
+        if (!actor.ok) return notFound();
+        const eventId = String(body.eventId);
+        const text = String(body.text).trim();
+        const outcome = replay("decision", eventId, owner, { plan: plan.id, text });
+        if (outcome === "conflict") return conflict();
+        if (outcome === "replay") {
+          return ok({ event: events.find((event) => event.id === eventId), created: false });
+        }
+        const event = addEvent(
+          "plan.decision_recorded",
+          owner,
+          { id: eventId, planId: plan.id, actorSessionId: actor.id },
+          { text },
+        );
+        return ok({ event, created: true });
+      }
       if (sub === "tasks" && method === "GET") {
         const status = query.get("status");
         const items = [...tasks.values()]

@@ -94,6 +94,17 @@ export async function personalOrganizationId(pool: pg.Pool, userId: string): Pro
   return id;
 }
 
+/** An organization's name, as the home page's Projects rail shows it under each Project. */
+export async function organizationName(pool: pg.Pool, organizationId: string): Promise<string> {
+  const { rows } = await pool.query<{ name: string }>(
+    "select name from organization where id = $1",
+    [organizationId],
+  );
+  const name = rows[0]?.name;
+  if (name === undefined) throw new Error(`Organization ${organizationId} does not exist.`);
+  return name;
+}
+
 /** A `/api/v1` answer that was not 2xx. */
 export class ApiError extends Error {
   constructor(
@@ -199,6 +210,13 @@ export async function coordinationApi(users: TestHelpers, userId: string) {
       return call("POST", `/projects/${projectId}/plans/${planKey}/log`, {
         eventId: randomUUID(),
         message,
+        sessionId,
+      });
+    },
+    recordDecision(projectId: string, planKey: string, text: string, sessionId?: string) {
+      return call("POST", `/projects/${projectId}/plans/${planKey}/decisions`, {
+        eventId: randomUUID(),
+        text,
         sessionId,
       });
     },
