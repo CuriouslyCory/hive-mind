@@ -1,4 +1,9 @@
-import { UNAVAILABLE_EVENT_TYPE } from "@hivemind/contract";
+import {
+  formatAdrNumber,
+  MAX_ADR_NUMBER,
+  MIN_ADR_NUMBER,
+  UNAVAILABLE_EVENT_TYPE,
+} from "@hivemind/contract";
 
 // Plain-text descriptions of Events for the dashboard (issue #11, "Shared
 // content"). Callers pass Events through the shared projection first
@@ -157,9 +162,14 @@ export function describeEvent(type: string, rawPayload: unknown): EventText {
   }
 }
 
-/** `ADR-0017` for 17, or "an ADR" when the number is missing. */
+/** `ADR-0017` for 17, or "an ADR" when the number is missing or not an ADR number. */
 function adrKey(number: number | null): string {
-  return number === null ? "an ADR" : `ADR-${String(number).padStart(4, "0")}`;
+  return number !== null &&
+    Number.isInteger(number) &&
+    number >= MIN_ADR_NUMBER &&
+    number <= MAX_ADR_NUMBER
+    ? formatAdrNumber(number)
+    : "an ADR";
 }
 
 function capitalize(value: string): string {

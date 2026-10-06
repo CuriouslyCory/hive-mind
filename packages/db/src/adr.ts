@@ -22,6 +22,7 @@ import {
   adrContent,
   MAX_ADR_CONTENT_BYTES,
   MAX_ADR_NUMBER,
+  MAX_ADR_SUPERSEDES,
   MAX_ADR_TITLE_LENGTH,
 } from "./schema/adr.ts";
 import { agentSession } from "./schema/coordination.ts";
@@ -49,7 +50,7 @@ export const MAX_ADR_SYNC_ENTRIES = 2000;
 export const MAX_ADR_PATH_LENGTH = 1024;
 
 /** A slug as ADR file names write it (ADR-0001). */
-export const ADR_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const ADR_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
  * An ADR file's path: `docs/adr/NNNN-slug.md` under the directory holding
@@ -197,8 +198,8 @@ function reserveInputProblem(input: ReserveAdrInput): string | null {
 
 /**
  * Reserves the Project's next ADR number under the caller's UUID, or
- * recognizes a retry of the same reservation (`replay`, which allocates
- * nothing and writes no Event). Under the Project lock the number is
+ * recognizes a retry of the same reservation (`replay`, which takes no
+ * number and writes no Event). Under the Project lock the number is
  * `greatest(next_adr_number, floor + 1, highest existing number + 1)`, and
  * the counter moves past it. A floor that would move the counter more than
  * `MAX_ADR_FLOOR_ADVANCE` is refused, so a stray floor cannot burn the number
@@ -229,12 +230,12 @@ export async function reserveAdr(db: Db, input: ReserveAdrInput): Promise<Reserv
           principal: input.principal,
           fingerprint,
         },
-        // The number is allocated here, after the replay check, so a retry
-        // never consumes one.
+        // The number is taken here, after the replay check, so a retry never
+        // uses one up.
         async (sp) => {
           const session = await checkActorSession(sp, input, now);
           if (session) throw new Outcome(session);
-          const number = await allocateAdrNumber(sp, input.projectId, floor);
+          const number = await takeNextAdrNumber(sp, input.projectId, floor);
           const [row] = await sp
             .insert(adr)
             .values({
@@ -274,9 +275,10 @@ export async function reserveAdr(db: Db, input: ReserveAdrInput): Promise<Reserv
 /**
  * Picks the reservation's number and moves the counter past it, or throws an
  * `Outcome` refusing it. Call it under the Project lock. Raw SQL, so the
- * Project's updated_at is left alone (as `allocatePlanNumber` does).
+ * Project's updated_at is left alone (as `allocatePlanNumber` does for Plan
+ * numbers).
  */
-async function allocateAdrNumber(
+async function takeNextAdrNumber(
   tx: Transaction,
   projectId: string,
   floor: number,
@@ -338,10 +340,16 @@ function contentProblem(item: AdrContentInput): string | null {
   }
   if (sha256Hex(item.contentMd) !== item.sha256) return "sha256 does not match the content.";
   if (item.title.trim() === "") return "The title must not be blank.";
+  if (item.title.length > MAX_ADR_TITLE_LENGTH) {
+    return `The title is longer than ${MAX_ADR_TITLE_LENGTH} characters.`;
+  }
   if (!(ADR_STATUSES as readonly string[]).includes(item.status)) return "Unknown status.";
   if (!DATE.test(item.date)) return "date must be YYYY-MM-DD.";
   if (!item.supersedes.every((n) => Number.isInteger(n) && n >= 1 && n <= MAX_ADR_NUMBER)) {
     return `supersedes must list numbers from 1 to ${MAX_ADR_NUMBER}.`;
+  }
+  if (item.supersedes.length > MAX_ADR_SUPERSEDES) {
+    return `supersedes may list at most ${MAX_ADR_SUPERSEDES} ADRs.`;
   }
   for (const value of [item.contentMd, item.title, ...item.warnings.map((w) => w.message)]) {
     if (value.includes("\u0000")) return "The file contains a NUL character.";
@@ -439,33 +447,49 @@ export interface AdrSyncProblem {
   message: string;
 }
 
-/**
- * The warnings only a sync can find, by comparing a file with its number's
- * reservation. The codes are the contract's `ADR_WARNING_CODES` of the same
- * names; warnings about the set of files (supersedes targets and the like)
- * come from the contract's parser, which the API runs.
- */
-export const ADR_SYNC_NOTICE_CODES = [
-  /** A file with a number nobody reserved: it bypassed `adr new`. */
-  "ADR_NUMBER_UNRESERVED",
-  /** A reserved number's file has another slug but the reserved title. */
-  "ADR_SLUG_DIFFERS_FROM_RESERVATION",
-  /** A file took a number reserved for another ADR, which needs a new number. */
-  "ADR_RESERVATION_TAKEN",
-] as const;
-export type AdrSyncNoticeCode = (typeof ADR_SYNC_NOTICE_CODES)[number];
+/** The reservation a synced file was compared with. */
+export interface AdrSyncReservation {
+  title: string;
+  slug: string;
+}
 
 /**
- * Something a sync applied that someone should look at, reported when the
- * file is published. Only in the answer: never stored or put in the Event.
- * `ADR_RESERVATION_TAKEN` stays visible afterwards as `reservationTaken`.
+ * Something a sync applied that someone should look at, found by comparing a
+ * file with its number's reservation when the sync adds the file. Only in
+ * the answer: never stored or put in the Event. The codes are the
+ * contract's `ADR_WARNING_CODES` of the same names, and the API writes the
+ * messages; warnings about the set of files (supersedes targets and the
+ * like) come from the contract's `validateAdrSet`, which the API runs on
+ * `AdrSyncSummary.files`. `ADR_RESERVATION_TAKEN` stays visible afterwards
+ * as `reservationTaken`.
  */
-export interface AdrSyncNotice {
-  code: AdrSyncNoticeCode;
+export type AdrSyncNotice =
+  /** A file with a number nobody reserved: it bypassed `adr new`. */
+  | { code: "ADR_NUMBER_UNRESERVED"; number: number; path: string }
+  /** A file took a number reserved for another ADR, which needs a new number. */
+  | {
+      code: "ADR_RESERVATION_TAKEN";
+      number: number;
+      path: string;
+      reservation: AdrSyncReservation;
+    }
+  /** A reserved number's file has another slug (`slug`) but the reserved title. */
+  | {
+      code: "ADR_SLUG_DIFFERS_FROM_RESERVATION";
+      number: number;
+      path: string;
+      slug: string;
+      reservation: AdrSyncReservation;
+    };
+
+export type AdrSyncNoticeCode = AdrSyncNotice["code"];
+
+/** One file of a sync, with what its stored content says. */
+export interface AdrSyncedFile {
   number: number;
   path: string;
-  /** Plain text, at most a few hundred characters. */
-  message: string;
+  status: AdrStatus;
+  supersedes: number[];
 }
 
 /** The Project's last ADR sync: what the copy is as of. */
@@ -491,7 +515,13 @@ export interface AdrSyncSummary {
   unchanged: number;
   /** Every change, in number order (the Event lists at most 100). */
   changes: AdrSyncSummaryChange[];
+  /** In number order. */
   notices: AdrSyncNotice[];
+  /**
+   * Every file of the synced commit, in number order, read in the sync's
+   * transaction. Empty on a replay, which reads no content.
+   */
+  files: AdrSyncedFile[];
   /** The counter after the sync: the number the next reservation gets at least. */
   nextNumber: number;
 }
@@ -682,6 +712,7 @@ export async function syncAdrs(db: Db, input: SyncAdrsInput): Promise<SyncAdrsOu
           unchanged: entries.length,
           changes: [],
           notices: [],
+          files: [],
           nextNumber: state.nextNumber,
         },
       } as const;
@@ -777,6 +808,10 @@ export async function syncAdrs(db: Db, input: SyncAdrsInput): Promise<SyncAdrsOu
         unchanged: writes.unchanged,
         changes: writes.changes,
         notices: writes.notices,
+        files: entries.map(({ number, path, sha256 }) => {
+          const { status, supersedes } = contentOf(contents, sha256);
+          return { number, path, status, supersedes };
+        }),
         nextNumber,
       },
     } as const;
@@ -820,8 +855,7 @@ function planSync(
   let unchanged = 0;
 
   for (const entry of entries) {
-    const content = contents.get(entry.sha256);
-    if (!content) throw new Error(`content ${entry.sha256} was not loaded`);
+    const content = contentOf(contents, entry.sha256);
     const existing = byNumber.get(entry.number);
     const { number, path } = entry;
     const write = {
@@ -840,12 +874,7 @@ function planSync(
     if (!existing) {
       upserts.push(write);
       changes.push({ number, path, change: "added", statusFrom: null, statusTo: content.status });
-      notices.push({
-        code: "ADR_NUMBER_UNRESERVED",
-        number,
-        path,
-        message: `ADR-${pad(number)} was not reserved with \`hivemind adr new\`.`,
-      });
+      notices.push({ code: "ADR_NUMBER_UNRESERVED", number, path });
       continue;
     }
 
@@ -858,20 +887,14 @@ function planSync(
       if (reservation) {
         const published = { ...row, state: "published" as const, slug: entry.slug };
         if (isReservationTaken(published, content.title)) {
-          notices.push({
-            code: "ADR_RESERVATION_TAKEN",
-            number,
-            path,
-            message:
-              `ADR-${pad(number)} was reserved for "${reservation.title}" (${reservation.slug}); ` +
-              "this file took the number, so that ADR needs a new one from `hivemind adr new`.",
-          });
+          notices.push({ code: "ADR_RESERVATION_TAKEN", number, path, reservation });
         } else if (entry.slug !== reservation.slug) {
           notices.push({
             code: "ADR_SLUG_DIFFERS_FROM_RESERVATION",
             number,
             path,
-            message: `ADR-${pad(number)} was reserved with the slug ${reservation.slug}.`,
+            slug: entry.slug,
+            reservation,
           });
         }
       }
@@ -907,12 +930,14 @@ function planSync(
   return { upserts, removedIds, changes, notices, unchanged };
 }
 
-function pad(number: number): string {
-  return String(number).padStart(4, "0");
+function contentOf(contents: Map<string, ContentFacts>, sha256: string): ContentFacts {
+  const content = contents.get(sha256);
+  if (!content) throw new Error(`content ${sha256} was not loaded`);
+  return content;
 }
 
 /** The reservation on a row, if it has one. */
-function reservationOf(row: Adr): { title: string; slug: string } | null {
+function reservationOf(row: Adr): AdrSyncReservation | null {
   return row.reservedTitle !== null && row.reservedSlug !== null
     ? { title: row.reservedTitle, slug: row.reservedSlug }
     : null;

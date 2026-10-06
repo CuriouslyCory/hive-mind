@@ -180,6 +180,18 @@ export async function listAdrs(db: Db, input: ListAdrsInput): Promise<AdrPage> {
 
 /** `listAdrs` inside the caller's read transaction. */
 export async function readAdrs(tx: Db | Transaction, input: ListAdrsInput): Promise<AdrPage> {
+  const page = await readAdrItems(tx, input);
+  return { ...page, sync: await readAdrSyncState(tx, input.projectId) };
+}
+
+/**
+ * `readAdrs` without the last sync, for a caller that reads several pages
+ * and the sync state once (`readAdrSyncState`).
+ */
+export async function readAdrItems(
+  tx: Db | Transaction,
+  input: ListAdrsInput,
+): Promise<Omit<AdrPage, "sync">> {
   const conditions: SQL[] = [eq(adr.projectId, input.projectId)];
   if (input.status) conditions.push(eq(adrContent.status, input.status));
   if (input.state) conditions.push(eq(adr.state, input.state));
@@ -190,11 +202,7 @@ export async function readAdrs(tx: Db | Transaction, input: ListAdrsInput): Prom
     .where(and(...conditions))
     .orderBy(desc(adr.number))
     .limit(input.limit + 1);
-  return {
-    items: rows.slice(0, input.limit).map(toAdrView),
-    hasMore: rows.length > input.limit,
-    sync: await readAdrSyncState(tx, input.projectId),
-  };
+  return { items: rows.slice(0, input.limit).map(toAdrView), hasMore: rows.length > input.limit };
 }
 
 export interface AdrWithChain {

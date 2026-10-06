@@ -561,7 +561,7 @@ describe("ADR request sizes", () => {
     ["line breaks and tabs", "\r\n\t"],
     ["three-byte characters", WIDE],
     ["four-byte characters", "🐝"],
-    ["C1 controls and separators", "\u0085 ‮"],
+    ["separators and format characters", " ‮"],
   ])("fit a valid 64 KiB file of %s in one contents body", async (_name, filler) => {
     const content = maximalFile(filler);
     expect(utf8ByteLength(content)).toBe(MAX_ADR_FILE_BYTES);
@@ -573,6 +573,8 @@ describe("ADR request sizes", () => {
 
   it("refuse the 6-byte JSON escapes in the parser, before any upload", () => {
     expect(parseAdrContent(maximalFile("\u0001")).ok).toBe(false);
+    // Some JSON encoders escape C1 controls too.
+    expect(parseAdrContent(maximalFile("\u0085")).ok).toBe(false);
   });
 });
 

@@ -36,6 +36,7 @@ import {
   MAX_ADR_FLOOR_ADVANCE as DB_MAX_ADR_FLOOR_ADVANCE,
   MAX_ADR_NUMBER as DB_MAX_ADR_NUMBER,
   MAX_ADR_PATH_LENGTH as DB_MAX_ADR_PATH_LENGTH,
+  MAX_ADR_SUPERSEDES as DB_MAX_ADR_SUPERSEDES,
   MAX_ADR_SYNC_ENTRIES as DB_MAX_ADR_SYNC_ENTRIES,
   MAX_ADR_TITLE_LENGTH as DB_MAX_ADR_TITLE_LENGTH,
 } from "@hivemind/db";
@@ -75,6 +76,7 @@ describe("the ADR limits of the contract and @hivemind/db", () => {
     expect(MAX_ADR_NUMBER).toBe(DB_MAX_ADR_NUMBER);
     expect(MAX_ADR_TITLE_LENGTH).toBe(DB_MAX_ADR_TITLE_LENGTH);
     expect(MAX_ADR_FILE_BYTES).toBe(DB_MAX_ADR_CONTENT_BYTES);
+    expect(MAX_ADR_SUPERSEDES).toBe(DB_MAX_ADR_SUPERSEDES);
     // The contract may be stricter than the database, never looser.
     expect(MAX_ADR_SYNC_ENTRIES).toBeLessThanOrEqual(DB_MAX_ADR_SYNC_ENTRIES);
     expect(MAX_ADR_PATH_LENGTH).toBeLessThanOrEqual(DB_MAX_ADR_PATH_LENGTH);
@@ -697,6 +699,28 @@ describeDb("/api/v1 ADRs", () => {
       expect(again.files[0]).toMatchObject({ valid: true, created: false });
     });
 
+    // Every file the parser accepts must be one @hivemind/db stores: a file it
+    // refuses after parsing would fail the whole upload with a 500.
+    it("refuses a title of only Unicode whitespace per file, storing the rest", async () => {
+      const projectId = await api.createProject(owner);
+      const valid = await adrFile(1, "Valid");
+      const blank = await withHash(
+        "0002-blank.md",
+        valid.content.replace("# Valid\n", "# \u3000\ufeff\n"),
+      );
+      const c1 = await withHash("0003-c1.md", valid.content.replace("# Valid", "# Valid \u009b"));
+      const result = await ok(
+        await upload(owner.token, projectId, [valid, blank, c1]),
+        uploadAdrContentsOutputSchema,
+      );
+      expect(result.files.map((file) => [file.valid, file.errors.map((e) => e.code)])).toEqual([
+        [true, []],
+        [false, ["ADR_TITLE_MISSING"]],
+        [false, ["ADR_CONTROL_CHARACTER"]],
+      ]);
+      expect(result.files[0]?.created).toBe(true);
+    });
+
     it("returns the parser's warnings and keeps them on the ADR", async () => {
       const projectId = await api.createProject(owner);
       const file = await withHash(
@@ -899,8 +923,9 @@ describeDb("/api/v1 ADRs", () => {
           reservation: { gitBranch: "feat/x", reservedBy: { kind: "user", userId: owner.id } },
         },
       });
-      // A changed floor is not part of the replay check.
-      const again = await reserved(owner.token, projectId, { ...body, floor: 0 });
+      // A changed floor is not part of the replay check, and a replay does
+      // not apply it: the next reservation below still gets 2.
+      const again = await reserved(owner.token, projectId, { ...body, floor: 5 });
       expect(again).toMatchObject({ created: false, adr: { id: first.adr.id, number: 1 } });
       expect(await eventsOf(projectId)).toHaveLength(1);
 
@@ -1190,6 +1215,47 @@ describeDb("/api/v1 ADRs", () => {
         syncedBy: { kind: "user", userId: owner.id },
       });
       expect((await list(projectId)).lastSync).toEqual(lastSync);
+    });
+
+    it("lists removed ADRs with ?state=removed, keeping their last copy", async () => {
+      const projectId = await api.createProject(owner);
+      const one = await adrFile(1, "One", { status: "accepted" });
+      const two = await adrFile(2, "Two");
+      await synced(projectId, [one, two]);
+      await synced(projectId, [one]);
+
+      const removed = await list(projectId, "?state=removed");
+
+      expect(removed.items).toEqual([
+        expect.objectContaining({
+          number: 2,
+          state: "removed",
+          title: "Two",
+          status: "proposed",
+          path: "docs/adr/0002-two.md",
+          contentSha256: two.sha256,
+        }),
+      ]);
+      expect((await list(projectId, "?state=removed&status=accepted")).items).toEqual([]);
+      expect((await list(projectId, "?state=published")).items.map((i) => i.number)).toEqual([1]);
+    });
+
+    it("names a Project key as the principal of its sync", async () => {
+      const projectId = await api.createProject(owner);
+      const key = await api.createKey(owner, projectId);
+      const file = await adrFile(1, "By a key");
+      expect((await upload(key.secret, projectId, [file])).status).toBe(200);
+
+      const result = await ok(
+        await syncRequest(key.secret, projectId, [file], { baseCommitSha: null }),
+        syncAdrsOutputSchema,
+      );
+
+      const syncedBy = { kind: "project_key", keyId: key.id };
+      expect(result.lastSync).toMatchObject({ syncedBy });
+      expect(result.lastSync.syncedBy).toEqual(syncedBy);
+      expect((await list(projectId)).lastSync?.syncedBy).toEqual(syncedBy);
+      expect((await getAdr(projectId, 1)).lastSync?.syncedBy).toEqual(syncedBy);
     });
   });
 

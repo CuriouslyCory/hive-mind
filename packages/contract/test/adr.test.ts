@@ -407,6 +407,26 @@ describe("parseAdrContent", () => {
     ])("does not take a title from %s", (_name, line) => {
       expect(errorCodes(withBody(line, ""))).toEqual(["ADR_TITLE_MISSING"]);
     });
+
+    // A blank title, as nameSchema in common.ts defines it with String.trim(),
+    // is no title: @hivemind/db refuses to store one.
+    it.each([
+      ["spaces", "#    "],
+      ["an ideographic space", "# \u3000"],
+      ["a zero-width no-break space", "# \ufeff"],
+      ["a no-break space", "# \u00a0"],
+      ["an em space and a line separator", "# \u2003\u2028"],
+      ["Unicode whitespace before closing hashes", "# \u3000 ##"],
+    ])("takes no title from an H1 of only %s", (_name, line) => {
+      const result = parseAdrContent(withBody(line, "# Later", ""));
+      expect(result.ok || result.errors).toEqual([
+        { code: "ADR_TITLE_MISSING", message: "Line 5: the title is blank." },
+      ]);
+    });
+
+    it("keeps Unicode whitespace around a title that is not blank", () => {
+      expect(titleOf(withBody("# \u3000Title\u3000", ""))).toBe("\u3000Title\u3000");
+    });
   });
 
   describe("fenced code", () => {
@@ -474,7 +494,7 @@ describe("parseAdrContent", () => {
       expect(errorCodes(withBody("# Ring \u0007 bell"))).toEqual(["ADR_CONTROL_CHARACTER"]);
       expect(errorCodes(withBody("# Escape \u001b[31m red"))).toEqual(["ADR_CONTROL_CHARACTER"]);
       expect(errorCodes(withBody("# Tab\tinside"))).toEqual(["ADR_TITLE_INVALID"]);
-      expect(errorCodes(withBody("# C1 \u009b control"))).toEqual(["ADR_TITLE_INVALID"]);
+      expect(errorCodes(withBody("# C1 \u009b control"))).toEqual(["ADR_CONTROL_CHARACTER"]);
     });
 
     it("reports every error at once", () => {
@@ -551,6 +571,10 @@ describe("parseAdrContent", () => {
       ["backspace", "\b"],
       ["unit separator", "\u001f"],
       ["DEL", "\u007f"],
+      ["the first C1 control, U+0080", "\u0080"],
+      ["NEL", "\u0085"],
+      ["CSI", "\u009b"],
+      ["the last C1 control, U+009F", "\u009f"],
     ])("rejects %s anywhere in the file, naming the line", (_name, character) => {
       for (const contents of [
         withBody("# Title", `Some${character}text.`),
@@ -584,8 +608,9 @@ describe("parseAdrContent", () => {
     it("still accepts tabs, LF, CRLF and a lone CR in the body", () => {
       expect(parsed(withBody("# Title", "a\tb", "c\rd")).title).toBe("Title");
       expect(parseAdrContent(VALID.replaceAll("\n", "\r\n")).ok).toBe(true);
-      // C1 controls and other format characters are text, not C0 controls.
-      expect(parseAdrContent(withBody("# Title", "\u0085   ‮")).ok).toBe(true);
+      // Format characters, separators and the characters on either side of
+      // the C1 range are text.
+      expect(parseAdrContent(withBody("# Title", "~\u00a0   ‮")).ok).toBe(true);
     });
 
     it("accepts multi-byte UTF-8", () => {
@@ -752,6 +777,8 @@ describe("renderAdrTemplate", () => {
     ["two\nlines", "ADR_TITLE_INVALID"],
     ["tab\there", "ADR_TITLE_INVALID"],
     ["x".repeat(201), "ADR_TITLE_INVALID"],
+    ["\u3000", "ADR_TITLE_INVALID"],
+    ["\ufeff", "ADR_TITLE_INVALID"],
   ])("rejects the title %j", (title, code) => {
     const result = renderAdrTemplate({ title, date: "2026-10-05" });
     expect(!result.ok && result.errors.map((error) => error.code)).toEqual([code]);

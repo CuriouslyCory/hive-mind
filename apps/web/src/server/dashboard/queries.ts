@@ -23,7 +23,8 @@ import {
   planKey,
   planNumbers,
   readAdr,
-  readAdrs,
+  readAdrItems,
+  readAdrSyncState,
   readPlan,
   readPlans,
   readPlanTasks,
@@ -684,9 +685,9 @@ async function adrPage(
   filter: { status?: AdrStatus; state: AdrState },
   scope: CursorScope,
   cursor: string | undefined,
-): Promise<DashboardPage<AdrView> & { sync: AdrSyncState | null }> {
+): Promise<DashboardPage<AdrView>> {
   const position = decodePosition(scope, cursor, [INT4_POSITION]);
-  const page = await readAdrs(tx, {
+  const page = await readAdrItems(tx, {
     projectId,
     ...filter,
     limit: DASHBOARD_PAGE_SIZE,
@@ -696,7 +697,6 @@ async function adrPage(
   return {
     items: page.items,
     nextCursor: page.hasMore && last ? encodeKeysetCursor(scope, [String(last.number)]) : null,
-    sync: page.sync,
   };
 }
 
@@ -1142,17 +1142,15 @@ export async function loadAdrList(
       ["dashboard.reservedAdrs", projectId],
       options.reserved,
     );
+    const sync = await readAdrSyncState(tx, projectId);
     const names = await loadAttributions(
       tx,
       projectId,
-      principalIds([
-        published.sync?.syncedBy,
-        ...reserved.items.map((view) => view.reservation?.principal),
-      ]),
+      principalIds([sync?.syncedBy, ...reserved.items.map((view) => view.reservation?.principal)]),
     );
     return {
       ...pageBase(header, context),
-      lastSync: toAdrSyncView(published.sync, names),
+      lastSync: toAdrSyncView(sync, names),
       status,
       adrs: { items: published.items.map(toAdrSummary), nextCursor: published.nextCursor },
       removed: { items: removed.items.map(toAdrSummary), nextCursor: removed.nextCursor },

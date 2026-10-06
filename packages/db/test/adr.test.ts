@@ -11,7 +11,7 @@ import {
 import { getAdr, listAdrs, MAX_ADR_CHAIN_DEPTH, recentAdrs } from "../src/adr-read.ts";
 import { MAX_ADR_SYNC_EVENT_CHANGES } from "../src/event.ts";
 import type { Principal } from "../src/principal.ts";
-import { adr, adrContent } from "../src/schema/adr.ts";
+import { adr, adrContent, MAX_ADR_SUPERSEDES, MAX_ADR_TITLE_LENGTH } from "../src/schema/adr.ts";
 import { createTestDatabase, describeDb, type TestDatabase } from "../src/testing/harness.ts";
 import {
   adrEvents,
@@ -106,11 +106,12 @@ describeDb("ADR reservations", () => {
   it("replays a retry with the same id without advancing the counter", async () => {
     const { project, reserve } = await setup();
     const id = randomUUID();
-    const first = await reserve({ id });
+    const first = await reserve({ id, floor: 0 });
     const before = await projectAdrState(testDb.db, project.id);
 
-    // A retry may recompute its floor; the floor is not part of the request's identity.
-    const again = await reserve({ id, floor: 0 });
+    // A retry may recompute its floor; the floor is not part of the request's
+    // identity, and a replay does not apply it.
+    const again = await reserve({ id, floor: 5 });
 
     expect(first.status).toBe("created");
     expect(again).toEqual({ status: "replay", adr: first.status === "created" && first.adr });
@@ -198,17 +199,22 @@ describeDb("ADR reservations", () => {
 
   describe("seeding", () => {
     it("starts above the floor, and ignores a floor below the counter", async () => {
-      const { reserve } = await setup();
+      const { project, reserve } = await setup();
       expect(await reserve({ floor: 14 })).toMatchObject({ adr: { number: 15 } });
       expect(await reserve({ floor: 3 })).toMatchObject({ adr: { number: 16 } });
       expect(await reserve()).toMatchObject({ adr: { number: 17 } });
+      // The Event records the floor the client sent, not the counter.
+      const events = await adrEvents(testDb.db, project.id);
+      expect(events.map((e) => (e.payload as { number: number; floor: number }).floor)).toEqual([
+        14, 3, 0,
+      ]);
     });
 
     it("starts above the highest existing number even if the counter is behind it", async () => {
       const { project, reserved } = await setup();
       await reserved();
-      // A counter behind the rows cannot happen through these functions; the
-      // allocator still never reuses a number.
+      // A counter behind the rows cannot happen through these functions; a
+      // reservation still never reuses a number.
       await setNextAdrNumber(project.id, 1);
       expect(await reserved()).toMatchObject({ number: 2 });
     });
@@ -300,6 +306,33 @@ describeDb("ADR content", () => {
       .where(eq(adrContent.projectId, project.id));
     expect(rows).toEqual([]);
   });
+
+  // The API's output schemas bound these, so a stored row must fit them.
+  it.each([
+    ["a title over 200 characters", { title: "x".repeat(MAX_ADR_TITLE_LENGTH + 1) }],
+    ["a blank title", { title: "\u3000" }],
+    [
+      "more than 64 superseded ADRs",
+      { supersedes: Array.from({ length: MAX_ADR_SUPERSEDES + 1 }, (_, i) => i + 1) },
+    ],
+  ] as const)("refuses %s", async (_case, change) => {
+    const { context } = await setup();
+    const item = { ...adrFile(1, "one").content, ...change };
+    const outcome = await storeAdrContents(testDb.db, { ...context, items: [item] });
+    expect(outcome).toMatchObject({ status: "invalid", problems: [{ sha256: item.sha256 }] });
+  });
+
+  it("accepts the largest title and supersedes list", async () => {
+    const { context } = await setup();
+    const item = {
+      ...adrFile(1, "one").content,
+      title: "x".repeat(MAX_ADR_TITLE_LENGTH),
+      supersedes: Array.from({ length: MAX_ADR_SUPERSEDES }, (_, i) => i + 1),
+    };
+    expect(await storeAdrContents(testDb.db, { ...context, items: [item] })).toMatchObject({
+      status: "ok",
+    });
+  });
 });
 
 describeDb("ADR sync", () => {
@@ -330,7 +363,14 @@ describeDb("ADR sync", () => {
         code: "ADR_NUMBER_UNRESERVED",
         number: f.entry.number,
         path: f.entry.path,
-        message: `ADR-${f.entry.path.slice(9, 13)} was not reserved with \`hivemind adr new\`.`,
+      })),
+    );
+    expect(outcome.summary.files).toEqual(
+      files.map((f) => ({
+        number: f.entry.number,
+        path: f.entry.path,
+        status: "accepted",
+        supersedes: [],
       })),
     );
     expect(outcome.summary.changes[0]).toEqual({
@@ -715,6 +755,7 @@ describeDb("ADR sync", () => {
           unchanged: 3,
           changes: [],
           notices: [],
+          files: [],
           nextNumber: 4,
         },
       });
@@ -745,9 +786,7 @@ describeDb("ADR sync", () => {
               code: "ADR_RESERVATION_TAKEN",
               number: 1,
               path: intruder.entry.path,
-              message:
-                'ADR-0001 was reserved for "Use Postgres" (use-postgres); this file took the ' +
-                "number, so that ADR needs a new one from `hivemind adr new`.",
+              reservation: { title: "Use Postgres", slug: "use-postgres" },
             },
           ],
         },
@@ -772,7 +811,7 @@ describeDb("ADR sync", () => {
       });
     });
 
-    it("publishes its own file quietly, notes a renamed slug, and leaves unsynced reservations reserved", async () => {
+    it("syncs its own file quietly, notes a renamed slug, and leaves unsynced reservations reserved", async () => {
       const { project, context, reserved } = await setup();
       const own = await reserved({ title: "Use Postgres", slug: "use-postgres" });
       const renamed = await reserved({ title: "Cache reads", slug: "cache-reads" });
@@ -792,7 +831,8 @@ describeDb("ADR sync", () => {
               code: "ADR_SLUG_DIFFERS_FROM_RESERVATION",
               number: renamed.number,
               path: "docs/adr/0002-read-cache.md",
-              message: "ADR-0002 was reserved with the slug cache-reads.",
+              slug: "read-cache",
+              reservation: { title: "Cache reads", slug: "cache-reads" },
             },
           ],
           nextNumber: 4,
@@ -811,6 +851,85 @@ describeDb("ADR sync", () => {
       expect(later).toMatchObject({ status: "ok", summary: { removed: 2 } });
       expect((await adrRows(testDb.db, project.id))[2]?.state).toBe("reserved");
     });
+  });
+
+  it("never lowers the counter when the highest ADR is removed", async () => {
+    const { project, context, reserve } = await setup();
+    const files = adrFiles(3);
+    const first = commitSha();
+    await uploadAndSync(testDb.db, context, files, { commitSha: first });
+
+    const removal = await uploadAndSync(testDb.db, context, files.slice(0, 2), {
+      baseCommitSha: first,
+    });
+
+    expect(removal).toMatchObject({ status: "ok", summary: { removed: 1, nextNumber: 4 } });
+    expect((await projectAdrState(testDb.db, project.id)).nextAdrNumber).toBe(4);
+    expect(await reserve()).toMatchObject({ status: "created", adr: { number: 4 } });
+  });
+
+  it("records the caller's own Session as the actor of adr.synced", async () => {
+    const { project, principal, context } = await setup();
+    const session = await insertSession(testDb.db, project.id, principal);
+    const file = adrFile(1, "one");
+    await storeAdrContents(testDb.db, { ...context, items: [file.content] });
+
+    const outcome = await syncAdrs(testDb.db, {
+      ...context,
+      sessionId: session.id,
+      commitSha: commitSha(),
+      baseCommitSha: null,
+      forced: false,
+      entries: [file.entry],
+    });
+
+    expect(outcome).toMatchObject({ status: "ok", replay: false });
+    const [synced] = await adrEvents(testDb.db, project.id);
+    expect(synced).toMatchObject({
+      type: "adr.synced",
+      actorKind: "user",
+      actorUserId: principal.kind === "user" ? principal.userId : null,
+      actorSessionId: session.id,
+    });
+  });
+
+  it("keeps nothing when the Event insert fails", async () => {
+    const { project, context, reserve } = await setup();
+    const files = adrFiles(3);
+    const first = commitSha();
+    await uploadAndSync(testDb.db, context, files.slice(0, 2), { commitSha: first });
+    await storeAdrContents(testDb.db, { ...context, items: files.map((f) => f.content) });
+    const rows = await adrRows(testDb.db, project.id);
+    const state = await projectAdrState(testDb.db, project.id);
+    const events = await adrEvents(testDb.db, project.id);
+    // project.id is a generated uuid, so it is safe to inline.
+    await testDb.db.execute(
+      sql.raw(`
+        create function adr_test_fail_event() returns trigger language plpgsql as $$
+        begin raise exception 'adr test: event insert refused'; end $$;
+        create trigger adr_test_fail_event before insert on event for each row
+        when (new.project_id = '${project.id}' and new.type in ('adr.synced', 'adr.reserved'))
+        execute function adr_test_fail_event();
+      `),
+    );
+    const refused = { cause: { message: "adr test: event insert refused" } };
+    try {
+      await expect(
+        uploadAndSync(testDb.db, context, files, { commitSha: commitSha(), baseCommitSha: first }),
+      ).rejects.toMatchObject(refused);
+      await expect(reserve({ floor: 0 })).rejects.toMatchObject(refused);
+
+      expect(await adrRows(testDb.db, project.id)).toEqual(rows);
+      expect(await projectAdrState(testDb.db, project.id)).toEqual(state);
+      expect(await adrEvents(testDb.db, project.id)).toEqual(events);
+    } finally {
+      await testDb.db.execute(
+        sql.raw(`
+          drop trigger adr_test_fail_event on event;
+          drop function adr_test_fail_event();
+        `),
+      );
+    }
   });
 
   it("refuses a Session the principal does not own, applying nothing", async () => {
@@ -971,6 +1090,19 @@ describeDb("ADR reads", () => {
       [3, "accepted"],
       [2, "superseded"],
     ]);
+  });
+
+  it("orders recent ADRs by their last sync, then by number", async () => {
+    const { project, context } = await setup();
+    const files = adrFiles(5);
+    const first = commitSha();
+    await uploadAndSync(testDb.db, context, files, { commitSha: first });
+    const changed = [adrFile(1, "decision-1", { body: "Changed." }), ...files.slice(1)];
+
+    await uploadAndSync(testDb.db, context, changed, { baseCommitSha: first });
+
+    const recent = await recentAdrs(testDb.db, { projectId: project.id, limit: 3 });
+    expect(recent.map((item) => item.number)).toEqual([1, 5, 4]);
   });
 
   it("returns nothing for another Project's numbers", async () => {

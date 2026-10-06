@@ -253,10 +253,15 @@ export function parseAdrContent(contents: string | Uint8Array): AdrResult<Parsed
   const scan = scanBody(body, split.bodyFirstLine);
 
   let title = "";
-  if (!scan.title || scan.title.text === "") {
+  if (!scan.title) {
     errors.push({
       code: "ADR_TITLE_MISSING",
       message: "The file has no title: add an H1 line, `# Title`, outside any code block.",
+    });
+  } else if (isBlankTitle(scan.title.text)) {
+    errors.push({
+      code: "ADR_TITLE_MISSING",
+      message: `Line ${scan.title.line}: the title is blank.`,
     });
   } else {
     title = scan.title.text;
@@ -322,16 +327,19 @@ function decodeAdr(contents: string | Uint8Array): Decoded {
 }
 
 /**
- * The index of the first C0 control character other than tab, LF and CR, or
- * of the first DEL, or -1. Postgres text cannot store NUL, a terminal would
- * act on the others, and JSON writes each as a 6-byte escape, which would let
- * a 64 KiB file outgrow one upload request (MAX_ADR_UPLOAD_BODY_BYTES in
- * adr-api.ts).
+ * The index of the first control character other than tab, LF and CR (C0,
+ * DEL or C1, as markdownSchema in common.ts refuses them), or -1. Postgres
+ * text cannot store NUL, a terminal would act on the others, and JSON writes
+ * each C0 control as a 6-byte escape, which would let a 64 KiB file outgrow
+ * one upload request (MAX_ADR_UPLOAD_BODY_BYTES in adr-api.ts).
  */
 function controlCharacterIndex(text: string): number {
   for (let index = 0; index < text.length; index++) {
     const code = text.charCodeAt(index);
-    if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f) {
+    if (
+      (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) ||
+      (code >= 0x7f && code <= 0x9f)
+    ) {
       return index;
     }
   }
@@ -616,6 +624,16 @@ function sectionWarnings(sections: Heading[]): AdrWarning[] {
 // C0 and C1 control characters, as nameSchema in common.ts rejects them.
 const CONTROL_CHARACTERS = /\p{Cc}/u;
 
+/**
+ * Empty or only whitespace, by String.prototype.trim() as nameSchema in
+ * common.ts and @hivemind/db's storeAdrContents decide it: Unicode spaces
+ * such as U+3000 and U+FEFF count, not only the spaces and tabs a heading
+ * is trimmed of.
+ */
+function isBlankTitle(title: string): boolean {
+  return title.trim() === "";
+}
+
 /** Why `title` cannot be an ADR title, completing "the title …", or null. */
 function adrTitleProblem(title: string): string | null {
   if (title.length > MAX_ADR_TITLE_LENGTH) {
@@ -843,7 +861,7 @@ export function renderAdrTemplate(
   const title = input.title;
   const titleProblem =
     adrTitleProblem(title) ??
-    (title === "" || atxHeading(`# ${title}`)?.text !== title
+    (isBlankTitle(title) || atxHeading(`# ${title}`)?.text !== title
       ? "must not be empty, start or end with a space, or end with #."
       : null);
   if (titleProblem)

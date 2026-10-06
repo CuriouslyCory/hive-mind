@@ -20,17 +20,15 @@ import {
   type AdrSyncEntry,
   type AdrSyncNotice,
   type AdrSyncState as AdrSyncStateRecord,
+  type AdrSyncSummary,
   type AdrView,
   type AdrWithChain,
-  type Db,
   getAdr as getAdrRecord,
   listAdrs as listAdrRecords,
   reserveAdr as reserveAdrRecord,
   storeAdrContents,
   syncAdrs as syncAdrRecords,
 } from "@hivemind/db";
-import { adr, adrContent } from "@hivemind/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
 import { apiError } from "./authorize";
 import { adrNotFound, authorizeProject, coordinationError } from "./coordination-auth";
 import { api } from "./implementer";
@@ -136,7 +134,8 @@ export const uploadAdrContents = api.projects.adrs.contents.handler(
         principal: access.principal,
         items,
       });
-      // The parser checks everything storeAdrContents does, so this is a bug.
+      // checkAdrFile (the parser and the supersedes bound) checks everything
+      // storeAdrContents does, so this is a bug.
       if (outcome.status !== "ok") {
         throw new Error(`storeAdrContents refused parsed files: ${JSON.stringify(outcome)}`);
       }
@@ -227,9 +226,7 @@ export const syncAdrs = api.projects.adrs.sync.handler(
     switch (outcome.status) {
       case "ok": {
         const { summary } = outcome;
-        const warnings = outcome.replay
-          ? []
-          : await syncWarnings(db, input.id, entries, summary.notices, summary.previousCommitSha);
+        const warnings = outcome.replay ? [] : syncWarnings(summary);
         return {
           changed: !outcome.replay,
           lastSync: toSyncStateDto(summary.lastSync),
@@ -303,40 +300,23 @@ function listed(items: string[]): string {
 /**
  * The notices of an applied sync, in number order: the reservation notices
  * `syncAdrs` found, and the supersedes-graph warnings of the synced set
- * (`validateAdrSet`). The first sync of a repository reports no unreserved
- * numbers, since every existing file would be one.
+ * (`validateAdrSet`). Both come from the sync's own transaction, so no read
+ * here can fail after the sync committed. The first sync of a repository
+ * reports no unreserved numbers, since every existing file would be one.
  */
-async function syncWarnings(
-  db: Db,
-  projectId: string,
-  entries: AdrSyncEntry[],
-  notices: AdrSyncNotice[],
-  previousCommitSha: string | null,
-): Promise<AdrSyncWarning[]> {
-  const kept = notices.filter(
-    (notice) => previousCommitSha !== null || notice.code !== "ADR_NUMBER_UNRESERVED",
-  );
-  const reservations = await reservationsOf(
-    db,
-    projectId,
-    kept.filter((notice) => notice.code !== "ADR_NUMBER_UNRESERVED").map((n) => n.number),
-  );
-  const warnings: AdrSyncWarning[] = kept.map((notice) => ({
-    number: notice.number,
-    path: notice.path,
-    code: notice.code,
-    message: truncated(noticeMessage(notice, reservations.get(notice.number))),
-  }));
-
-  // Content rows never change, so these facts are the synced files' even if
-  // another sync has finished since.
-  const facts = await contentFacts(db, projectId, entries);
-  const pathOf = new Map(entries.map((entry) => [entry.number, entry.path]));
-  const set = entries.flatMap((entry) => {
-    const fact = facts.get(entry.sha256);
-    return fact ? [{ number: entry.number, path: entry.path, ...fact }] : [];
-  });
-  for (const warning of validateAdrSet(set).warnings) {
+function syncWarnings(summary: AdrSyncSummary): AdrSyncWarning[] {
+  const warnings: AdrSyncWarning[] = summary.notices
+    .filter(
+      (notice) => summary.previousCommitSha !== null || notice.code !== "ADR_NUMBER_UNRESERVED",
+    )
+    .map((notice) => ({
+      number: notice.number,
+      path: notice.path,
+      code: notice.code,
+      message: truncated(noticeMessage(notice)),
+    }));
+  const pathOf = new Map(summary.files.map((file) => [file.number, file.path]));
+  for (const warning of validateAdrSet(summary.files).warnings) {
     const path = pathOf.get(warning.number);
     if (!path) continue;
     warnings.push({
@@ -349,58 +329,18 @@ async function syncWarnings(
   return warnings.sort((a, b) => a.number - b.number);
 }
 
-function noticeMessage(
-  notice: AdrSyncNotice,
-  reservation: { title: string; slug: string } | undefined,
-): string {
+function noticeMessage(notice: AdrSyncNotice): string {
   const name = formatAdrNumber(notice.number);
   switch (notice.code) {
     case "ADR_NUMBER_UNRESERVED":
       return `${name} was not reserved with hivemind adr new.`;
-    case "ADR_RESERVATION_TAKEN":
-      return reservation
-        ? `${name} was reserved for "${reservation.title}" (${reservation.slug}), but ${notice.path} took the number. The reserved ADR needs a new number: run hivemind adr new for it.`
-        : notice.message;
-    case "ADR_SLUG_DIFFERS_FROM_RESERVATION": {
-      const slug = parseAdrFileName(notice.path.slice(notice.path.lastIndexOf("/") + 1));
-      return reservation && slug.ok
-        ? `${notice.path} has the slug ${slug.slug}; ${name} was reserved as ${reservation.slug}.`
-        : notice.message;
+    case "ADR_RESERVATION_TAKEN": {
+      const { title, slug } = notice.reservation;
+      return `${name} was reserved for "${title}" (${slug}), but ${notice.path} took the number. The reserved ADR needs a new number: run hivemind adr new for it.`;
     }
+    case "ADR_SLUG_DIFFERS_FROM_RESERVATION":
+      return `${notice.path} has the slug ${notice.slug}; ${name} was reserved as ${notice.reservation.slug}.`;
   }
-}
-
-/** The reservations behind `numbers`, which never change once made. */
-async function reservationsOf(
-  db: Db,
-  projectId: string,
-  numbers: number[],
-): Promise<Map<number, { title: string; slug: string }>> {
-  if (numbers.length === 0) return new Map();
-  const rows = await db
-    .select({ number: adr.number, title: adr.reservedTitle, slug: adr.reservedSlug })
-    .from(adr)
-    .where(and(eq(adr.projectId, projectId), inArray(adr.number, numbers)));
-  return new Map(
-    rows.flatMap(({ number, title, slug }) =>
-      title !== null && slug !== null ? [[number, { title, slug }] as const] : [],
-    ),
-  );
-}
-
-/** The status and supersedes of each synced file's stored content, by sha256. */
-async function contentFacts(db: Db, projectId: string, entries: AdrSyncEntry[]) {
-  const hashes = [...new Set(entries.map((entry) => entry.sha256))];
-  if (hashes.length === 0) return new Map();
-  const rows = await db
-    .select({
-      sha256: adrContent.contentSha256,
-      status: adrContent.status,
-      supersedes: adrContent.supersedes,
-    })
-    .from(adrContent)
-    .where(and(eq(adrContent.projectId, projectId), inArray(adrContent.contentSha256, hashes)));
-  return new Map(rows.map(({ sha256, ...fact }) => [sha256, fact]));
 }
 
 /** A parser or db message, at most `MAX_ADR_PROBLEM_MESSAGE_LENGTH` code units. */

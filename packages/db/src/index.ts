@@ -18,19 +18,17 @@ export function createDb(pool: pg.Pool) {
 export type Db = ReturnType<typeof createDb>;
 
 export {
-  ADR_SLUG,
-  ADR_SYNC_NOTICE_CODES,
   type AdrContentInput,
   type AdrSyncEntry,
+  type AdrSyncedFile,
   type AdrSyncNotice,
   type AdrSyncNoticeCode,
   type AdrSyncProblem,
   type AdrSyncProblemReason,
+  type AdrSyncReservation,
   type AdrSyncState,
   type AdrSyncSummary,
-  type AdrSyncSummaryChange,
   type AdrWriter,
-  isReservationTaken,
   MAX_ADR_FLOOR_ADVANCE,
   MAX_ADR_PATH_LENGTH,
   MAX_ADR_SYNC_ENTRIES,
@@ -55,10 +53,10 @@ export {
   listAdrs,
   MAX_ADR_CHAIN_DEPTH,
   readAdr,
+  readAdrItems,
   readAdrSyncState,
   readAdrs,
   readRecentAdrs,
-  recentAdrs,
 } from "./adr-read.ts";
 export {
   createClient,
@@ -213,6 +211,7 @@ export {
   type AdrStatus,
   MAX_ADR_CONTENT_BYTES,
   MAX_ADR_NUMBER,
+  MAX_ADR_SUPERSEDES,
   MAX_ADR_TITLE_LENGTH,
 } from "./schema/adr.ts";
 export {

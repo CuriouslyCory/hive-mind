@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  ADR_SLUG_PATTERN,
+  ADR_STATUSES,
+  MAX_ADR_NUMBER,
+  MAX_ADR_SLUG_LENGTH,
+  MAX_ADR_TITLE_LENGTH,
+  MIN_ADR_NUMBER,
+} from "./adr.ts";
 import { actorSchema } from "./auth.ts";
 import {
   countSchema,
@@ -90,16 +98,15 @@ export const MAX_ADR_SYNC_EVENT_CHANGES = 100;
 
 // ADR identity as `adr.*` payloads carry it. An ADR Event affects no Plan,
 // Task or Session, so the ADR is named in the payload rather than in a new
-// Event column (issue #19). Numbers run from 1 to 9999 (`docs/adr/NNNN-*.md`)
-// and statuses are ADR-0001's.
-const MAX_ADR_NUMBER = 9999;
-const adrNumberSchema = z.int().min(1).max(MAX_ADR_NUMBER);
-const adrStatusSchema = z.enum(["proposed", "accepted", "deprecated", "superseded"]);
-const adrTitleSchema = textSchema(200);
+// Event column (issue #19). The bounds are adr.ts's; adr-api.ts imports this
+// module, so its schemas are not reused here.
+const adrNumberSchema = z.int().min(MIN_ADR_NUMBER).max(MAX_ADR_NUMBER);
+const adrStatusSchema = z.enum(ADR_STATUSES);
+const adrTitleSchema = textSchema(MAX_ADR_TITLE_LENGTH);
 const adrSlugSchema = z
   .string()
-  .max(100)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Must be lowercase words joined by hyphens.");
+  .max(MAX_ADR_SLUG_LENGTH)
+  .regex(ADR_SLUG_PATTERN, "Must be lowercase words joined by hyphens.");
 
 const adrSyncChangeKindSchema = z.enum(ADR_SYNC_CHANGE_KINDS);
 

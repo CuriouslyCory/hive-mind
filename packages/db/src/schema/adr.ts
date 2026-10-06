@@ -45,6 +45,9 @@ export const MAX_ADR_NUMBER = 9999;
 /** The longest reservation title, in UTF-16 code units. */
 export const MAX_ADR_TITLE_LENGTH = 200;
 
+/** The most ADRs one file may supersede, as the API's responses bound it. */
+export const MAX_ADR_SUPERSEDES = 64;
+
 /** The largest stored ADR file, in UTF-8 bytes. */
 export const MAX_ADR_CONTENT_BYTES = 64 * 1024;
 
