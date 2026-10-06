@@ -25,6 +25,19 @@ export interface HomeDecisionsInput {
 const DECISION_TYPE = "plan.decision_recorded";
 
 /**
+ * Rows read per query (or the limit, if larger), so a run of unreadable rows
+ * costs few round trips.
+ */
+export const DECISION_BATCH_SIZE = 50;
+
+/**
+ * Queries per read. With the panel's limit, at most 4 × 50 = 200 of the
+ * newest matching rows are examined; when that many in a row are unreadable,
+ * the panel shows the readable ones found among them and nothing older.
+ */
+export const DECISION_MAX_BATCHES = 4;
+
+/**
  * The filter on a decision's text, its Plan's key, its actor's agent or its
  * Project's name. Project names come from `projects`, which the caller read,
  * so they are matched here and only the matching ids reach the query.
@@ -53,6 +66,7 @@ export async function loadRecentDecisions(
   const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
   const filter = queryCondition(input.q.trim(), input.projects);
 
+  const batchSize = Math.max(input.limit, DECISION_BATCH_SIZE);
   // The keyset position is the database's own text of `effective_at`, since a
   // JavaScript Date would drop its microseconds.
   const read = (after: { effectiveAt: string; seq: string } | null) =>
@@ -80,13 +94,14 @@ export async function loadRecentDecisions(
         ),
       )
       .orderBy(desc(event.effectiveAt), desc(event.seq))
-      .limit(input.limit);
+      .limit(batchSize);
 
   // Unreadable rows are skipped, so a batch can come up short of the limit;
-  // the next batch continues after the last row read.
+  // the next batch continues after the last row read, up to
+  // DECISION_MAX_BATCHES batches.
   const found: { decision: Omit<HomeDecision, "actor">; row: typeof event.$inferSelect }[] = [];
   let after: { effectiveAt: string; seq: string } | null = null;
-  while (found.length < input.limit) {
+  for (let batches = 0; batches < DECISION_MAX_BATCHES && found.length < input.limit; batches++) {
     const batch = await read(after);
     for (const { row, planNumber, agent } of batch) {
       const projected = projectEvent(row);
@@ -106,7 +121,7 @@ export async function loadRecentDecisions(
       if (found.length === input.limit) break;
     }
     const last = batch.at(-1);
-    if (batch.length < input.limit || !last) break;
+    if (batch.length < batchSize || !last) break;
     after = { effectiveAt: last.position, seq: last.row.seq };
   }
 

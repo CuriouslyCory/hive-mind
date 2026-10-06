@@ -1,6 +1,8 @@
 import { describeDb } from "@hivemind/db/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
+  DECISION_BATCH_SIZE,
+  DECISION_MAX_BATCHES,
   type HomeDecisionsInput,
   loadRecentDecisions,
 } from "../src/server/dashboard/home-decisions";
@@ -195,5 +197,28 @@ describeDb("home dashboard decisions", () => {
       name: null,
       revoked: true,
     });
+  });
+
+  it("reads past unreadable rows in batches, up to DECISION_MAX_BATCHES of them", async () => {
+    /** One readable decision in a new Project, then `count` newer unreadable ones. */
+    async function buried(count: number) {
+      const projectId = await api.createProject(owner);
+      const plan = await createPlan(owner.token, projectId);
+      const id = await decide(owner.token, projectId, plan.key, "Buried decision.");
+      await api.testDb.pool.query(
+        `insert into event (project_id, type, payload_version, payload, actor_kind, plan_id, effective_at)
+         select $1, 'plan.decision_recorded', 2, '{"text": "newer"}', 'system', $2,
+           clock_timestamp() + make_interval(secs => i)
+         from generate_series(1, $3::int) as i`,
+        [projectId, plan.id, count],
+      );
+      return { id, projects: [{ id: projectId, name: "Buried" }] };
+    }
+    // Found in the third batch.
+    const reachable = await buried(2 * DECISION_BATCH_SIZE + 10);
+    expect(await idsOf({ projects: reachable.projects, limit: 4 })).toEqual([reachable.id]);
+    // Every row the batches examine is unreadable, so the read stops there.
+    const beyond = await buried(DECISION_MAX_BATCHES * DECISION_BATCH_SIZE);
+    expect(await idsOf({ projects: beyond.projects, limit: 4 })).toEqual([]);
   });
 });
