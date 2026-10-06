@@ -1,29 +1,19 @@
-import "../../../design-system/styles.css";
 import "./landing.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  designSystemFontClassName,
-  Logo,
-  LogoLockup,
-} from "../../../design-system";
+import { Badge, Button, Card, LogoLockup } from "../../../design-system";
 import {
   CLI_DOCS_URL,
-  DASHBOARD_DOCS_URL,
-  DECISIONS_URL,
-  fullCommand,
-  INSTALL_COMMAND,
   REPOSITORY_URL,
   ROADMAP_URL,
-  TYPICAL_RUN,
-} from "./_components/content";
+  SiteHeader,
+  SitePage,
+  ThemeSwitch,
+} from "../../../site";
+import { fullCommand, INSTALL_COMMAND, TYPICAL_RUN } from "./_components/content";
 import { CopyButton } from "./_components/copy-button";
 import { DashboardMock } from "./_components/dashboard-mock";
 import { HeroIllustration } from "./_components/hero-illustration";
-import { ThemeSwitch } from "./_components/theme-switch";
 
 const TITLE = "HiveMind — many agents, one codebase";
 const DESCRIPTION =
@@ -46,22 +36,15 @@ export const metadata: Metadata = {
 // navigation.
 export default function WelcomePage() {
   return (
-    <div className={`hm-root hm-landing ${designSystemFontClassName}`} data-theme="system">
-      <a className="lp-skip" href="#main">
-        Skip to main content
-      </a>
-      <TopBar />
-      <main id="main" tabIndex={-1}>
-        <Hero />
-        <WhySection />
-        <HowSection />
-        <DashboardSection />
-        <CliSection />
-        <RoadmapSection />
-        <GetStartedBand />
-      </main>
-      <Footer />
-    </div>
+    <SitePage className="hm-landing" mainId="main" header={<TopBar />}>
+      <Hero />
+      <WhySection />
+      <HowSection />
+      <DashboardSection />
+      <CliSection />
+      <RoadmapSection />
+      <GetStartedBand />
+    </SitePage>
   );
 }
 
@@ -89,57 +72,36 @@ function HexGlyph({ children, size = 24 }: { children?: ReactNode; size?: number
   );
 }
 
+const PRIMARY_NAV = [
+  { href: "#how", label: "How it works" },
+  { href: "#dashboard", label: "Dashboard" },
+  { href: "#cli", label: "CLI" },
+  { href: "#roadmap", label: "Roadmap" },
+  { href: REPOSITORY_URL, label: "GitHub" },
+] as const;
+
 function TopBar() {
   return (
-    <header className="lp-topbar">
-      <div className="lp-wrap lp-topbar-inner">
-        <a className="lp-home" href="#top" aria-label="HiveMind home">
-          <Logo loading="eager" />
-        </a>
-        <nav className="lp-nav" aria-label="Primary">
-          <a className="lp-nav-link" href="#how">
-            How it works
-          </a>
-          <a className="lp-nav-link" href="#dashboard">
-            Dashboard
-          </a>
-          <a className="lp-nav-link" href="#cli">
-            CLI
-          </a>
-          <a className="lp-nav-link" href="#roadmap">
-            Roadmap
-          </a>
-          <a className="lp-nav-link" href={REPOSITORY_URL}>
-            GitHub
-          </a>
-        </nav>
-        <div className="lp-topbar-right">
-          {/* Hidden below 720px: a non-essential badge, and the top bar has
-              no room for it there. */}
-          <Badge tone="neutral" pill className="lp-hide-sm">
-            Early access
-          </Badge>
-          <ThemeSwitch />
-          <Button
-            variant="outline"
-            href="/sign-in"
-            className="lp-topbar-cta"
-            aria-label="Sign in with GitHub"
-          >
-            <span>
-              Sign in<span className="lp-hide-sm"> with GitHub</span>
-            </span>
-          </Button>
-        </div>
-      </div>
-    </header>
+    <SiteHeader homeHref="#top" nav={PRIMARY_NAV}>
+      {/* Hidden below 720px: a non-essential badge, and the top bar has no
+          room for it there. */}
+      <Badge tone="neutral" pill className="lp-hide-sm">
+        Early access
+      </Badge>
+      <ThemeSwitch />
+      <Button variant="outline" href="/sign-in" aria-label="Sign in with GitHub">
+        <span>
+          Sign in<span className="lp-hide-sm"> with GitHub</span>
+        </span>
+      </Button>
+    </SiteHeader>
   );
 }
 
 function Hero() {
   return (
     <section id="top" className="lp-section lp-hero">
-      <div className="lp-wrap lp-g2 lp-hero-grid">
+      <div className="site-wrap lp-g2 lp-hero-grid">
         <div className="lp-stack lp-hero-copy">
           <p className="lp-eyebrow lp-eyebrow-honey">
             <HexGlyph size={16}>
@@ -225,7 +187,7 @@ function SectionIntro({
 function WhySection() {
   return (
     <section className="lp-section lp-sunken">
-      <div className="lp-wrap lp-stack lp-section-stack">
+      <div className="site-wrap lp-stack lp-section-stack">
         <SectionIntro eyebrow="Why a hive" title="Agents that work alone step on each other.">
           <p className="lp-lede">
             Two agents on two machines, one repository. Each only sees its own worktree. HiveMind is
@@ -342,7 +304,7 @@ function Terminal() {
 function HowSection() {
   return (
     <section id="how" className="lp-section">
-      <div className="lp-wrap lp-stack lp-section-stack">
+      <div className="site-wrap lp-stack lp-section-stack">
         <SectionIntro eyebrow="How it works" title="Three steps and the hive is running." />
         <div className="lp-g2 lp-align-start">
           <ol className="lp-steps">
@@ -372,7 +334,7 @@ function HowSection() {
 function DashboardSection() {
   return (
     <section id="dashboard" className="lp-section lp-sunken">
-      <div className="lp-wrap lp-stack lp-section-stack">
+      <div className="site-wrap lp-stack lp-section-stack">
         <div className="lp-g2 lp-align-end">
           <SectionIntro eyebrow="The dashboard" title="See every agent, as it happens." />
           <p className="lp-lede">
@@ -408,7 +370,7 @@ function Feature({
 function CliSection() {
   return (
     <section id="cli" className="lp-section">
-      <div className="lp-wrap lp-stack lp-section-stack">
+      <div className="site-wrap lp-stack lp-section-stack">
         <div className="lp-g2 lp-align-end">
           <SectionIntro eyebrow="The CLI" title="Built for the agent's shell, not yours." />
           <p className="lp-lede">
@@ -521,7 +483,7 @@ const MILESTONE_TONES = { Done: "success", Next: "info", Planned: "neutral" } as
 function RoadmapSection() {
   return (
     <section id="roadmap" className="lp-section lp-sunken">
-      <div className="lp-wrap lp-g2 lp-align-start">
+      <div className="site-wrap lp-g2 lp-align-start">
         <div className="lp-stack lp-roadmap-intro">
           <p className="lp-eyebrow">Roadmap</p>
           <h2 className="lp-h2">Built in the open, tracked with itself.</h2>
@@ -553,7 +515,7 @@ function RoadmapSection() {
 function GetStartedBand() {
   return (
     <section className="lp-section lp-band">
-      <div className="lp-wrap lp-g2 lp-align-center">
+      <div className="site-wrap lp-g2 lp-align-center">
         <div className="lp-stack lp-band-copy">
           <p className="lp-eyebrow">Get started</p>
           <h2 className="lp-h2">No tasks yet. Add one and the next agent can claim it.</h2>
@@ -578,32 +540,5 @@ function GetStartedBand() {
         </div>
       </div>
     </section>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className="lp-footer">
-      <div className="lp-wrap lp-footer-inner">
-        <Logo mark={false} height={22} />
-        <nav className="lp-foot-links" aria-label="Footer">
-          <a className="lp-foot-link" href={REPOSITORY_URL}>
-            GitHub
-          </a>
-          <a className="lp-foot-link" href={CLI_DOCS_URL}>
-            CLI docs
-          </a>
-          <a className="lp-foot-link" href={DASHBOARD_DOCS_URL}>
-            Dashboard docs
-          </a>
-          <a className="lp-foot-link" href={DECISIONS_URL}>
-            Decisions
-          </a>
-        </nav>
-        <span className="lp-small lp-faint lp-footer-note">
-          Many minds, one hive. © 2026 CuriouslyCory
-        </span>
-      </div>
-    </footer>
   );
 }

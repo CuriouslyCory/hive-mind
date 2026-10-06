@@ -1,0 +1,209 @@
+/* The frame of the public pages (SitePage, SiteHeader, SiteFooter in this
+   directory): the page root, the skip link, the content width, the top bar
+   and the footer. Every rule is scoped under .hm-site: Next keeps global
+   stylesheets loaded after client navigation, and Cache Components keeps a
+   visited page mounted but hidden, so an unscoped rule would reach the
+   dashboard. Nothing here styles html or body, and nothing depends on their
+   styles. Breakpoints are 1024px and 720px, as on the landing page. */
+
+/* The page root. It is positioned against the initial containing block, so
+   it spans the viewport whatever margin or padding <body> has (the browser's
+   default 8px, or the dashboard's rules after a client navigation), and its
+   surface fills at least one screen, with the footer at the bottom. */
+.hm-site {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.hm-site :where(a, button, main):focus-visible {
+  outline: var(--border-focus) solid var(--focus);
+  outline-offset: 2px;
+}
+.hm-site main:focus {
+  outline: none;
+}
+.hm-site .site-main {
+  flex: 1;
+}
+
+/* Skip link: off screen until focused. */
+.hm-site .site-skip {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 10;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: 700 15px / 22px var(--font-sans);
+  box-shadow: var(--shadow-float);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.hm-site .site-skip:focus-visible {
+  transform: none;
+}
+
+/* The content column: at most 1200px, with the page gutters. */
+.hm-site .site-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-left: var(--space-12);
+  padding-right: var(--space-12);
+}
+
+/* Top bar */
+.hm-site .site-topbar {
+  border-bottom: var(--border-hair) solid var(--line);
+  background: var(--surface);
+}
+.hm-site .site-topbar-inner {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+.hm-site .site-home {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-lg);
+  text-decoration: none;
+  flex: none;
+}
+.hm-site .site-home .hm-logo-tile {
+  padding: var(--space-1) 10px;
+}
+.hm-site .site-nav {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: var(--space-4);
+}
+.hm-site .site-nav-link {
+  color: var(--ink-muted);
+  text-decoration: none;
+  font: 700 15px / 22px var(--font-sans);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  transition:
+    background-color var(--duration-fast),
+    color var(--duration-fast);
+}
+.hm-site .site-nav-link:hover {
+  color: var(--ink);
+  background: var(--hive-tint);
+}
+.hm-site .site-topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.hm-site .site-theme {
+  display: inline-flex;
+}
+
+/* Footer */
+.hm-site .site-footer {
+  border-top: var(--border-hair) solid var(--line);
+  background: var(--surface);
+}
+.hm-site .site-footer-inner {
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-8);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+}
+.hm-site .site-footer .hm-logo-tile {
+  padding: var(--space-1) 10px;
+}
+.hm-site .site-foot-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+.hm-site .site-foot-link {
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+.hm-site .site-foot-link:hover {
+  color: var(--ink);
+}
+.hm-site .site-footer-note {
+  margin-left: auto;
+  font: 400 13px / 18px var(--font-sans);
+  color: var(--ink-faint);
+}
+
+@media (max-width: 1024px) {
+  .hm-site .site-nav {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .hm-site .site-wrap {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+  /* The top bar tightens and the logo shrinks, so the right-hand controls
+     fit at 320px. */
+  .hm-site .site-topbar-inner {
+    gap: var(--space-3);
+  }
+  .hm-site .site-topbar-right {
+    gap: var(--space-2);
+  }
+  .hm-site .site-home .hm-logo-tile {
+    padding: var(--space-1) var(--space-2);
+  }
+  .hm-site .site-home .hm-logo-tile img {
+    width: auto;
+  }
+  .hm-site .site-home .hm-logo-tile img:first-child {
+    height: 26px;
+  }
+  .hm-site .site-home .hm-logo-tile img:last-child {
+    height: 22px;
+  }
+  .hm-site .site-footer-note {
+    margin-left: 0;
+  }
+  /* Words a top bar control can do without on a small screen; give the
+     control an aria-label that keeps its full name. */
+  .hm-site .site-hide-sm {
+    display: none;
+  }
+}
+
+/* Touch targets: at least 44px tall on small screens and on any touch screen. */
+@media (max-width: 720px), (pointer: coarse) {
+  .hm-site .site-home,
+  .hm-site .site-topbar-right .hm-switch,
+  .hm-site .site-foot-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .hm-site .site-topbar-right .hm-switch {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .hm-site .site-topbar-right .hm-btn {
+    height: 44px;
+  }
+}
+
+/* Printed, the page flows from the top of the first sheet like any other. */
+@media print {
+  .hm-site {
+    position: static;
+    min-height: 0;
+  }
+}

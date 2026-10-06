@@ -1,28 +1,12 @@
-/* The landing page (page.tsx), ported from its design (ADR-0016). Every
-   rule is scoped under .hm-landing: Next keeps global stylesheets loaded
-   after client navigation, and Cache Components keeps a visited page mounted
-   but hidden, so an unscoped rule would reach /sign-in and the dashboard.
-   Nothing here styles html or body, and nothing depends on their styles.
+/* The landing page (page.tsx), ported from its design (ADR-0016). The page
+   root, skip link, content width (site-wrap), top bar and footer are the
+   site frame's, in apps/web/src/site/site.css. Every rule is scoped under
+   .hm-landing: Next keeps global stylesheets loaded after client navigation,
+   and Cache Components keeps a visited page mounted but hidden, so an
+   unscoped rule would reach /sign-in and the dashboard. Nothing here styles
+   html or body, and nothing depends on their styles.
    Breakpoints are 1024px and 720px. */
 
-/* The page root. It is positioned against the initial containing block, so
-   it spans the viewport whatever margin or padding <body> has (the browser's
-   default 8px, or the dashboard's rules after a client navigation), and its
-   surface fills at least one screen. */
-.hm-landing {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  min-height: 100dvh;
-}
-.hm-landing :where(a, button, main):focus-visible {
-  outline: var(--border-focus) solid var(--focus);
-  outline-offset: 2px;
-}
-.hm-landing main:focus {
-  outline: none;
-}
 /* No specificity, so component margins (Card eyebrow and title) still apply. */
 :where(.hm-landing) :where(h1, h2, h3, p, ol) {
   margin: 0;
@@ -41,32 +25,7 @@
   border: 0;
 }
 
-/* Skip link: off screen until focused. */
-.hm-landing .lp-skip {
-  position: absolute;
-  top: var(--space-3);
-  left: var(--space-3);
-  z-index: 10;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  color: var(--ink);
-  font: 700 15px / 22px var(--font-sans);
-  box-shadow: var(--shadow-float);
-  text-decoration: none;
-  transform: translateY(-200%);
-}
-.hm-landing .lp-skip:focus-visible {
-  transform: none;
-}
-
 /* Layout helpers */
-.hm-landing .lp-wrap {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding-left: var(--space-12);
-  padding-right: var(--space-12);
-}
 .hm-landing .lp-section {
   padding-top: 96px;
   padding-bottom: 96px;
@@ -164,56 +123,6 @@
   border-radius: var(--radius-sm);
   color: var(--ink);
   white-space: nowrap;
-}
-
-/* Top bar (not sticky, as designed) */
-.hm-landing .lp-topbar {
-  border-bottom: var(--border-hair) solid var(--line);
-  background: var(--surface);
-}
-.hm-landing .lp-topbar-inner {
-  height: 72px;
-  display: flex;
-  align-items: center;
-  gap: var(--space-6);
-}
-.hm-landing .lp-home {
-  display: inline-flex;
-  align-items: center;
-  border-radius: var(--radius-lg);
-  text-decoration: none;
-  flex: none;
-}
-.hm-landing .lp-home .hm-logo-tile {
-  padding: var(--space-1) 10px;
-}
-.hm-landing .lp-nav {
-  display: flex;
-  gap: var(--space-1);
-  margin-left: var(--space-4);
-}
-.hm-landing .lp-nav-link {
-  color: var(--ink-muted);
-  text-decoration: none;
-  font: 700 15px / 22px var(--font-sans);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  transition:
-    background-color var(--duration-fast),
-    color var(--duration-fast);
-}
-.hm-landing .lp-nav-link:hover {
-  color: var(--ink);
-  background: var(--hive-tint);
-}
-.hm-landing .lp-topbar-right {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.hm-landing .lp-theme {
-  display: inline-flex;
 }
 
 /* Hero */
@@ -622,38 +531,6 @@
   width: auto;
 }
 
-/* Footer */
-.hm-landing .lp-footer {
-  border-top: var(--border-hair) solid var(--line);
-  background: var(--surface);
-}
-.hm-landing .lp-footer-inner {
-  padding-top: var(--space-8);
-  padding-bottom: var(--space-8);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-6);
-}
-.hm-landing .lp-footer .hm-logo-tile {
-  padding: var(--space-1) 10px;
-}
-.hm-landing .lp-foot-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-5);
-}
-.hm-landing .lp-foot-link {
-  color: var(--ink-muted);
-  text-decoration: none;
-}
-.hm-landing .lp-foot-link:hover {
-  color: var(--ink);
-}
-.hm-landing .lp-footer-note {
-  margin-left: auto;
-}
-
 @media (max-width: 1024px) {
   .hm-landing .lp-g2,
   .hm-landing .lp-g3 {
@@ -669,16 +546,9 @@
     position: static;
     margin-top: var(--space-6);
   }
-  .hm-landing .lp-nav {
-    display: none;
-  }
 }
 
 @media (max-width: 720px) {
-  .hm-landing .lp-wrap {
-    padding-left: var(--space-4);
-    padding-right: var(--space-4);
-  }
   .hm-landing .lp-section {
     padding-top: var(--space-16);
     padding-bottom: var(--space-16);
@@ -727,27 +597,9 @@
   }
 
   /* Not in the design, which is 560px wide at a 390px viewport: the top bar
-     drops "Early access" and " with GitHub" and shrinks the logo, the
-     honeycomb stays inside the column, and the tables keep two or three
+     drops "Early access" and " with GitHub" (and site.css shrinks the logo),
+     the honeycomb stays inside the column, and the tables keep two or three
      columns, the others moving into the main cell. */
-  .hm-landing .lp-topbar-inner {
-    gap: var(--space-3);
-  }
-  .hm-landing .lp-topbar-right {
-    gap: var(--space-2);
-  }
-  .hm-landing .lp-home .hm-logo-tile {
-    padding: var(--space-1) var(--space-2);
-  }
-  .hm-landing .lp-home .hm-logo-tile img {
-    width: auto;
-  }
-  .hm-landing .lp-home .hm-logo-tile img:first-child {
-    height: 26px;
-  }
-  .hm-landing .lp-home .hm-logo-tile img:last-child {
-    height: 22px;
-  }
   .hm-landing .lp-honeycomb {
     width: 100%;
     margin-right: 0;
@@ -772,25 +624,10 @@
     width: 100%;
     white-space: normal;
   }
-  .hm-landing .lp-footer-note {
-    margin-left: 0;
-  }
 }
 
 /* Touch targets: at least 44px tall on small screens and on any touch screen. */
 @media (max-width: 720px), (pointer: coarse) {
-  .hm-landing .lp-home,
-  .hm-landing .hm-switch,
-  .hm-landing .lp-foot-link {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-  }
-  .hm-landing .hm-switch {
-    min-width: 44px;
-    justify-content: center;
-  }
-  .hm-landing .lp-topbar-cta,
   .hm-landing .lp-copy,
   .hm-landing .lp-touch {
     height: 44px;
@@ -814,13 +651,5 @@
   .hm-landing .lp-show-xs {
     display: block;
     margin-top: var(--space-1);
-  }
-}
-
-/* Printed, the page flows from the top of the first sheet like any other. */
-@media print {
-  .hm-landing {
-    position: static;
-    min-height: 0;
   }
 }

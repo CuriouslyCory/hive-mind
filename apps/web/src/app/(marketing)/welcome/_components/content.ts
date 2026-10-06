@@ -1,12 +1,6 @@
 // Landing page copy that must stay in step with docs/cli.md.
 // apps/web/test/landing-content.test.ts checks both against the doc.
 
-export const REPOSITORY_URL = "https://github.com/CuriouslyCory/hive-mind";
-export const CLI_DOCS_URL = `${REPOSITORY_URL}/blob/main/docs/cli.md`;
-export const DASHBOARD_DOCS_URL = `${REPOSITORY_URL}/blob/main/docs/dashboard.md`;
-export const DECISIONS_URL = `${REPOSITORY_URL}/tree/main/docs/adr`;
-export const ROADMAP_URL = `${REPOSITORY_URL}/issues/1`;
-
 /** docs/cli.md → Install → Install script. */
 export const INSTALL_COMMAND =
   "curl -fsSL https://github.com/CuriouslyCory/hive-mind/releases/latest/download/install.sh | sh";

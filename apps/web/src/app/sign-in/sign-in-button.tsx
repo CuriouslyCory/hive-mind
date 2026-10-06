@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Alert } from "../../design-system/alert";
+import { Button } from "../../design-system/button";
 import { authClient } from "../../lib/auth-client";
 
 /** `callbackURL` must already be a validated same-origin path. */
@@ -29,10 +31,20 @@ export function SignInButton({ callbackURL }: { callbackURL: string }) {
 
   return (
     <>
-      <button type="button" onClick={signIn} disabled={pending || !ready}>
-        Sign in with GitHub
-      </button>
-      {failed && <p role="alert">Sign-in failed. Try again.</p>}
+      <Button
+        variant="primary"
+        size="lg"
+        className="si-cta"
+        onClick={signIn}
+        disabled={pending || !ready}
+      >
+        {pending ? "Signing in…" : "Sign in with GitHub"}
+      </Button>
+      {failed && (
+        <Alert tone="danger" title="Sign-in failed.">
+          HiveMind could not start the sign-in with GitHub. Try again.
+        </Alert>
+      )}
     </>
   );
 }
