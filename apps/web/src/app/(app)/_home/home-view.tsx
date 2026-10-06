@@ -271,6 +271,9 @@ function hasFilters(params: HomeParams): boolean {
   );
 }
 
+/** The sections whose content the History range changes (`HomeCard` region ids). */
+const RANGE_REGIONS = "home-throughput home-agents home-hot-paths";
+
 function FilterRow({ params }: { params: HomeParams }) {
   return (
     <div className="home-filter-row">
@@ -291,6 +294,7 @@ function FilterRow({ params }: { params: HomeParams }) {
           </span>
           <NavTabs
             aria-labelledby="home-range-label"
+            controls={RANGE_REGIONS}
             value={params.range}
             items={(["24h", "7d", "30d"] as const).map((range) => ({
               value: range,

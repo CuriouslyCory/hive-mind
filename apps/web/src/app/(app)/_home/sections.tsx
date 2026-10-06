@@ -46,9 +46,12 @@ export function HomeCard({
   aside,
   children,
   testId,
+  regionId,
   ruled = true,
 }: {
   id: string;
+  /** The section's own id, for controls elsewhere that change it. */
+  regionId?: string;
   title: string;
   count?: number;
   aside?: ReactNode;
@@ -58,7 +61,7 @@ export function HomeCard({
   ruled?: boolean;
 }) {
   return (
-    <section className="hm-card home-card" aria-labelledby={id} data-testid={testId}>
+    <section id={regionId} className="hm-card home-card" aria-labelledby={id} data-testid={testId}>
       <div className={ruled ? "home-card-head home-card-head-ruled" : "home-card-head"}>
         <h2 id={id} className="home-card-title">
           {title}
@@ -239,79 +242,84 @@ export function SessionsSection({ dashboard }: { dashboard: HomeDashboard }) {
       ruled={false}
       testId="home-sessions"
     >
-      <div className="home-card-tabs">
-        <NavTabs aria-label="Session status" value={sessions.tab} items={tabs} />
-      </div>
-      {sessions.rows.length === 0 ? (
-        <p className="home-empty">{emptySessionsText(dashboard)}</p>
-      ) : (
-        <div className="home-table-scroll">
-          <table className="home-table home-sessions-table">
-            <thead>
-              <tr>
-                <th scope="col" className="home-col-status">
-                  Status
-                </th>
-                <th scope="col">Session</th>
-                <th scope="col" className="home-col-focus">
-                  Project · Focus
-                </th>
-                <th scope="col" className="home-col-branch">
-                  Branch
-                </th>
-                <th scope="col" className="home-col-time">
-                  Heartbeat
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.rows.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    <SessionState row={row} />
-                  </td>
-                  <td>
-                    <Link className="home-link" href={sessionPath(row.projectId, row.id)}>
-                      {row.intent.trim() === "" ? "Session without an intent" : row.intent}
-                    </Link>
-                    <div className="home-byline">
-                      <span className="home-small home-faint">
-                        {row.agent} · {attributionLabel(row.owner)}
-                      </span>
-                      {row.overlapping ? <Badge tone="danger">Overlap</Badge> : null}
-                    </div>
-                  </td>
-                  <td>
-                    <div className="home-small home-muted">{row.projectName}</div>
-                    {row.focusPlanKey ? (
-                      <Link
-                        className="home-link home-mono"
-                        href={planPath(row.projectId, row.focusPlanKey)}
-                      >
-                        {row.focusPlanKey}
-                      </Link>
-                    ) : (
-                      <span className="home-mono home-faint">
-                        <span aria-hidden="true">—</span>
-                        <span className="home-sr-only">No focus</span>
-                      </span>
-                    )}
-                  </td>
-                  <td className="home-branch">{row.gitBranch ?? "—"}</td>
-                  <td className="home-time">
-                    {row.state === "ended" && row.endedAt ? (
-                      <When date={row.endedAt} asOf={asOf} prefix="ended " />
-                    ) : (
-                      <When date={row.lastHeartbeatAt} asOf={asOf} />
-                    )}
-                  </td>
+      <NavTabs
+        aria-label="Session status"
+        value={sessions.tab}
+        items={tabs}
+        wrapperClassName="home-card-tabs"
+        panelId="home-sessions-panel"
+      >
+        {sessions.rows.length === 0 ? (
+          <p className="home-empty">{emptySessionsText(dashboard)}</p>
+        ) : (
+          <div className="home-table-scroll">
+            <table className="home-table home-sessions-table">
+              <thead>
+                <tr>
+                  <th scope="col" className="home-col-status">
+                    Status
+                  </th>
+                  <th scope="col">Session</th>
+                  <th scope="col" className="home-col-focus">
+                    Project · Focus
+                  </th>
+                  <th scope="col" className="home-col-branch">
+                    Branch
+                  </th>
+                  <th scope="col" className="home-col-time">
+                    Heartbeat
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <TableFooter showing={showing} more={more} />
+              </thead>
+              <tbody>
+                {sessions.rows.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      <SessionState row={row} />
+                    </td>
+                    <td>
+                      <Link className="home-link" href={sessionPath(row.projectId, row.id)}>
+                        {row.intent.trim() === "" ? "Session without an intent" : row.intent}
+                      </Link>
+                      <div className="home-byline">
+                        <span className="home-small home-faint">
+                          {row.agent} · {attributionLabel(row.owner)}
+                        </span>
+                        {row.overlapping ? <Badge tone="danger">Overlap</Badge> : null}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="home-small home-muted">{row.projectName}</div>
+                      {row.focusPlanKey ? (
+                        <Link
+                          className="home-link home-mono"
+                          href={planPath(row.projectId, row.focusPlanKey)}
+                        >
+                          {row.focusPlanKey}
+                        </Link>
+                      ) : (
+                        <span className="home-mono home-faint">
+                          <span aria-hidden="true">—</span>
+                          <span className="home-sr-only">No focus</span>
+                        </span>
+                      )}
+                    </td>
+                    <td className="home-branch">{row.gitBranch ?? "—"}</td>
+                    <td className="home-time">
+                      {row.state === "ended" && row.endedAt ? (
+                        <When date={row.endedAt} asOf={asOf} prefix="ended " />
+                      ) : (
+                        <When date={row.lastHeartbeatAt} asOf={asOf} />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <TableFooter showing={showing} more={more} />
+      </NavTabs>
     </HomeCard>
   );
 }
@@ -355,76 +363,83 @@ export function PlansSection({ dashboard }: { dashboard: HomeDashboard }) {
       ruled={false}
       testId="home-plans"
     >
-      <div className="home-card-tabs">
-        <NavTabs aria-label="Plan status" value={plans.tab} items={tabs} />
-      </div>
-      {plans.rows.length === 0 ? (
-        <p className="home-empty">{empty}</p>
-      ) : (
-        <div className="home-table-scroll">
-          <table className="home-table home-plans-table">
-            <thead>
-              <tr>
-                <th scope="col" className="home-col-plan">
-                  Plan
-                </th>
-                <th scope="col">Title</th>
-                <th scope="col" className="home-col-status">
-                  Status
-                </th>
-                <th scope="col" className="home-col-progress">
-                  Progress
-                </th>
-                <th scope="col" className="home-col-time">
-                  Updated
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {plans.rows.map((row) => {
-                const status = planStatusBadge(row.status);
-                const { done, total } = row.progress;
-                return (
-                  <tr key={row.id}>
-                    <td>
-                      <div className="home-mono">{row.key}</div>
-                      <div className="home-small home-faint">{row.projectName}</div>
-                    </td>
-                    <td>
-                      <Link className="home-link" href={planPath(row.projectId, row.key)}>
-                        {row.title}
-                      </Link>
-                      <div className="home-small home-faint">
-                        by {attributionLabel(row.createdBy)}
-                      </div>
-                    </td>
-                    <td>
-                      <Badge tone={status.tone}>{status.label}</Badge>
-                    </td>
-                    <td>
-                      <span className="home-small home-muted home-num">
-                        {total === 0 ? "No Tasks yet" : `${done} of ${plural(total, "Task")} done`}
-                      </span>
-                      <div className="home-meter" aria-hidden="true">
-                        <span
-                          className="home-meter-fill"
-                          style={{
-                            width: `${total === 0 ? 0 : Math.round((done / total) * 100)}%`,
-                          }}
-                        />
-                      </div>
-                    </td>
-                    <td className="home-time">
-                      <When date={row.updatedAt} asOf={asOf} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <TableFooter showing={showing} more={more} />
+      <NavTabs
+        aria-label="Plan status"
+        value={plans.tab}
+        items={tabs}
+        wrapperClassName="home-card-tabs"
+        panelId="home-plans-panel"
+      >
+        {plans.rows.length === 0 ? (
+          <p className="home-empty">{empty}</p>
+        ) : (
+          <div className="home-table-scroll">
+            <table className="home-table home-plans-table">
+              <thead>
+                <tr>
+                  <th scope="col" className="home-col-plan">
+                    Plan
+                  </th>
+                  <th scope="col">Title</th>
+                  <th scope="col" className="home-col-status">
+                    Status
+                  </th>
+                  <th scope="col" className="home-col-progress">
+                    Progress
+                  </th>
+                  <th scope="col" className="home-col-time">
+                    Updated
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {plans.rows.map((row) => {
+                  const status = planStatusBadge(row.status);
+                  const { done, total } = row.progress;
+                  return (
+                    <tr key={row.id}>
+                      <td>
+                        <div className="home-mono">{row.key}</div>
+                        <div className="home-small home-faint">{row.projectName}</div>
+                      </td>
+                      <td>
+                        <Link className="home-link" href={planPath(row.projectId, row.key)}>
+                          {row.title}
+                        </Link>
+                        <div className="home-small home-faint">
+                          by {attributionLabel(row.createdBy)}
+                        </div>
+                      </td>
+                      <td>
+                        <Badge tone={status.tone}>{status.label}</Badge>
+                      </td>
+                      <td>
+                        <span className="home-small home-muted home-num">
+                          {total === 0
+                            ? "No Tasks yet"
+                            : `${done} of ${plural(total, "Task")} done`}
+                        </span>
+                        <div className="home-meter" aria-hidden="true">
+                          <span
+                            className="home-meter-fill"
+                            style={{
+                              width: `${total === 0 ? 0 : Math.round((done / total) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </td>
+                      <td className="home-time">
+                        <When date={row.updatedAt} asOf={asOf} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <TableFooter showing={showing} more={more} />
+      </NavTabs>
     </HomeCard>
   );
 }

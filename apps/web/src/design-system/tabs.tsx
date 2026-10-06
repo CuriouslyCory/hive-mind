@@ -28,7 +28,38 @@ export type TabsProps = {
   /** Names the tablist. Pass this or `aria-labelledby`. */
   "aria-label"?: string;
   "aria-labelledby"?: string;
+  /**
+   * `automatic` (the default): arrow keys move focus and select. `manual`:
+   * arrow keys only move focus, and Enter or Space selects. Use `manual`
+   * when selecting is expensive, such as a tab that loads a page.
+   */
+  activation?: "automatic" | "manual";
+  /** The base of the tabs' element ids (`tabElementId`); generated if absent. */
+  id?: string;
+  /**
+   * The id (or space-separated ids) of the element outside Tabs that shows
+   * the selected tab's content, for items without a `panel`. Every tab gets
+   * it as `aria-controls`.
+   */
+  controls?: string;
 };
+
+/** The element id of tab `index` in Tabs whose `id` is `base`. */
+export function tabElementId(base: string, index: number): string {
+  return `${base}-tab-${index}`;
+}
+
+/** What a key does on tab `index` of `count`: the tab to focus, and whether to select it. */
+export function tabKeyAction(
+  key: string,
+  index: number,
+  count: number,
+  activation: "automatic" | "manual" = "automatic",
+): { focus: number; select: boolean } | null {
+  const target = tabIndexForKey(key, index, count);
+  if (target === null) return null;
+  return { focus: target, select: activation === "automatic" };
+}
 
 /**
  * The index a key moves the selection to from tab `index` of `count`, or
@@ -54,8 +85,9 @@ export function tabIndexForKey(key: string, index: number, count: number): numbe
 
 /**
  * Peer views. Follows the WAI-ARIA tabs pattern: one tab stop (the selected
- * tab), arrow keys move between tabs and select them, Home and End jump to
- * the ends. Panels are not tab stops (the WAI-ARIA pattern suggests one,
+ * tab), arrow keys move between tabs and select them (or, with
+ * `activation="manual"`, only move focus, and Enter or Space selects), Home
+ * and End jump to the ends. A count is read after its label as ", 3". Panels are not tab stops (the WAI-ARIA pattern suggests one,
  * but Biome's noNoninteractiveTabindex rule forbids tabIndex on them), so put
  * at least one focusable element in a panel that needs keyboard access.
  */
@@ -67,8 +99,12 @@ export function Tabs({
   className,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
+  activation = "automatic",
+  id,
+  controls,
 }: TabsProps) {
-  const baseId = useId();
+  const generatedId = useId();
+  const baseId = id ?? generatedId;
   const [ownValue, setOwnValue] = useState(defaultValue ?? items[0]?.value);
   const selected = value ?? ownValue;
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -76,7 +112,7 @@ export function Tabs({
   const selectedIndex = items.findIndex((item) => item.value === selected);
   const focusableIndex = selectedIndex === -1 ? 0 : selectedIndex;
 
-  const tabId = (index: number) => `${baseId}-tab-${index}`;
+  const tabId = (index: number) => tabElementId(baseId, index);
   const panelId = (index: number) => `${baseId}-panel-${index}`;
 
   function select(next: string) {
@@ -85,13 +121,13 @@ export function Tabs({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-    const target = tabIndexForKey(event.key, index, items.length);
-    if (target === null) return;
+    const action = tabKeyAction(event.key, index, items.length, activation);
+    if (action === null) return;
     event.preventDefault();
-    const item = items[target];
+    const item = items[action.focus];
     if (!item) return;
-    select(item.value);
-    tabRefs.current[target]?.focus();
+    if (action.select) select(item.value);
+    tabRefs.current[action.focus]?.focus();
   }
 
   const tablist = (
@@ -113,14 +149,19 @@ export function Tabs({
             role="tab"
             id={tabId(index)}
             aria-selected={isSelected}
-            aria-controls={hasPanels ? panelId(index) : undefined}
+            aria-controls={hasPanels ? panelId(index) : controls}
             tabIndex={index === focusableIndex ? 0 : -1}
             className="hm-tab"
             onClick={() => select(item.value)}
             onKeyDown={(event) => onKeyDown(event, index)}
           >
             {item.label}
-            {item.count === undefined ? null : <span className="hm-tab-count">{item.count}</span>}
+            {item.count === undefined ? null : (
+              <>
+                <span className="hm-sr-only">, </span>
+                <span className="hm-tab-count">{item.count}</span>
+              </>
+            )}
           </button>
         );
       })}

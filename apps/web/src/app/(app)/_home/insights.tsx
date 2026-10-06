@@ -59,6 +59,7 @@ export function Throughput({ dashboard }: { dashboard: HomeDashboard }) {
       title="Throughput"
       aside={RANGE_TEXT[range].label}
       testId="home-throughput"
+      regionId="home-throughput"
     >
       <div className="home-card-body">
         <dl className="home-stats">
@@ -150,6 +151,7 @@ export function Agents({ dashboard }: { dashboard: HomeDashboard }) {
       count={agents.length}
       aside={RANGE_TEXT[range].label}
       testId="home-agents"
+      regionId="home-agents"
     >
       {agents.length === 0 ? (
         <p className="home-empty">
@@ -311,6 +313,7 @@ export function HotPaths({ dashboard }: { dashboard: HomeDashboard }) {
       title="Hot paths"
       aside={RANGE_TEXT[range].label}
       testId="home-hot-paths"
+      regionId="home-hot-paths"
     >
       {hotPaths.length === 0 ? (
         <p className="home-empty">

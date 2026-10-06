@@ -141,6 +141,29 @@ describe("the home view", () => {
     expect(html).toContain('role="img" aria-label="23 Tasks done, last 7 days.');
   });
 
+  it("ties the Sessions and Plans tabs to the table they control", () => {
+    for (const panel of ["home-sessions-panel", "home-plans-panel"]) {
+      const opening = new RegExp(`<div role="tabpanel" id="${panel}" aria-labelledby="([^"]+)">`);
+      const labelledBy = opening.exec(html)?.[1];
+      expect(labelledBy, panel).toBeDefined();
+      // Labelled by the selected tab, and controlled by every tab of its list.
+      expect(html).toMatch(
+        new RegExp(`id="${labelledBy}" aria-selected="true" aria-controls="${panel}"`),
+      );
+      expect(html.match(new RegExp(`aria-controls="${panel}"`, "g"))?.length).toBeGreaterThan(1);
+    }
+    expect(html).toMatch(
+      /<div role="tabpanel" id="home-sessions-panel"[^>]*>[\s\S]*home-sessions-table/,
+    );
+  });
+
+  it("ties the History tabs to the sections the range changes", () => {
+    expect(html).toContain('aria-controls="home-throughput home-agents home-hot-paths"');
+    for (const id of ["home-throughput", "home-agents", "home-hot-paths"]) {
+      expect(html).toContain(`<section id="${id}"`);
+    }
+  });
+
   it("renders times relative to the snapshot, machine-readable", () => {
     expect(html).toContain(`<time dateTime="${new Date(AS_OF.getTime() - 12_000).toISOString()}"`);
     expect(text(html)).toContain("12 s ago");
