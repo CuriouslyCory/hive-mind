@@ -184,6 +184,7 @@ const PROGRESS_FIELD: { readonly [S in TaskStatus]: keyof PlanProgress } = {
   done: "done",
 };
 
+/** Each Plan's Task counts by status (`PlanProgress`), by Plan id; zeros for a Plan with no Tasks. */
 export async function progressOf(
   tx: Db | Transaction,
   planIds: string[],

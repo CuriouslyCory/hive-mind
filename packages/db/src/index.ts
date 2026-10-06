@@ -170,6 +170,7 @@ export {
   type PlanWriter,
   planKey,
   planNumbers,
+  progressOf,
   type RecordPlanDecisionOutcome,
   readPlan,
   readPlans,
