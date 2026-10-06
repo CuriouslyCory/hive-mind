@@ -76,6 +76,11 @@ export function describeEvent(type: string, rawPayload: unknown): EventText {
       return text(`Changed the Plan status${change(str(payload, "from"), str(payload, "to"))}`);
     case "plan.log_appended":
       return { text: "Added a log entry", markdown: str(payload, "message") };
+    case "plan.decision_recorded": {
+      // Plain text, never markdown: shown escaped on the one line.
+      const decision = str(payload, "text");
+      return text(decision ? `Recorded a decision: ${decision}` : "Recorded a decision");
+    }
     case "task.added": {
       const position = num(payload, "position");
       return text(

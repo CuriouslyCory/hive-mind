@@ -916,6 +916,14 @@ describe("live update filters", () => {
     }
   });
 
+  it("refreshes a recorded decision's Plan page and the overview, not other Plans", () => {
+    const decision = asStream({ type: "plan.decision_recorded", planId, payload: { text: "D" } });
+    expect(isKnownEventType("plan.decision_recorded")).toBe(true);
+    expect(shouldRefreshFor({ kind: "project" }, decision)).toBe(true);
+    expect(shouldRefreshFor({ kind: "plan", planId }, decision)).toBe(true);
+    expect(shouldRefreshFor({ kind: "plan", planId: randomUUID() }, decision)).toBe(false);
+  });
+
   it("refreshes a Session page for Events it acted through or that affected it", () => {
     const scope = { sessionId, taskId };
     expect(affectsSession(asStream({ type: "session.updated", sessionId }), scope)).toBe(true);

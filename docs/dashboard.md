@@ -139,7 +139,7 @@ Plan bodies, Plan log entries, Session end summaries and ADR files are written b
 
 An ADR page renders only the part of the file after its frontmatter (`parseAdrContent(...).adr.body` from `@hivemind/contract`); the status, date and supersedes list come from the stored copy and render as plain text. A later `---` block in the body is a rule and a heading, never metadata. Links between ADRs in the repository are relative (`[ADR-0004](0004-x.md)`), so under the rules above they render as plain text, not links; the page's supersedes and superseded-by links point to the other ADR pages instead. The ADR's title is plain text.
 
-Labels, intents, ADR titles and Event text are not markdown. They render as plain React text, and Event text is built only from known payload fields of projected Events (`apps/web/src/server/dashboard/event-text.ts`), never by spreading a payload into HTML or props.
+Labels, intents, ADR titles, recorded decisions and Event text are not markdown. They render as plain React text, and Event text is built only from known payload fields of projected Events (`apps/web/src/server/dashboard/event-text.ts`), never by spreading a payload into HTML or props.
 
 ## Known limitations
 

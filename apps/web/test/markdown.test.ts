@@ -322,4 +322,14 @@ describe("describeEvent", () => {
     expect(described.markdown).toBe("[x](javascript:alert(1))");
     expectInert(render(described.markdown ?? ""));
   });
+
+  it("describes a recorded decision as plain text, never markdown", () => {
+    expect(
+      describeEvent("plan.decision_recorded", { text: "Use [x](javascript:alert(1)) *now*" }),
+    ).toEqual({ text: "Recorded a decision: Use [x](javascript:alert(1)) *now*", markdown: null });
+    expect(describeEvent("plan.decision_recorded", { text: 42 })).toEqual({
+      text: "Recorded a decision",
+      markdown: null,
+    });
+  });
 });

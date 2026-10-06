@@ -53,10 +53,11 @@ function previousPlanId(event: StreamEvent): unknown {
 }
 
 /**
- * A Plan page: Events of the Plan or its Tasks (claims included, since task
- * Events carry the Plan), a Session leaving the Plan, and any Event of a
- * Session the page shows (Scope, heartbeat and liveness changes). ADR Events
- * change nothing it shows, even when a shown Session acted through them.
+ * A Plan page: Events of the Plan (log entries and recorded decisions
+ * included) or its Tasks (claims included, since task Events carry the
+ * Plan), a Session leaving the Plan, and any Event of a Session the page
+ * shows (Scope, heartbeat and liveness changes). ADR Events change nothing
+ * it shows, even when a shown Session acted through them.
  */
 export function affectsPlan(
   event: StreamEvent,
