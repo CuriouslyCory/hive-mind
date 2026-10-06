@@ -300,8 +300,9 @@ export const planLog: CommandDefinition = {
 
 /**
  * A decision as the contract stores it: trimmed, then one line of 1 to
- * `MAX_DECISION_TEXT_LENGTH` characters without control characters. Checked
- * here so a bad decision fails before any request.
+ * `MAX_DECISION_TEXT_LENGTH` characters without control characters or line
+ * and paragraph separators (U+2028, U+2029). Checked here, with the
+ * contract's own schema, so a bad decision fails before any request.
  */
 function decisionTextOf(value: string): string {
   const parsed = decisionTextSchema.safeParse(value);

@@ -351,6 +351,8 @@ describe("plan decide", () => {
     };
     await usage(["plan", "decide", planKey, "   "], "<text> is blank");
     await usage(["plan", "decide", planKey, "First line\nsecond"], "one line");
+    await usage(["plan", "decide", planKey, "First line second"], "one line");
+    await usage(["plan", "decide", planKey, "First line second"], "one line");
     await usage(["plan", "decide", planKey, "Tab\there"], "control characters");
     await usage(["plan", "decide", planKey, "x".repeat(501)], "at most 500");
     await usage(["plan", "decide", planKey], "Missing <text>");

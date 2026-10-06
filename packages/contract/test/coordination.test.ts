@@ -345,6 +345,8 @@ describe("text limits", () => {
       "\u001b[2J",
       "C1\u009b",
       "lone \ud800",
+      "line separator",
+      "paragraph separator",
     ]) {
       expect(accepts(recordPlanDecisionInputSchema, { ...decision, text: bad })).toBe(false);
     }

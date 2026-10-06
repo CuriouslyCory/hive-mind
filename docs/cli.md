@@ -265,7 +265,7 @@ Your Sessions are the ones started by the same principal: the same User (through
 - Tasks can be claimed and started only in an `active` Plan. In a `paused` Plan the current holders can still heartbeat, block, finish and release.
 - In a `done` or `abandoned` Plan, `plan log --message` and `plan decide` still work; `plan edit` and `task add` are `CONFLICT`.
 - `plan log <plan>` without `--message` lists the Plan's Events, log entries and decisions included, newest first. A Session attached to the Plan when it ends adds its `session end` summary there too.
-- `plan decide <plan> <text>` records a decision as a `plan.decision_recorded` Event. It is shown in the dashboard's Decisions panel and in the Plan's activity (`plan log`). Quote the text: it is one line, trimmed, of 1 to 500 characters, with no line breaks or other control characters; anything else is `USAGE_ERROR` (exit 1) before any request. Put longer reasoning in `plan log --message`.
+- `plan decide <plan> <text>` records a decision as a `plan.decision_recorded` Event. It is shown in the dashboard's Decisions panel and in the Plan's activity (`plan log`). Quote the text: it is one line, trimmed, of 1 to 500 characters, with no line breaks (U+2028 and U+2029 included) or other control characters; anything else is `USAGE_ERROR` (exit 1) before any request. Put longer reasoning in `plan log --message`.
 
 ### Tasks
 
