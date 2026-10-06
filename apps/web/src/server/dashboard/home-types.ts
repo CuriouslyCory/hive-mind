@@ -204,6 +204,18 @@ export type AttentionItem =
 
 export type AttentionKind = AttentionItem["kind"];
 
+/**
+ * Each kind's label as the page shows it. The filter matches it too, so
+ * "lapsed" lists every lapsed claim.
+ */
+export const ATTENTION_LABELS: Record<AttentionKind, string> = {
+  blocked_task: "Blocked Task",
+  lease_ending: "Lease ending",
+  claim_lapsed: "Claim lapsed",
+  unclaimed_plan: "Unclaimed Plan",
+  paused_plan: "Paused Plan",
+};
+
 // --- Activity -----------------------------------------------------------------
 
 export interface HomeEventView extends EventView {

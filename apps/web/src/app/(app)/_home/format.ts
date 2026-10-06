@@ -2,12 +2,13 @@ import type { PlanStatus } from "@hivemind/db";
 import type { Route } from "next";
 import type { BadgeTone } from "../../../design-system";
 import { homeHref } from "../../../server/dashboard/home-params";
-import type {
-  AttentionItem,
-  HomeParams,
-  HomeRange,
-  HomeStat,
-  HomeThroughputBucket,
+import {
+  ATTENTION_LABELS,
+  type AttentionItem,
+  type HomeParams,
+  type HomeRange,
+  type HomeStat,
+  type HomeThroughputBucket,
 } from "../../../server/dashboard/home-types";
 import type { Attribution, SessionLabel } from "../../../server/dashboard/queries";
 
@@ -97,11 +98,11 @@ export const ATTENTION_KINDS: Record<
   AttentionItem["kind"],
   { label: string; icon: "alert" | "link" | "hex" | "info"; color: AttentionColor }
 > = {
-  blocked_task: { label: "Blocked Task", icon: "alert", color: "danger" },
-  lease_ending: { label: "Lease ending", icon: "link", color: "honey" },
-  claim_lapsed: { label: "Claim lapsed", icon: "hex", color: "honey" },
-  unclaimed_plan: { label: "Unclaimed Plan", icon: "info", color: "info" },
-  paused_plan: { label: "Paused Plan", icon: "info", color: "muted" },
+  blocked_task: { label: ATTENTION_LABELS.blocked_task, icon: "alert", color: "danger" },
+  lease_ending: { label: ATTENTION_LABELS.lease_ending, icon: "link", color: "honey" },
+  claim_lapsed: { label: ATTENTION_LABELS.claim_lapsed, icon: "hex", color: "honey" },
+  unclaimed_plan: { label: ATTENTION_LABELS.unclaimed_plan, icon: "info", color: "info" },
+  paused_plan: { label: ATTENTION_LABELS.paused_plan, icon: "info", color: "muted" },
 };
 
 /** What the item is about: its Task's title, or its Plan's. */

@@ -427,6 +427,19 @@ describeDb("home dashboard", () => {
       expect(home.attention.total).toBe(1);
     });
 
+    it.each([
+      ["lapsed", ["claim_lapsed", "claim_lapsed"]],
+      ["LEASE ENDING", ["lease_ending"]],
+      ["blocked task", ["blocked_task"]],
+      ["unclaimed", ["unclaimed_plan"]],
+      ["paused plan", ["paused_plan"]],
+    ])("filters attention on the label %s, as the page shows it", async (q, kinds) => {
+      const home = await load(owner.id, { q });
+      expect(home.attention.items.map((item) => item.kind)).toEqual(kinds);
+      expect(home.attention.total).toBe(kinds.length);
+      expect(home.counts.blockedTasks).toBe(kinds.includes("blocked_task") ? 1 : 0);
+    });
+
     it("leaves home-only sections empty on the list views", async () => {
       for (const view of ["plans", "sessions"] as const) {
         const home = await load(owner.id, { view });

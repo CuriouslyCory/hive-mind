@@ -56,7 +56,9 @@ import { loadHomeAnalytics } from "./home-analytics";
 import { type HomeNames, loadHomeNames } from "./home-attribution";
 import { loadRecentDecisions } from "./home-decisions";
 import {
+  ATTENTION_LABELS,
   type AttentionItem,
+  type AttentionKind,
   HOME_ATTENTION_LIMIT,
   HOME_DECISION_LIMIT,
   HOME_EVENT_LIMIT,
@@ -258,7 +260,7 @@ async function readHomeDashboard(
   let analytics = emptyAnalytics(applied.range);
   let decisions: HomeDashboard["decisions"] = [];
   if (isHome) {
-    attention = await readAttention(context, { scopeIds, pattern, projectName });
+    attention = await readAttention(context, { scopeIds, q: applied.q, projectName });
     eventRows = await readEvents(tx, { scopeIds, q: applied.q, projectName });
     const inputProjects = scope.map((item) => ({ id: item.id, name: item.name }));
     analytics = await loadHomeAnalytics(tx, {
@@ -818,12 +820,18 @@ async function readAttention(
   context: Context,
   input: {
     scopeIds: string[];
-    pattern: string | null;
+    /** The filter; an item matches on its subject or on its kind's label. */
+    q: string;
     projectName: (id: string) => string;
   },
 ): Promise<AttentionRead> {
   const { tx, now } = context;
-  const { scopeIds, pattern, projectName } = input;
+  const { scopeIds, q, projectName } = input;
+  const pattern = q === "" ? null : likePattern(q);
+  // Every item of a kind whose label contains the filter matches, as the
+  // design's filter does (it searches the label with the item's fields).
+  const labelMatches = (kind: AttentionKind) =>
+    ATTENTION_LABELS[kind].toLowerCase().includes(q.toLowerCase());
   const limit = HOME_ATTENTION_LIMIT;
   const lapsedSince = new Date(now.getTime() - LAPSED_CLAIM_WINDOW_SECONDS * 1000);
   const base = (projectId: string, number: number) => ({
@@ -831,17 +839,17 @@ async function readAttention(
     projectName: projectName(projectId),
     planKey: planKey(number),
   });
-  const taskMatches = (withReason: boolean) =>
-    pattern === null
+  const taskMatches = (kind: AttentionKind) =>
+    pattern === null || labelMatches(kind)
       ? undefined
       : or(
           ilike(task.title, pattern),
-          withReason ? ilike(task.blockReason, pattern) : undefined,
+          kind === "blocked_task" ? ilike(task.blockReason, pattern) : undefined,
           planKeyLike(pattern),
           projectNameLike(tx, task.projectId, scopeIds, pattern),
         );
-  const planMatchesSubject =
-    pattern === null
+  const planSubjectMatches = (kind: AttentionKind) =>
+    pattern === null || labelMatches(kind)
       ? undefined
       : or(
           ilike(plan.title, pattern),
@@ -868,7 +876,7 @@ async function readAttention(
         gt(task.leaseExpiresAt, now),
         lte(task.leaseExpiresAt, new Date(now.getTime() + LEASE_ENDING_SECONDS * 1000)),
         liveSessionCondition(now),
-        taskMatches(false),
+        taskMatches("lease_ending"),
       ),
     )
     .orderBy(asc(task.leaseExpiresAt), asc(task.id))
@@ -900,7 +908,7 @@ async function readAttention(
         openPlan,
         gt(task.leaseExpiresAt, lapsedSince),
         or(lte(task.leaseExpiresAt, now), not(liveSessionCondition(now))),
-        taskMatches(false),
+        taskMatches("claim_lapsed"),
       ),
     )
     .orderBy(desc(task.leaseExpiresAt), desc(task.id))
@@ -933,7 +941,7 @@ async function readAttention(
         isNull(task.claimedBySessionId),
         ne(task.status, "done"),
         openPlan,
-        taskMatches(false),
+        taskMatches("claim_lapsed"),
       ),
     )
     .orderBy(event.taskId, desc(event.seq))
@@ -969,7 +977,7 @@ async function readAttention(
         inArray(task.projectId, scopeIds),
         eq(task.status, "blocked"),
         openPlan,
-        taskMatches(true),
+        taskMatches("blocked_task"),
       ),
     )
     .orderBy(sql`${task.blockedAt} desc nulls last`, desc(task.id))
@@ -1011,7 +1019,7 @@ async function readAttention(
           ),
         ),
         sql`${idleSince} <= ${new Date(now.getTime() - UNCLAIMED_PLAN_SECONDS * 1000)}`,
-        planMatchesSubject,
+        planSubjectMatches("unclaimed_plan"),
       ),
     )
     .orderBy(sql`${idleSince} desc`, desc(plan.id))
@@ -1025,7 +1033,7 @@ async function readAttention(
         inArray(plan.projectId, scopeIds),
         eq(plan.status, "paused"),
         hasOpenTask,
-        planMatchesSubject,
+        planSubjectMatches("paused_plan"),
       ),
     )
     .orderBy(sql`${plan.pausedAt} desc nulls last`, desc(plan.id))
