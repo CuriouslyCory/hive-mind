@@ -27,6 +27,7 @@ import {
   heartbeatSession,
   type Principal,
   recordCollectionManifest,
+  recordPlanDecision,
   releaseTask,
   removeScope,
   reserveAdr,
@@ -219,6 +220,14 @@ describeDb("the Event catalog", () => {
     });
     expect(
       await appendPlanLog(db, { ...writer, ref: planId, eventId: randomUUID(), message: "Note" }),
+    ).toMatchObject({ status: "created" });
+    expect(
+      await recordPlanDecision(db, {
+        ...writer,
+        ref: planId,
+        eventId: randomUUID(),
+        text: "Retry with jittered backoff.",
+      }),
     ).toMatchObject({ status: "created" });
     expect(
       await addTask(db, { ...writer, ref: planId, taskId: randomUUID(), title: "More" }),

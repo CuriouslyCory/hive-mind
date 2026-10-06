@@ -30,6 +30,7 @@ import {
   listPlanLog,
   listPlans,
   listPlanTasks,
+  recordPlanDecision,
   setPlanStatus,
   updatePlan,
 } from "./plans";
@@ -73,6 +74,7 @@ export const router = api.router({
       update: updatePlan,
       setStatus: setPlanStatus,
       log: { list: listPlanLog, append: appendPlanLog },
+      decisions: { record: recordPlanDecision },
       tasks: { list: listPlanTasks, add: addTask },
     },
     tasks: {

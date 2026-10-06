@@ -120,6 +120,22 @@ export function textSchema(max: number) {
 }
 
 /**
+ * Single-line plain text that is trimmed on parse: surrounding whitespace is
+ * removed first, then the result must be 1 to `max` UTF-16 code units of
+ * well-formed text with no control characters (so no line breaks). The
+ * stored value is always the trimmed one.
+ */
+export function trimmedTextSchema(max: number) {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    .refine((value) => value.isWellFormed(), "Must be valid Unicode text.")
+    .refine((value) => !CONTROL_CHARACTERS.test(value), "Must not contain control characters.");
+}
+
+/**
  * Unsigned 64-bit integers (an Event's `seq` and `writerXid`) as decimal
  * strings. A JavaScript number loses precision above 2^53, so they never
  * travel as numbers.

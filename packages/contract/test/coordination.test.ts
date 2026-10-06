@@ -36,6 +36,7 @@ import {
   MAX_ADR_SYNC_EVENT_CHANGES,
   MAX_COLLECTION_BATCH_PATHS,
   MAX_CONFLICT_INTENT_LENGTH,
+  MAX_DECISION_TEXT_LENGTH,
   MAX_EVENT_BYTES,
   MAX_MANAGEMENT_BODY_BYTES,
   MAX_MARKDOWN_BYTES,
@@ -51,6 +52,7 @@ import {
   PROJECT_KEY_PERMISSIONS,
   planRefSchema,
   projectStatusSchema,
+  recordPlanDecisionInputSchema,
   registerCollectionManifestInputSchema,
   type Scope,
   type Session,
@@ -139,6 +141,7 @@ const RESPONSE_FIXTURES: Record<string, string> = {
   setPlanStatus: "set-plan-status.json",
   listPlanLog: "event-page.json",
   appendPlanLog: "append-plan-log.json",
+  recordPlanDecision: "record-plan-decision.json",
   listPlanTasks: "task-page.json",
   addTask: "add-task.json",
   claimTask: "claim-task.json",
@@ -325,6 +328,26 @@ describe("text limits", () => {
     expect(accepts(startSessionInputSchema, { ...session, intent: "two\nlines" })).toBe(false);
     expect(accepts(startSessionInputSchema, { ...session, agent: "lone \udc00" })).toBe(false);
   });
+
+  it("trims decisions and bounds them at 500 characters on one line", () => {
+    const decision = { id: PROJECT_ID, planRef: "PLAN-1", eventId: UUID };
+    const parse = (text: string) => recordPlanDecisionInputSchema.parse({ ...decision, text }).text;
+    expect(parse("  Retry with backoff.\n")).toBe("Retry with backoff.");
+    const text = "d".repeat(MAX_DECISION_TEXT_LENGTH);
+    expect(parse(` ${text} `)).toBe(text);
+    expect(accepts(recordPlanDecisionInputSchema, { ...decision, text: `${text}d` })).toBe(false);
+    for (const bad of [
+      "",
+      "   ",
+      "two\nlines",
+      "tab\there",
+      "\u001b[2J",
+      "C1\u009b",
+      "lone \ud800",
+    ]) {
+      expect(accepts(recordPlanDecisionInputSchema, { ...decision, text: bad })).toBe(false);
+    }
+  });
 });
 
 describe("coordination inputs", () => {
@@ -338,6 +361,9 @@ describe("coordination inputs", () => {
     );
     expect(
       accepts(appendPlanLogInputSchema, { id: PROJECT_ID, planRef: "PLAN-1", message: "m" }),
+    ).toBe(false);
+    expect(
+      accepts(recordPlanDecisionInputSchema, { id: PROJECT_ID, planRef: "PLAN-1", text: "d" }),
     ).toBe(false);
   });
 
@@ -568,6 +594,7 @@ const MAXIMAL_PAYLOADS: Record<EventType, unknown> = {
   "plan.updated": { title: wideTitle, bodyChanged: true },
   "plan.status_changed": { from: "active", to: "abandoned" },
   "plan.log_appended": { message: markdown },
+  "plan.decision_recorded": { text: WIDE.repeat(MAX_DECISION_TEXT_LENGTH) },
   "task.added": { title: wideTitle, position: Number.MAX_SAFE_INTEGER },
   "task.claimed": { stolenFromSessionId: UUID, leaseExpiresAt: LONG_TIME },
   "task.released": { reason: "session_abandoned" },

@@ -59,6 +59,11 @@ export interface EventPayloads {
   "plan.status_changed": { from: PlanStatus; to: Exclude<PlanStatus, "draft"> };
   /** A Plan log entry: bounded markdown. Its Event UUID is the client's entry ID. */
   "plan.log_appended": { message: string };
+  /**
+   * A decision recorded against the Plan: one trimmed line of plain text, at
+   * most 500 characters. Its Event UUID is the client's decision ID.
+   */
+  "plan.decision_recorded": { text: string };
   "task.added": { title: string; position: number };
   /**
    * The new holder is the Event's session_id. A `--steal` takeover of a live
@@ -164,6 +169,7 @@ export const EVENT_PAYLOAD_VERSIONS: { readonly [T in EventType]: number } = {
   "plan.updated": 1,
   "plan.status_changed": 1,
   "plan.log_appended": 1,
+  "plan.decision_recorded": 1,
   "task.added": 1,
   "task.claimed": 1,
   "task.released": 1,

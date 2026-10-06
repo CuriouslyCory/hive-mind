@@ -20,6 +20,8 @@ import {
   listPlanLogInputSchema,
   listProjectEventsInputSchema,
   listSessionEventsInputSchema,
+  recordPlanDecisionInputSchema,
+  recordPlanDecisionOutputSchema,
 } from "./event.ts";
 import { eventStreamFrameSchema, streamProjectEventsInputSchema } from "./event-stream.ts";
 import {
@@ -310,6 +312,20 @@ export const apiContract = {
           })
           .input(appendPlanLogInputSchema)
           .output(appendPlanLogOutputSchema),
+      },
+
+      decisions: {
+        record: base
+          .route({
+            method: "POST",
+            path: "/projects/{id}/plans/{planRef}/decisions",
+            successStatus: 200,
+            operationId: "recordPlanDecision",
+            tags: ["Plans"],
+            summary: "Record a one-line decision against a Plan",
+          })
+          .input(recordPlanDecisionInputSchema)
+          .output(recordPlanDecisionOutputSchema),
       },
 
       tasks: {

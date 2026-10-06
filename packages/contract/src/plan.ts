@@ -8,6 +8,7 @@ import {
   paginationInputShape,
   textSchema,
   timestampSchema,
+  trimmedTextSchema,
 } from "./common.ts";
 
 export const MAX_PLAN_TITLE_LENGTH = 120;
@@ -51,6 +52,14 @@ export type PlanRef = z.infer<typeof planRefSchema>;
 export const planTitleSchema = textSchema(MAX_PLAN_TITLE_LENGTH);
 
 export const planBodySchema = markdownSchema();
+
+export const MAX_DECISION_TEXT_LENGTH = 500;
+
+/**
+ * A decision recorded against a Plan, such as "Retry with jittered backoff,
+ * capped at 30 seconds.": one line of plain text, never markdown, trimmed.
+ */
+export const decisionTextSchema = trimmedTextSchema(MAX_DECISION_TEXT_LENGTH);
 
 /** Task counts of a Plan by status, computed when the Plan is read. */
 export const planProgressSchema = z.strictObject({
