@@ -207,6 +207,28 @@ export async function coordinationApi(users: TestHelpers, userId: string) {
 
 export type CoordinationApi = Awaited<ReturnType<typeof coordinationApi>>;
 
+/** Long enough for a 1-second poll, the refresh and a reconnect backoff or two. */
+export const LIVE = { timeout: 20_000 };
+
+export async function expectLive(page: Page) {
+  await expect(page.getByTestId("live-status")).toHaveAttribute("data-state", "live", LIVE);
+}
+
+/** Opens `path` and marks the document, so a spec can tell it was never reloaded. */
+export async function openLive(page: Page, path: string) {
+  await page.goto(path);
+  await expectLive(page);
+  await page.evaluate(() => {
+    (window as unknown as { __notReloaded?: boolean }).__notReloaded = true;
+  });
+}
+
+export async function expectNotReloaded(page: Page) {
+  expect(
+    await page.evaluate(() => (window as unknown as { __notReloaded?: boolean }).__notReloaded),
+  ).toBe(true);
+}
+
 /**
  * Moves focus with Tab until `target` has it, then follows it with Enter:
  * keyboard-only navigation. Fails if `target` is not reached within `limit`
