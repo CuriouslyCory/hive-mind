@@ -7,7 +7,7 @@ import { formatAdrNumber } from "@hivemind/contract";
 import { expect, type Page, test } from "@playwright/test";
 import type { TestHelpers } from "better-auth/plugins";
 import pg from "pg";
-import { type CliCall, cliRunner, describe, okData } from "./cli-runner";
+import { type CliCall, cliRunner, describeRun, okData } from "./cli-runner";
 import { E2E_BASE_URL, e2eDatabaseUrl } from "./e2e-env";
 import { type FieldAddingProxy, startFieldAddingProxy } from "./field-adding-proxy";
 import {
@@ -350,7 +350,7 @@ test("two worktrees reserve, supersede, merge and sync ADRs while the dashboard 
       ),
     );
     const superseded = await run(["adr", "supersede", "3", "--by", String(numberA)], a);
-    expect(superseded.status, describe(superseded)).toBe(0);
+    expect(superseded.status, describeRun(superseded)).toBe(0);
     expect(superseded.stdout).toContain(
       `ADR-0003 is now superseded by ${nameA}. Commit both files, merge them, then run 'hivemind adr sync'.`,
     );

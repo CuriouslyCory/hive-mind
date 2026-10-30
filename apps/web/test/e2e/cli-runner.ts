@@ -67,27 +67,27 @@ export interface Envelope<T = Record<string, unknown>> {
 /** The single JSON envelope on stdout. */
 export function envelope<T = Record<string, unknown>>(result: CliResult): Envelope<T> {
   const lines = result.stdout.trimEnd().split("\n");
-  expect(lines, describe(result)).toHaveLength(1);
+  expect(lines, describeRun(result)).toHaveLength(1);
   return JSON.parse(lines[0] as string) as Envelope<T>;
 }
 
 /** The successful envelope's data; fails with the CLI's output otherwise. */
 export function okData<T = Record<string, unknown>>(result: CliResult): T {
-  expect(result.status, describe(result)).toBe(0);
+  expect(result.status, describeRun(result)).toBe(0);
   const parsed = envelope<T>(result);
-  expect(parsed.ok, describe(result)).toBe(true);
+  expect(parsed.ok, describeRun(result)).toBe(true);
   return parsed.data;
 }
 
 /** The failed envelope's error, after checking the exit code. */
 export function failure(result: CliResult, exitCode: number): { code: string; message: string } {
-  expect(result.status, describe(result)).toBe(exitCode);
+  expect(result.status, describeRun(result)).toBe(exitCode);
   const parsed = envelope(result);
-  expect(parsed.ok, describe(result)).toBe(false);
+  expect(parsed.ok, describeRun(result)).toBe(false);
   return parsed.error as { code: string; message: string };
 }
 
-export function describe(result: CliResult): string {
+export function describeRun(result: CliResult): string {
   return `hivemind ${result.argv.join(" ")}\nexit: ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`;
 }
 

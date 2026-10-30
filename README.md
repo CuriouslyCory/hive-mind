@@ -31,7 +31,7 @@ Next come M5 (search), M6 (agent skills and hooks) and M7 (hardening). The full 
 
 ## Local development
 
-You need Node 24 and pnpm 12. `package.json` pins pnpm 12.8.1 in `packageManager` and `devEngines`; with Corepack (`corepack enable`) that version is used automatically. You also need Docker or Podman for Postgres.
+You need Node 24 and pnpm 12. `package.json` pins pnpm 12.16.1 in `packageManager` and `devEngines`; with Corepack (`corepack enable`) that version is used automatically. You also need Docker or Podman for Postgres.
 
 1. Install dependencies:
 
@@ -79,7 +79,7 @@ Under `pnpm dev`, http://localhost:3000/tracker shows the dev tracker: the chang
 
 ## CLI development
 
-`pnpm build` also compiles the CLI for your own platform to `apps/cli/dist/hivemind`. Bun 1.4.2 comes from `apps/cli`'s devDependencies, so you don't need Bun installed. Don't run `node_modules/.bin/bun`: its postinstall is disabled and it only prints an error. To rebuild just the CLI:
+`pnpm build` also compiles the CLI for your own platform to `apps/cli/dist/hivemind`. Bun 1.4.4 comes from `apps/cli`'s devDependencies, so you don't need Bun installed. Don't run `node_modules/.bin/bun`: its postinstall is disabled and it only prints an error. To rebuild just the CLI:
 
 ```bash
 pnpm --filter @hivemind/cli build

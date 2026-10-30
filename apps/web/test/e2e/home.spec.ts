@@ -171,6 +171,10 @@ test("a decision recorded through the API reaches an open home page on its next 
   const decisions = page.getByTestId("home-decisions");
   await expect(decisions).toContainText("No decisions recorded here yet.");
   await expect(page.getByTestId("home-freshness")).toHaveAttribute("data-state", "live");
+  // The server render is already "live", but the refresh timer is scheduled
+  // only when Freshness mounts, which is also when the data's age first
+  // shows. Moving the clock before that skips a timer that does not exist yet.
+  await expect(page.getByTestId("home-freshness").locator("time")).toBeVisible();
 
   const text = `Keep the hand-written lexer ${randomUUID().slice(0, 6)}`;
   await api.recordDecision(alpha.id, parserPlan.key, text, parserSession);

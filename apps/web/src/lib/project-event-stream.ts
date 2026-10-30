@@ -55,7 +55,7 @@ const MESSAGE_DELIMITER_GLOBAL = /(?:\r\n|\r(?!\n)|\n){2}/g;
 /**
  * Splits an SSE byte stream into messages and parses each with oRPC's
  * `decodeEventMessage`, the parser its own client uses. The framing is
- * oRPC's `EventDecoder` algorithm (@orpc/standard-server 1.15.4), with a
+ * oRPC's `EventDecoder` algorithm (@orpc/standard-server 1.16.1), with a
  * byte bound: the text held for an incomplete message is checked before it
  * is buffered, and every complete message is checked before it is parsed,
  * so a stream without message boundaries cannot grow memory. Bytes are

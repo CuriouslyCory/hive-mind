@@ -10,7 +10,7 @@
 | macOS | x64 (Intel), arm64 (Apple silicon) | macOS 13 |
 
 - Windows and musl-based Linux (Alpine) are not supported. The installer and the npm package refuse them.
-- The minimums come from the Bun 1.4.2 runtime the binaries are built with. Bun recommends Linux kernel 5.6 or newer and runs on kernels back to 3.10.
+- The minimums come from the Bun 1.4.4 runtime the binaries are built with. Bun recommends Linux kernel 5.6 or newer and runs on kernels back to 3.10.
 - CI runs the binaries on Ubuntu 24.04 and macOS 15 runners. Older systems within the minimums are not tested.
 - On Linux x64 without AVX2 the binary dies with SIGILL. The installer checks `/proc/cpuinfo` first, and the npm launcher prints a hint when this happens. There is no baseline (non-AVX2) build.
 

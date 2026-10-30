@@ -6,21 +6,21 @@ packages:
 catalog:
   # Every @orpc/* package must use this same exact version: they depend on each
   # other at exact versions, so a range could install two copies.
-  "@orpc/client": 1.15.4
-  "@orpc/contract": 1.15.4
-  "@orpc/openapi": 1.15.4
-  "@orpc/openapi-client": 1.15.4
-  "@orpc/server": 1.15.4
-  "@orpc/standard-server": 1.15.4
-  "@orpc/zod": 1.15.4
-  "@types/node": ^24.19.0
+  "@orpc/client": 1.16.1
+  "@orpc/contract": 1.16.1
+  "@orpc/openapi": 1.16.1
+  "@orpc/openapi-client": 1.16.1
+  "@orpc/server": 1.16.1
+  "@orpc/standard-server": 1.16.1
+  "@orpc/zod": 1.16.1
+  "@types/node": ^24.19.2
   "@types/pg": ^8.23.1
-  drizzle-orm: ~0.45.3
-  pg: ^8.23.0
+  drizzle-orm: ~0.45.4
+  pg: ^8.23.1
   typescript: ~6.0.3
-  vite: ^8.3.1
-  vitest: ^5.0.2
-  zod: ^4.6.5
+  vite: ^8.3.5
+  vitest: ^5.0.5
+  zod: ^4.6.7
 
 # Every dependency with a build script must be reviewed here: true runs it,
 # false skips it. strictDepBuilds (default true) fails the install on any

@@ -161,7 +161,7 @@ export async function decideDeviceRequest(
 
 /**
  * The plugin's error for a device request, by its `error` code and, for
- * `invalid_request`, its description (better-auth 1.7.6 messages; the tests
+ * `invalid_request`, its description (better-auth 1.7.14 messages; the tests
  * pin them). `undefined` for anything else, which the caller rethrows.
  */
 function deviceFailure(error: unknown): DecisionFailure | undefined {

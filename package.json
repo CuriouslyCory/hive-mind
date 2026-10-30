@@ -2,7 +2,7 @@
   "name": "hive-mind",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.8.1",
+  "packageManager": "pnpm@12.16.1",
   "engines": {
     "node": ">=24",
     "pnpm": ">=12"
@@ -15,7 +15,7 @@
     },
     "packageManager": {
       "name": "pnpm",
-      "version": "12.8.1",
+      "version": "12.16.1",
       "onFail": "download"
     }
   },
@@ -36,10 +36,10 @@
     "version-packages": "changeset version"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.6.4",
     "@changesets/cli": "~3.0.3",
     "@types/node": "catalog:",
-    "turbo": "~2.11.5",
+    "turbo": "~2.11.10",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

@@ -4,19 +4,21 @@ import type { DBAdapter, Where } from "better-auth/types";
 
 /**
  * Makes the device plugin's two state changes on a pending device code atomic
- * on Postgres. Both are races in better-auth 1.7.6 with the Drizzle adapter:
+ * on Postgres with the Drizzle adapter:
  *
  * - Binding. Opening a code (`GET /device`, `deviceVerify`) binds it to the
- *   viewer with `incrementOne`, guarded by "still pending and unbound". The
- *   Drizzle adapter runs that as `UPDATE ... WHERE id IN (SELECT id ... WHERE
- *   <guard> LIMIT 1)`. Postgres evaluates the subquery once, on its snapshot,
- *   and does not re-evaluate it after waiting for a concurrent writer, so two
- *   Users opening one code at once both "bind" it and the second overwrites
- *   the first.
- * - Decision. approve and deny check that the code is pending and bound to
- *   the signed-in User, then `update` it by id alone, so a concurrent Approve
- *   and Deny both succeed and the last write wins: the CLI could be signed in
- *   after the user saw "Denied".
+ *   viewer with `incrementOne`, guarded by "still pending and unbound". Up to
+ *   `@better-auth/drizzle-adapter` 1.7.6 that ran as `UPDATE ... WHERE id IN
+ *   (SELECT id ... WHERE <guard> LIMIT 1)`. Postgres evaluates the subquery
+ *   once, on its snapshot, and does not re-evaluate it after waiting for a
+ *   concurrent writer, so two Users opening one code at once both "bound" it
+ *   and the second overwrote the first. The adapter's 1.7.7 also puts the
+ *   guard in the outer WHERE, which closes that race; this wrapper still
+ *   takes the write.
+ * - Decision. In better-auth 1.7.14, approve and deny check that the code is
+ *   pending and bound to the signed-in User, then `update` it by id alone, so
+ *   a concurrent Approve and Deny both succeed and the last write wins: the
+ *   CLI could be signed in after the user saw "Denied".
  *
  * This wrapper runs both as one `UPDATE ... WHERE <id and guard>` through
  * `updateMany`. Postgres re-checks a plain WHERE clause against the row it
@@ -24,10 +26,10 @@ import type { DBAdapter, Where } from "better-auth/types";
  * writes changes the row. The loser of a binding race between two Users gets
  * `null`, as the plugin expects from an unmatched guard, and is not shown the
  * request. If the winner was the same User (two tabs opening one code), the
- * code is bound to them, so the loser gets the row and is shown the request,
- * as without the wrapper. The loser of a decision race gets the plugin's own
- * "already processed" error, the same answer as a decision made after the
- * first.
+ * code is bound to them, so the loser gets the row and is shown the request
+ * (the 1.7.14 adapter alone would give it `null`). The loser of a decision
+ * race gets the plugin's own "already processed" error, the same answer as a
+ * decision made after the first.
  *
  * Redemption needs no wrapper: the plugin claims an approved code with
  * `consumeOne`, a `DELETE ... RETURNING`, and a row can be deleted once, so

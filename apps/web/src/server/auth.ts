@@ -106,7 +106,7 @@ export const PROJECT_KEY_MIN_EXPIRES_IN_DAYS = 1;
 export const PROJECT_KEY_MAX_EXPIRES_IN_DAYS = 365;
 
 /**
- * The api-key plugin's HTTP routes in better-auth 1.7.6. They answer 404:
+ * The api-key plugin's HTTP routes in better-auth 1.7.14. They answer 404:
  * they would let a caller create, change or list organization keys that no
  * Project binding restricts. Server code calls the matching `auth.api`
  * methods after its own authorization. The auth route handler also rejects

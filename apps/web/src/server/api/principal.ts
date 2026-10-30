@@ -180,7 +180,7 @@ export async function readLiveProjectKey(
 /**
  * The code `verifyApiKey` answers both for a key it did not find and for any
  * exception that is not a better-auth `APIError`, such as a database error,
- * which it catches and does not rethrow (better-auth 1.7.6). Its other codes
+ * which it catches and does not rethrow (better-auth 1.7.14). Its other codes
  * (disabled, expired, usage or rate limit exceeded) are verdicts on a key it
  * read, so they are always a 401.
  */
