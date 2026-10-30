@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node src/migrate.ts"
+    "db:migrate": "node src/migrate.ts",
+    "db:clear-preview-credentials": "node src/preview-credentials.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

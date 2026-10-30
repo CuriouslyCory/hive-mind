@@ -5,7 +5,7 @@ M2 ([#12](https://github.com/CuriouslyCory/hive-mind/issues/12)) is done only wh
 ## Prerequisites
 
 - [ ] The M2 PR is merged and deployed to production, and the checks in [setup.md](setup.md) H6 and H8 pass, including `CRON_SECRET`.
-- [ ] [#8](https://github.com/CuriouslyCory/hive-mind/issues/8) is resolved, or the owner has accepted its exposure for this data. Every preview database branch is still a copy of production, so the Plans, Tasks, intents, summaries, hostnames and branch names recorded here are copied into each preview deployment, which runs unmerged code.
+- [ ] [#8](https://github.com/CuriouslyCory/hive-mind/issues/8)'s fix is deployed: preview builds clear the copied credentials (setup.md H2). Every preview database branch is still a copy of production's other data, so the Plans, Tasks, intents, summaries, hostnames and branch names recorded here are copied into each preview deployment, which runs unmerged code. #8 accepts that while the data is the owner's.
 - [ ] The owner has chosen the hive-mind organization and Project this repository binds to.
 
 Until all three hold, the runbook is ready but the dogfooding item in #12 stays unchecked.
