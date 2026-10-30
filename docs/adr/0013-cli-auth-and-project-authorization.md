@@ -34,7 +34,7 @@ date: 2026-10-01
 
 ## Consequences
 
-- The race guard depends on how better-auth 1.7.6 issues these writes. If a later version runs them inside `adapter.transaction`, the wrapper no longer applies and the concurrency tests in `apps/web/test/device-auth.test.ts` fail; upgrades must keep those tests green. The race should be reported upstream.
+- The race guard depends on how better-auth 1.7.6 issues these writes. If a later version runs them inside `adapter.transaction`, the wrapper no longer applies and the concurrency tests in `apps/web/test/device-auth.test.ts` fail; upgrades must keep those tests green. The race should be reported upstream. Amended 2026-10-29: from `@better-auth/drizzle-adapter` 1.7.7, `incrementOne` also applies its guard in the outer WHERE, which closes the binding race. In 1.7.14, approve and deny still update by id alone and nothing runs inside `adapter.transaction`, so the decision race remains and the wrapper still applies to both writes. The api-key plugin's routes are the same five, so `disabledPaths` is unchanged.
 - A better-auth upgrade must re-check `disabledPaths` against the plugin's routes; the catch-all rejection covers new `/api-key*` routes in the meantime.
 - A CLI login carries the User's full access in all their organizations; there are no scoped user tokens. Headless agents and CI should use Project keys.
 - A CLI login uses better-auth's default login session lifetime: 7 days, extended on use. `/api/v1` does not disable the refresh, so any request at least a day after the last extension moves the expiry to 7 days after that request, and a login used at least every 6 days never expires. A fixed lifetime would need `disableRefresh` in `resolveLoginSession`.

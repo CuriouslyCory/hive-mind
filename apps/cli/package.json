@@ -9,8 +9,8 @@
     "test": "vitest run"
   },
   "optionalDependencies": {
-    "@napi-rs/keyring-darwin-arm64": "2.1.0",
-    "@napi-rs/keyring-darwin-x64": "2.1.0"
+    "@napi-rs/keyring-darwin-arm64": "2.1.2",
+    "@napi-rs/keyring-darwin-x64": "2.1.2"
   },
   "devDependencies": {
     "@hivemind/config": "workspace:*",
@@ -19,7 +19,7 @@
     "@orpc/contract": "catalog:",
     "@orpc/openapi-client": "catalog:",
     "@types/node": "catalog:",
-    "bun": "1.4.2",
+    "bun": "1.4.4",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",

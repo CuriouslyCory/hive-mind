@@ -11,7 +11,7 @@
 //
 // Why the addon is embedded as a plain file and copied out here, instead of
 // letting Bun load it: a compiled binary cannot dlopen from inside itself, so
-// for a require()d `.node` Bun 1.4.2 writes the addon to
+// for a require()d `.node` Bun 1.4.4 writes the addon to
 // `<dir>/.bun-<euid>-<wyhash of contents>.node` and dlopens that. <dir> is
 // BUN_TMPDIR, else TMPDIR, TMP or TEMP, else /private/tmp on macOS, read once
 // from the environment the process started with (assigning process.env inside

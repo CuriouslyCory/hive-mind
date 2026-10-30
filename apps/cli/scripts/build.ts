@@ -268,7 +268,7 @@ export function build(options: BuildOptions = {}): string {
  * Replaces the binary's code signature with a fresh ad hoc one and verifies it.
  *
  * `bun build --compile` writes the bundle into the base Bun executable, which
- * Oven signs with its Developer ID. Bun 1.4.2 re-signs the result ad hoc only
+ * Oven signs with its Developer ID. Bun 1.4.4 re-signs the result ad hoc only
  * for arm64 (src/exe_format/macho.rs, `build_and_sign`); an x86_64 binary keeps
  * Oven's now-invalid signature, and `codesign --verify` rejects it ("code or
  * signature have been modified"). Keychain access lists bind to the signature,

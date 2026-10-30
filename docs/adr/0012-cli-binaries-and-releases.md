@@ -26,7 +26,7 @@ date: 2026-10-01
 
 - Bun enters the toolchain only to build the CLI; the rest of the repo stays on Node 24 and pnpm (ADR-0002). CLI logic tests run under Vitest on Node, and runtime behavior is tested by running the compiled binary from Vitest.
 - The auth base path `/api/auth` and cookie prefix `hivemind` (ADR-0006) and the `/api/v1` contract (ADR-0009) are compatibility promises from the first release.
-- A binary is 63–81 MB. A rebuild of the same commit produces byte-identical archives, so a rerun of the release workflow compares existing assets and npm versions instead of replacing them.
+- A binary is about 90–110 MB (the Linux x64 one is 109 MB); with Bun 1.4.2 it was 63–81 MB. Amended 2026-10-29: Bun is now 1.4.4, and the ad hoc re-signing, the `.node` extraction and the platform minimums described here are unchanged in its sources. A rebuild of the same commit produces byte-identical archives, so a rerun of the release workflow compares existing assets and npm versions instead of replacing them.
 - `SHA256SUMS` comes from the same release as the archives, so it detects corrupted or partial downloads, not a compromised release or GitHub account.
 - Without Developer ID signing, the Keychain's access list is bound to each build's ad hoc signature, so an upgraded binary may ask for Keychain access again in a terminal. Revisit signing if an install path quarantines the binary.
 - Every release publishes five npm packages (the launcher and four per-platform packages), each needing its own trusted publisher. npm's integrity check covers the binary, and the npm path works while the GitHub repository is private.

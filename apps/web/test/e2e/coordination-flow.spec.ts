@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import type { TestHelpers } from "better-auth/plugins";
 import pg from "pg";
-import { type CliCall, cliRunner, describe, failure, git, okData } from "./cli-runner";
+import { type CliCall, cliRunner, describeRun, failure, git, okData } from "./cli-runner";
 import { E2E_BASE_URL, e2eDatabaseUrl } from "./e2e-env";
 import { type FieldAddingProxy, startFieldAddingProxy } from "./field-adding-proxy";
 import { signedInPage, testUsers } from "./support";
@@ -175,7 +175,7 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
 
   // --- Distinct Sessions, one per worktree. Human mode prints only the UUID.
   const startedA = await as(a, ["session", "start", "--agent", a.name, "--intent", a.intent]);
-  expect(startedA.status, describe(startedA)).toBe(0);
+  expect(startedA.status, describeRun(startedA)).toBe(0);
   a.sessionId = startedA.stdout.trim();
   expect(a.sessionId).toMatch(UUID);
   expect(startedA.stderr).toContain(`export HIVEMIND_SESSION=${a.sessionId}`);
@@ -206,10 +206,10 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
     "--status",
     "active",
   ]);
-  expect(planCreated.status, describe(planCreated)).toBe(0);
+  expect(planCreated.status, describeRun(planCreated)).toBe(0);
   expect(planCreated.stdout.trim()).toBe("PLAN-1");
   const lexerAdded = await as(a, ["task", "add", "PLAN-1", "--title", "Rewrite the lexer"]);
-  expect(lexerAdded.status, describe(lexerAdded)).toBe(0);
+  expect(lexerAdded.status, describeRun(lexerAdded)).toBe(0);
   const lexerTask = lexerAdded.stdout.trim();
   expect(lexerTask).toMatch(UUID);
   const grammarTask = okData<{ task: TaskDto }>(
@@ -294,7 +294,7 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
     ]),
   );
   const checkBHuman = await as(b, ["scope", "check"]);
-  expect(checkBHuman.status, describe(checkBHuman)).toBe(0);
+  expect(checkBHuman.status, describeRun(checkBHuman)).toBe(0);
   expect(checkBHuman.stdout).toContain(a.sessionId);
   expect(checkBHuman.stdout).toContain("src/parser/lexer.ts");
   // ... and so does the Project status, from either side.
@@ -316,9 +316,10 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
     as(a, ["task", "claim", lexerTask, "--json"]),
     as(b, ["task", "claim", lexerTask, "--json"]),
   ]);
-  expect([claimA.status, claimB.status].sort(), `${describe(claimA)}\n${describe(claimB)}`).toEqual(
-    [0, 2],
-  );
+  expect(
+    [claimA.status, claimB.status].sort(),
+    `${describeRun(claimA)}\n${describeRun(claimB)}`,
+  ).toEqual([0, 2]);
   const [holder, other] = claimA.status === 0 ? [a, b] : [b, a];
   const [won, lost] = claimA.status === 0 ? [claimA, claimB] : [claimB, claimA];
   expect(okData(won)).toMatchObject({
@@ -331,7 +332,7 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
   expect(conflict.message).toContain(holder.sessionId);
   expect(conflict.message).toContain(holder.intent);
   const lostHuman = await as(other, ["task", "claim", lexerTask]);
-  expect(lostHuman.status, describe(lostHuman)).toBe(2);
+  expect(lostHuman.status, describeRun(lostHuman)).toBe(2);
   expect(lostHuman.stdout).toBe("");
   expect(lostHuman.stderr).toContain(holder.sessionId);
   expect(lostHuman.stderr).toContain(holder.intent);
@@ -470,7 +471,7 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
     ]),
   );
   const statusHuman = await run(["status"], noSession);
-  expect(statusHuman.status, describe(statusHuman)).toBe(0);
+  expect(statusHuman.status, describeRun(statusHuman)).toBe(0);
   expect(statusHuman.stdout).toContain("PLAN-1");
 
   const planLog = okData<{ items: EventDto[] }>(
@@ -499,7 +500,7 @@ test("two worktrees coordinate a Plan through claims, Scopes, heartbeats, a stea
     ]),
   );
   const planLogHuman = await run(["plan", "log", "PLAN-1"], noSession);
-  expect(planLogHuman.status, describe(planLogHuman)).toBe(0);
+  expect(planLogHuman.status, describeRun(planLogHuman)).toBe(0);
   expect(planLogHuman.stdout).toContain(progress);
   expect(planLogHuman.stdout).toContain(takeover);
 
