@@ -1,0 +1,90 @@
+name: Clean up Neon preview database branch
+
+# Neon's Vercel integration creates a `preview/<git-branch>` database branch for
+# each git branch with a preview deployment, and deletes it only the next time
+# a preview is created after its git branch is gone. This deletes it as soon as
+# a same-repository PR closes (merged or not) or its git branch is deleted.
+# Setup and the one-time cleanup of older branches: docs/setup.md H2.
+
+on:
+  # Runs this workflow as it is on main, including for PRs opened before it
+  # existed. It never checks out or runs code from the PR.
+  pull_request_target:
+    types: [closed]
+  delete:
+
+permissions: {}
+
+concurrency:
+  group: cleanup-neon-${{ github.event.pull_request.head.ref || github.event.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'delete' && github.event.ref_type == 'branch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete the matching preview database branch if it exists
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        with:
+          # This repository's Actions logs are public, so nothing below logs a
+          # branch name, a branch id or a response body.
+          script: |
+            const gitBranch = context.payload.pull_request?.head.ref ?? context.payload.ref;
+            if (!gitBranch || gitBranch === context.payload.repository.default_branch) {
+              throw new Error('Refusing to clean up an empty or default git branch.');
+            }
+
+            const { NEON_PROJECT_ID: projectId, NEON_API_KEY: apiKey } = process.env;
+            if (!projectId || !apiKey) {
+              throw new Error('Set NEON_PROJECT_ID as a repository variable and NEON_API_KEY as a repository secret.');
+            }
+
+            const branchName = `preview/${gitBranch}`;
+            const branchesUrl = `https://console.neon.tech/api/v2/projects/${encodeURIComponent(projectId)}/branches`;
+            const headers = { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' };
+            const request = (url, method = 'GET') => fetch(url, {
+              method,
+              headers,
+              signal: AbortSignal.timeout(30_000),
+            });
+
+            // Search also returns partial matches; only the exact name is deleted.
+            let branch;
+            let cursor;
+            do {
+              const url = new URL(branchesUrl);
+              url.searchParams.set('search', branchName);
+              url.searchParams.set('limit', '100');
+              if (cursor) url.searchParams.set('cursor', cursor);
+              const response = await request(url);
+              if (!response.ok) {
+                throw new Error(`Neon branch lookup failed (HTTP ${response.status}).`);
+              }
+              const page = await response.json();
+              branch = page.branches.find(candidate => candidate.name === branchName);
+              cursor = page.pagination?.next;
+            } while (!branch && cursor);
+
+            if (!branch) {
+              core.info('No matching Neon preview database branch; nothing to delete.');
+              return;
+            }
+            if (branch.default || branch.primary || branch.protected) {
+              throw new Error('Refusing to delete a default, primary or protected Neon branch.');
+            }
+
+            const response = await request(`${branchesUrl}/${encodeURIComponent(branch.id)}`, 'DELETE');
+            // A merge fires both triggers, and Neon's integration also deletes
+            // stale branches, so another run may have deleted it after the lookup.
+            if (!response.ok && response.status !== 404) {
+              throw new Error(`Neon branch deletion failed (HTTP ${response.status}).`);
+            }
+            core.info('Neon preview database branch deleted, or already gone.');

@@ -13,7 +13,7 @@ Values in this guide are the current ones for the `hive-mind-web` Vercel project
   - **Framework Preset:** Next.js.
   - **Node.js Version:** 24.x.
   - **Build Command and Install Command:** leave them at the defaults. `apps/web/vercel.json` sets the build command: it runs the migrations and then builds the app (see H2). The install command stays `pnpm install`.
-- [ ] Set preview deployment retention to about 30 days. Each preview gets its own Neon database branch (H2), and Vercel's default retention keeps previews much longer, which can use up Neon's branch limit.
+- [ ] Set preview deployment retention to about 30 days. A preview deployment kept after its Neon database branch is deleted (H2) can no longer reach a database.
 
 Notes:
 
@@ -27,6 +27,9 @@ Notes:
   - Preview branching on. Preview deployments need it.
   - **Neon Auth off.** hive-mind uses its own better-auth setup (ADR-0006).
 - [ ] Check with `vercel env ls` that `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED` (direct) exist for Production and Development. These are the only database variables the app reads.
+- [ ] For `.github/workflows/cleanup-neon.yml`, in **GitHub → Settings → Secrets and variables → Actions**, set:
+  - the repository variable `NEON_PROJECT_ID` to the Neon project's id (`hidden-sky-40379678`, from **Neon → Project settings**);
+  - the repository secret `NEON_API_KEY` to a Neon API key scoped to that project.
 
 How the database branches map to environments:
 
@@ -37,9 +40,11 @@ How the database branches map to environments:
 | Development | its own database branch (a different Neon endpoint from Production) | by hand, see below |
 
 - **Preview variables.** For each git branch with a preview deployment, the integration creates `preview/<git-branch>` and adds `DATABASE_URL` and `DATABASE_URL_UNPOOLED` as Preview variables scoped to that git branch. `vercel env ls` shows them as `Preview (<git-branch>)`.
-- **Migrations run in every Vercel build.** The build command in `apps/web/vercel.json` is `cd ../.. && pnpm --filter @hivemind/db db:migrate && pnpm exec turbo run build --filter=@hivemind/web`, so a preview migrates its own database branch and a production deployment migrates production. The build log shows `migrations applied`.
+- **Migrations run in every Vercel build.** The build command in `apps/web/vercel.json` is `cd ../.. && pnpm --filter @hivemind/db db:migrate && pnpm --filter @hivemind/db db:clear-preview-credentials && pnpm exec turbo run build --filter=@hivemind/web`, so a preview migrates its own database branch and a production deployment migrates production. The build log shows `migrations applied`.
+- **Preview builds then clear the copied credentials** (`packages/db/src/preview-credentials.ts`). With `VERCEL_ENV=preview`, it deletes every row of `session` (login sessions), `verification`, `device_code` and `apikey` (with their `project_api_key` bindings), and sets the OAuth tokens in `account` to null, in one transaction. The build log shows `preview credentials cleared`; any other build shows `preview credentials left alone: not a preview build` and connects to nothing. It runs on every preview build, so each push signs you out of that git branch's preview, and Project keys created on a preview stop working.
+- **Preview database branches are deleted when they are no longer needed.** `.github/workflows/cleanup-neon.yml` deletes `preview/<git-branch>` when a PR from this repository closes, merged or not, or when its git branch is deleted, even without a PR. Without it, the integration deletes a preview database branch only the next time a preview is created after its git branch is gone. The workflow runs from `main` and never checks out PR code. It deletes only the branch with that exact name, refuses the default, primary and protected branches, and succeeds if the branch is already gone. Missing configuration or a Neon API error fails the run, so check **Actions** if previews accumulate in Neon. It acts only on events after it was merged; delete older preview database branches in the Neon console.
 - **The Development database branch is never built,** so migrate it yourself: `vercel env pull apps/web/.env.local`, then `node --env-file=apps/web/.env.local packages/db/src/migrate.ts`.
-- **Preview data exposure, accepted for M0.** A preview database branch is "a copy-on-write fork of your production data" ([Neon FAQ](https://neon.com/faqs/postgres-tools-preview-deployments)); Neon's Vercel integration guides document no setting to fork from a different parent. So every preview deployment, which runs unmerged PR code, can read a copy of production's users, login sessions and OAuth tokens. A copied login-session token that hasn't expired is still valid in production; production accepts it only in a cookie signed with production's `BETTER_AUTH_SECRET`, which previews don't have, and the OAuth tokens are encrypted with that secret. If that secret leaks, the copied tokens can be used against production. #2's open question 4 accepts this for M0, while the only data is the owner's. Follow-up for M7: see issue #8. Details: ADR-0004.
+- **Preview data exposure.** A preview database branch is "a copy-on-write fork of your production data" ([Neon FAQ](https://neon.com/faqs/postgres-tools-preview-deployments)), and the integration always forks it from the default database branch, which is production. Clearing credentials (above) means a copied row can no longer be used against production, but the rest is still copied: users and their email addresses, organizations, Projects, Plans, Tasks, Sessions, Scopes, Events and ADRs. Every preview deployment, which runs unmerged PR code, can read them, and its build can read the credentials before they are cleared, because the build runs the PR's code. Issue #8 accepts this while the data is the owner's. Details: ADR-0004.
 
 ## H3. Production domain and GitHub OAuth apps
 
@@ -128,10 +133,11 @@ vercel env add GITHUB_CLIENT_SECRET development
 
 **Preview** (the next PR's preview deployment):
 
-- [ ] The preview build log shows `using pnpm v12.16.1` and `migrations applied`.
+- [ ] The preview build log shows `using pnpm v12.16.1`, `migrations applied` and `preview credentials cleared`, and the production build log shows `preview credentials left alone: not a preview build`.
 - [ ] Open the preview while logged in to Vercel and sign in with GitHub. You pass through production and land back on the preview, signed in.
 - [ ] In the Neon console, the new row in the `user` table is on the `preview/<git-branch>` database branch, not on the production database branch.
 - [ ] Users created on a preview have no GitHub login stored (oAuthProxy doesn't forward it), so their personal organization's slug comes from the display name. This is expected.
+- [ ] Close the PR. The **Clean up Neon preview database branch** run in **Actions** logs `Neon preview database branch deleted, or already gone.`, and `preview/<git-branch>` is gone from the Neon console.
 
 **CLI login** (production, with a CLI built from `main`: `pnpm build`, then use `apps/cli/dist/hivemind`; its default server is production):
 
